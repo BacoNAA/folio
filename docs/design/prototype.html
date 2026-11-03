@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Folio · 首版交互原型</title>
+<link rel="stylesheet" href="prototype.css">
+<body>
+<aside class="guide">
+  <div class="wordmark">folio<span>私 人 生 活 记 录</span></div>
+  <p class="eyebrow">设计评审 · 01 / 2026.11</p>
+  <h1>把日子留下，<br>慢慢找回来。</h1>
+  <p>暖白的纸面、墨绿的操作、安静的内容。先看看记录本身，再决定要怎样整理。</p>
+  <div class="guide-links">
+    <button data-route="home">01　记录流 <span>↗</span></button>
+    <button data-route="edit">02　连续编辑 <span>↗</span></button>
+    <button data-route="search">03　搜索与筛选 <span>↗</span></button>
+    <button data-route="places">04　地点小册 <span>↗</span></button>
+    <button data-route="trash">05　回收站 <span>↗</span></button>
+  </div>
+  <div class="prototype-note"><strong>可操作的设计样稿</strong><br>使用虚构示例；内容仅保留在本页内存，刷新即重置。照片、录音与位置以示意呈现，不调用设备。此原型覆盖首版主要流程，视觉与控件待评审。</div>
+  <button class="reset" id="reset">重置示例</button>
+</aside>
+<div class="mobile-note">Folio 交互样稿 · 示例数据 · 刷新重置 · 媒体与定位为模拟</div>
+<section class="phone" aria-label="Folio 手机原型">
+  <div class="status-bar"><span>9:41</span><span aria-hidden="true">▂▄▆　▰</span></div>
+  <header id="header"></header>
+  <main id="screen"></main>
+  <div id="bottom"></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <dialog id="sheet"><div id="sheet-content"></div></dialog>
+</section>
+<script src="prototype.js"></script>
+</body>
+</html>
