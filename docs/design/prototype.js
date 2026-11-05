@@ -8,6 +8,8 @@ const initialRecords = [
  {id:'r2',title:'西湖边的那阵风',created:'2026-11-02',time:{kind:'date',value:'2026-10-26'},placeId:'p2',tags:['散步'],star:false,pin:false,person:'',object:'',blocks:[{type:'text',text:'沿着湖边走了一小段，想记住风吹过树叶的声音。'},{type:'audio',caption:'湖边，傍晚',duration:'00:18'}]},
  {id:'r3',title:'妈妈的红豆汤',created:'2026-11-01',time:{kind:'free',value:'小时候'},placeId:null,tags:['家常'],star:true,pin:false,person:'妈妈',object:'',blocks:[{type:'text',text:'放学回家，桌上总有一碗。后来自己煮，总觉得还差一点。'},{type:'checklist',items:[{text:'红豆提前浸泡',done:true},{text:'最后再加糖',done:false}]}]}
 ];
+initialRecords.forEach(record=>record.blocks.forEach((block,i)=>{block.id=record.id+'-item-'+i;}));
+let blockSeq=0;
 let records=copy(initialRecords), places=copy(initialPlaces), drafts={}, draftMeta={}, trash=[], route='capture', selected=null, activeDraft=null, placeId=null, sort='event', placeQuery='', trail=[], seq=10, editClock=0, toastTimer;
 const emptyFilters={q:'',media:'',tag:'',year:'',star:false,placeId:null};
 const filters={...emptyFilters};
@@ -15,13 +17,13 @@ const $ = id => document.getElementById(id);
 const meaningfulBlock = b => b.type==='text'?Boolean(b.text.trim()):b.type==='checklist'?b.items.some(i=>i.text.trim()):true;
 const newDraft = key => key.startsWith('new-');
 function hasChanges(key){
- const d=drafts[key];
+ const d=drafts[key], meta=draftMeta[key];
+ const canRecoverContent=Boolean(meta.removed&&meaningfulBlock(meta.removed.block));
  if(newDraft(key)){
-  const initial=draftMeta[key];
-  return d.blocks.some(meaningfulBlock)||Boolean(d.title.trim()||d.person.trim()||d.object.trim()||d.tags.length||d.pendingPlace||d.placeId!==initial.placeId||d.time.kind!==initial.time.kind||d.time.value!==initial.time.value);
+  return canRecoverContent||d.blocks.some(meaningfulBlock)||Boolean(d.title.trim()||d.person.trim()||d.object.trim()||d.tags.length||d.pendingPlace||d.placeId!==meta.placeId||d.time.kind!==meta.time.kind||d.time.value!==meta.time.value);
  }
  const original=records.find(r=>r.id===key);
- return Boolean(original)&&JSON.stringify(original)!==JSON.stringify(d);
+ return Boolean(original)&&(canRecoverContent||JSON.stringify(original)!==JSON.stringify(d));
 }
 const availableDrafts = () => Object.entries(drafts).filter(([key])=>hasChanges(key)).sort(([a],[b])=>draftMeta[b].updated-draftMeta[a].updated);
 const btn = (text,action,id='',cls='') => `<button class="${cls}" data-action="${action}" data-id="${esc(id)}">${text}</button>`;
@@ -99,10 +101,11 @@ function detail(){
  $('screen').innerHTML=`<article class="detail"><div class="meta">${esc(timeLabel(r.time))}</div><h2>${esc(r.title||'一条记录')}</h2>${r.blocks.map(b=>b.type==='text'?`<p>${esc(b.text)}</p>`:b.type==='photo'?photo(b.caption):b.type==='audio'?`<div class="audio">${btn('▷','play')}<i aria-hidden="true">▂ ▅ ▃ ▆ ▂ ▄ ▆</i><span>${b.duration}</span></div><div class="hint">${esc(b.caption)}</div>`:`<div>${b.items.map(i=>`<div class="check"><span>${i.done?'☑':'☐'}</span><span>${esc(i.text)}</span></div>`).join('')}</div>`).join('')}<div class="meta">${r.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join('')}${placeFor(r)?btn(`⌖ ${esc(placeFor(r).name)}`,'place',r.placeId):''}</div><div class="hint">记录于 ${r.created}${r.modified?' · 已修改':''}</div><div class="detail-actions">${btn(r.star?'★ 已加星':'☆ 加星','star',r.id)}${btn(r.pin?'取消置顶':'置顶','pin',r.id)}${btn('删除','delete',r.id,'danger')}</div></article>`;
 }
 function blockOf(type){
- if(type==='text')return {type,text:''};
- if(type==='photo')return {type,caption:''};
- if(type==='audio')return {type,caption:'',duration:'00:12'};
- return {type,items:[{text:'',done:false}]};
+ const id='item-'+(++blockSeq);
+ if(type==='text')return {id,type,text:''};
+ if(type==='photo')return {id,type,caption:''};
+ if(type==='audio')return {id,type,caption:'',duration:'00:12'};
+ return {id,type,items:[{text:'',done:false}]};
 }
 function startEdit(id=null,type='text',focusText=false){
  const original=id?records.find(r=>r.id===id):null;
@@ -113,7 +116,7 @@ function startEdit(id=null,type='text',focusText=false){
   draftMeta[key]={updated:++editClock,scroll:0,placeId:drafts[key].placeId,time:{...drafts[key].time}};
  }
  if(original)draftMeta[key].detailTrail=[...trail,frame()];
- enter('edit');activeDraft=key;render();restoreEditor();
+ enter('edit');activeDraft=key;render();restoreEditor(true);
  if(focusText)$('screen').querySelector('textarea')?.focus();
 }
 function touchDraft(){draftMeta[activeDraft].updated=++editClock;}
@@ -123,15 +126,18 @@ function rememberEditor(){
  meta.clues=$('screen').querySelector('.clues')?.open;
 }
 function rememberField(el){
- const attr=['data-field','data-block','data-caption','data-item'].find(name=>el.hasAttribute(name));
+ const attr=['data-field','data-block','data-caption','data-item','data-check'].find(name=>el.hasAttribute(name));
  if(!attr)return;
  const meta=draftMeta[activeDraft];
- meta.selector=`[${attr}="${el.getAttribute(attr)}"]`;
+ const section=el.closest('[data-block-id]');
+ meta.selector=(section?`[data-block-id="${section.dataset.blockId}"] `:'')+`[${attr}="${el.getAttribute(attr)}"]`;
+ meta.focusSelector=meta.selector;
  meta.start=el.selectionStart;meta.end=el.selectionEnd;
 }
-function restoreEditor(){
+function restoreEditor(restoreFocus=false){
  const meta=draftMeta[activeDraft];
  $('screen').querySelector('.clues').open=Boolean(meta.clues);
+ if(restoreFocus&&meta.focusSelector)$('screen').querySelector(meta.focusSelector)?.focus({preventScroll:true});
  if(meta.selector&&meta.start!=null)$('screen').querySelector(meta.selector)?.setSelectionRange(meta.start,meta.end);
  $('screen').scrollTop=meta.scroll;
 }
@@ -139,20 +145,36 @@ function refreshEditor(){touchDraft();rememberEditor();editor();restoreEditor();
 function resumeDraft(key){
  if(!drafts[key])return;
  if($('sheet').open)closeSheet();
- enter('edit');activeDraft=key;render();restoreEditor();
+ enter('edit');activeDraft=key;render();restoreEditor(true);
 }
 function draftRow([key,d]){
  const text=d.blocks.find(b=>b.type==='text'&&b.text.trim())?.text.trim();
  const checklist=d.blocks.find(b=>b.type==='checklist'&&meaningfulBlock(b))?.items.find(i=>i.text.trim())?.text;
  const image=d.blocks.find(b=>b.type==='photo'), audio=d.blocks.find(b=>b.type==='audio');
- const preview=text||checklist||image?.caption||(audio?'录音 '+audio.duration:image?'照片':'');
+ const preview=text||checklist||image?.caption||(audio?'录音 '+audio.duration:image?'照片':draftMeta[key].removed?'已移除一项，可撤销':'');
  return btn(`${image?'<span class="draft-thumb" role="img" aria-label="草稿照片缩略图"></span>':''}<span><strong>${esc(d.title||preview?.slice(0,36)||'未完成的草稿')}</strong><small>${esc(d.title&&preview?preview.slice(0,48)+' · ':'')}${newDraft(key)?'新草稿':'已有记录的修改'}</small></span>`,'resume',key,'draft-row');
+}
+const blockLabels={text:'文字',photo:'照片',audio:'声音',checklist:'清单'};
+function editBlockBody(block){
+ if(block.type==='text')return `<textarea aria-label="文字内容" placeholder="写下一点此刻……" data-block>${esc(block.text)}</textarea>`;
+ if(block.type==='checklist'){
+  const rows=block.items.map((item,j)=>`<label class="check"><input type="checkbox" aria-label="事项 ${j+1} 完成" data-check="${j}" ${item.done?'checked':''}><input type="text" aria-label="清单事项 ${j+1}" data-item="${j}" value="${esc(item.text)}" placeholder="一件小事"></label>`).join('');
+  return rows+btn('＋ 添加事项','add-item',block.id);
+ }
+ const label=blockLabels[block.type]+'说明';
+ const media=block.type==='photo'?photo(block.caption,true):`<div class="audio"><button data-action="play" aria-label="试听声音示例">▷</button><i aria-hidden="true">▂ ▅ ▃ ▆ ▂ ▄</i><span>${esc(block.duration)}</span></div>`;
+ return media+`<input aria-label="${label}" data-caption placeholder="${label}（选填）" value="${esc(block.caption)}">`;
+}
+function editBlock(block,index){
+ const label=blockLabels[block.type], menuLabel=`第 ${index+1} 项（${label}）的更多操作`;
+ return `<section class="block" data-block-id="${block.id}"><div class="block-toolbar"><span>${label}</span><button data-action="block-menu" data-id="${block.id}" aria-label="${menuLabel}" aria-haspopup="dialog" title="${menuLabel}">⋯</button></div>${editBlockBody(block)}</section>`;
 }
 function editor(){
  const d=drafts[activeDraft]; if(!d){route='home';return render();}
  compact('记录这一刻',btn('完成','finish','','primary'));
- $('screen').innerHTML=`<input class="title-input" aria-label="标题（选填）" placeholder="标题，留空也可以" data-field="title" value="${esc(d.title)}">${d.blocks.map((b,i)=>`<section class="block"><div class="block-toolbar"><span>${{text:'文字',photo:'照片',audio:'声音',checklist:'清单'}[b.type]}</span>${btn('移除','remove-block',i)}</div>${b.type==='text'?`<textarea aria-label="文字内容" placeholder="写下一点此刻……" data-block="${i}">${esc(b.text)}</textarea>`:b.type==='photo'?`${photo(b.caption,true)}<input aria-label="照片说明" data-caption="${i}" placeholder="照片说明（选填）" value="${esc(b.caption)}">`:b.type==='audio'?`<div class="audio">${btn('▷','play')}<i aria-hidden="true">▂ ▅ ▃ ▆ ▂ ▄</i><span>${b.duration}</span></div><input aria-label="声音说明" data-caption="${i}" placeholder="声音说明（选填）" value="${esc(b.caption)}">`:`${b.items.map((item,j)=>`<label class="check"><input type="checkbox" aria-label="事项 ${j+1} 完成" data-check="${i}:${j}" ${item.done?'checked':''}><input type="text" aria-label="清单事项 ${j+1}" data-item="${i}:${j}" value="${esc(item.text)}" placeholder="一件小事"></label>`).join('')}${btn('＋ 添加事项','add-item',i)}`}</section>`).join('')}${btn('＋ 添加内容','add','','add-content')}<details class="clues"><summary>时间、地点与其他线索 <span class="hint">选填</span></summary>${btn(`时间　${esc(timeLabel(d.time))}`,'time')}${btn(`地点　${esc(placeFor(d)?.name||'选择或新建')}`,'pick-place')}<label class="field" for="tags">文字标签（用逗号分开）</label><input id="tags" data-field="tags" value="${esc(d.tags.join('，'))}"><label class="field" for="person">人物线索（此样稿演示一位）</label><input id="person" data-field="person" value="${esc(d.person)}"><label class="field" for="object">物件线索（此样稿演示一件）</label><input id="object" data-field="object" value="${esc(d.object)}"></details>`;
- $('bottom').innerHTML=`<div class="editor-bottom"><span class="saved">草稿保留在本次预览中</span>${btn('放弃修改','discard','','danger')}</div>`;
+ $('screen').innerHTML=`<input class="title-input" aria-label="标题（选填）" placeholder="标题，留空也可以" data-field="title" value="${esc(d.title)}">${d.blocks.map(editBlock).join('')}${btn('＋ 添加内容','add','','add-content')}<details class="clues"><summary>时间、地点与其他线索 <span class="hint">选填</span></summary>${btn(`时间　${esc(timeLabel(d.time))}`,'time')}${btn(`地点　${esc(placeFor(d)?.name||'选择或新建')}`,'pick-place')}<label class="field" for="tags">文字标签（用逗号分开）</label><input id="tags" data-field="tags" value="${esc(d.tags.join('，'))}"><label class="field" for="person">人物线索（此样稿演示一位）</label><input id="person" data-field="person" value="${esc(d.person)}"><label class="field" for="object">物件线索（此样稿演示一件）</label><input id="object" data-field="object" value="${esc(d.object)}"></details>`;
+ const feedback=draftMeta[activeDraft].removed?`已移除一项　${btn('撤销','undo-remove',activeDraft)}`:'草稿保留在本次预览中';
+ $('bottom').innerHTML=`<div class="editor-bottom"><span class="saved">${feedback}</span>${btn('放弃修改','discard','','danger')}</div>`;
 }
 function search(){
  compact(filters.placeId?'地点内查找':'搜索全部记录');
@@ -200,13 +222,79 @@ function openRecord(id){
 function beginSearch(id=null){
  enter('search');Object.assign(filters,emptyFilters,{placeId:id});render();
 }
-function quick(type){
+function addContent(after=''){
+ sheet(`<h3>添加一点内容</h3><div class="sheet-options" data-after="${after}">${btn('文字','add-block','text')}${btn('拍照','quick','camera')}${btn('选图','quick','album')}${btn('录音','quick','audio')}${btn('可勾选清单','add-block','checklist')}</div><div class="sheet-footer">${btn('取消','close')}</div>`);
+}
+function blockMenu(id){
+ const blocks=drafts[activeDraft].blocks, index=blocks.findIndex(b=>b.id===id);
+ if(index<0)return;
+ const move=(label,action,disabled)=>`<button data-action="${action}" data-id="${id}" ${disabled?'disabled':''}>${label}</button>`;
+ sheet(`<h3>第 ${index+1} 项 · ${blockLabels[blocks[index].type]}</h3><div class="sheet-options">${btn('在此后添加','insert-after',id)}${move('上移一项','move-up',index===0)}${move('下移一项','move-down',index===blocks.length-1)}${btn('移除这一项','remove-block',id,'danger')}</div><div class="sheet-footer">${btn('取消','close')}</div>`);
+}
+function focusBlock(block,inserted=false){
+ const meta=draftMeta[activeDraft];
+ const section=block&&$('screen').querySelector(`[data-block-id="${block.id}"]`);
+ let target=$('screen').querySelector('.add-content');
+ if(section){
+  const selector=meta.selector;
+  const previous=selector?$('screen').querySelector(selector):null;
+  target=section.querySelector('[data-action="block-menu"]');
+  if(inserted){
+   if(block.type==='audio')target=section.querySelector('[data-action="play"]');
+   if(block.type==='text'||block.type==='checklist')target=section.querySelector('textarea,input[type="text"]');
+  }else if(section.contains(previous))target=previous;
+ }
+ target.focus({preventScroll:true});
+ (section||target).scrollIntoView({block:'nearest'});
+ if(target.dataset.action){
+  const scope=block?`[data-block-id="${block.id}"] `:'';
+  meta.focusSelector=scope+`[data-action="${target.dataset.action}"]`;
+ }else rememberField(target);
+ rememberEditor();
+}
+function addBlock(type,after){
+ closeSheet();
+ if(route!=='edit'){startEdit(null,type);return;}
+ const blocks=drafts[activeDraft].blocks;
+ const index=after?blocks.findIndex(b=>b.id===after)+1:blocks.length;
+ if(after&&index===0)return;
+ const block=blockOf(type);
+ blocks.splice(index,0,block);refreshEditor();focusBlock(block,true);
+}
+function moveBlock(id,step){
+ const blocks=drafts[activeDraft].blocks, index=blocks.findIndex(b=>b.id===id), dest=index+step;
+ if(index<0||dest<0||dest>=blocks.length)return;
+ closeSheet();
+ const [block]=blocks.splice(index,1);blocks.splice(dest,0,block);
+ refreshEditor();focusBlock(block);
+}
+function removeBlock(id){
+ const blocks=drafts[activeDraft].blocks, index=blocks.findIndex(b=>b.id===id);
+ if(index<0)return;
+ closeSheet();
+ const [block]=blocks.splice(index,1);
+ draftMeta[activeDraft].removed={block,index,before:blocks[index-1]?.id,after:blocks[index]?.id};
+ refreshEditor();focusBlock(blocks[index]||blocks[index-1]);
+}
+function undoRemove(key){
+ if(route!=='edit'||activeDraft!==key)return;
+ const meta=draftMeta[key], removed=meta.removed;
+ if(!removed)return;
+ const blocks=drafts[key].blocks;
+ const next=blocks.findIndex(b=>b.id===removed.after), previous=blocks.findIndex(b=>b.id===removed.before);
+ let index=Math.min(removed.index,blocks.length);
+ if(next>=0)index=next;
+ else if(previous>=0)index=previous+1;
+ blocks.splice(index,0,removed.block);delete meta.removed;
+ refreshEditor();focusBlock(removed.block);
+}
+function quick(type,after=''){
  if(type==='checklist'){startEdit(null,type);return;}
  if(type==='audio'){
-  sheet(`<h3>录音交互示意</h3><p>正在模拟录音。停止后加入一段 12 秒的示例声音。</p><div class="sheet-footer">${btn('取消','close')}${btn('停止并保留示例','add-block','audio','primary')}</div>`);return;
+  sheet(`<h3>录音交互示意</h3><p>正在模拟录音。停止后加入一段 12 秒的示例声音。</p><div class="sheet-footer" data-after="${after}">${btn('取消','close')}${btn('停止并保留示例','add-block','audio','primary')}</div>`);return;
  }
  const label=type==='camera'?'拍照':'选图';
- sheet(`<h3>${label}示意</h3><p>本次使用示例照片，确认后加入当前记录。</p><div class="sheet-footer">${btn('取消','close')}${btn('使用示例照片','add-block','photo','primary')}</div>`);
+ sheet(`<h3>${label}示意</h3><p>本次使用示例照片，确认后加入当前记录。</p><div class="sheet-footer" data-after="${after}">${btn('取消','close')}${btn('使用示例照片','add-block','photo','primary')}</div>`);
 }
 const actions={
  capture:()=>rootPage('capture'),home:()=>rootPage('home'),places:()=>rootPage('places'),
@@ -219,17 +307,11 @@ const actions={
  'go-trash':()=>{closeSheet();enter('trash');render();},
  drafts:()=>sheet(`<h3>继续草稿 · ${availableDrafts().length} 份</h3><p>最近编辑的排在前面</p><div class="sheet-options">${availableDrafts().map(draftRow).join('')}</div><div class="sheet-footer">${btn('关闭','close')}</div>`),
  resume:resumeDraft,
- add:()=>sheet(`<h3>添加一点内容</h3><div class="sheet-options">${btn('文字','add-block','text')}${btn('拍照','quick','camera')}${btn('选图','quick','album')}${btn('录音','quick','audio')}${btn('可勾选清单','add-block','checklist')}</div><div class="sheet-footer">${btn('取消','close')}</div>`),
- 'add-block':type=>{
-  closeSheet();
-  if(route!=='edit'){startEdit(null,type);return;}
-  const blocks=drafts[activeDraft].blocks;blocks.push(blockOf(type));refreshEditor();
-  const last=$('screen').querySelectorAll('.block')[blocks.length-1];
-  last.scrollIntoView({block:'nearest'});if(type==='text')last.querySelector('textarea').focus();
- },
+ add:()=>addContent(),'insert-after':addContent,'add-block':addBlock,
+ 'block-menu':blockMenu,'move-up':id=>moveBlock(id,-1),'move-down':id=>moveBlock(id,1),
  play:()=>message('声音播放位置示意；原型未录制或播放音频。'),
- 'remove-block':i=>{drafts[activeDraft].blocks.splice(Number(i),1);refreshEditor();},
- 'add-item':i=>{drafts[activeDraft].blocks[i].items.push({text:'',done:false});refreshEditor();},
+ 'remove-block':removeBlock,'undo-remove':undoRemove,
+ 'add-item':id=>{drafts[activeDraft].blocks.find(b=>b.id===id).items.push({text:'',done:false});refreshEditor();},
  discard:()=>sheet(`<h3>放弃这份修改？</h3><p>${newDraft(activeDraft)?'这份新建草稿将被移除。':'保留上一次完成的记录，移除本次未完成修改。'}</p><div class="sheet-footer">${btn('继续编辑','close')}${btn('放弃修改','confirm-discard','','danger')}</div>`),
  'confirm-discard':()=>{forgetDraft(activeDraft);activeDraft=null;closeSheet();back();},
  time:timePicker,
@@ -253,7 +335,7 @@ document.addEventListener('click',event=>{
  const target=event.target.closest('button');if(!target)return;
  if(!target.closest('#toast')&&target.dataset.action!=='play')$('toast').style.display='none';
  if(target.dataset.route){rootPage(target.dataset.route);return;}
- if(target.dataset.action)actions[target.dataset.action]?.(target.dataset.id);
+ if(target.dataset.action)actions[target.dataset.action]?.(target.dataset.id,target.closest('[data-after]')?.dataset.after);
 });
 document.addEventListener('focusout',event=>{
  if(route==='edit'&&activeDraft&&$('screen').contains(event.target))rememberField(event.target);
@@ -266,14 +348,17 @@ document.addEventListener('input',event=>{
  if(route!=='edit'||!d||!$('screen').contains(el))return;
  touchDraft();rememberField(el);
  if(el.dataset.field)d[el.dataset.field]=el.dataset.field==='tags'?el.value.split(/[,，]/).map(t=>t.trim()).filter(Boolean):el.value;
- if(el.dataset.block!==undefined)d.blocks[el.dataset.block].text=el.value;
- if(el.dataset.caption!==undefined)d.blocks[el.dataset.caption].caption=el.value;
- if(el.dataset.item){const [i,j]=el.dataset.item.split(':');d.blocks[i].items[j].text=el.value;}
- if(el.dataset.check){const [i,j]=el.dataset.check.split(':');d.blocks[i].items[j].done=el.checked;}
+ const id=el.closest('[data-block-id]')?.dataset.blockId;
+ if(!id)return;
+ const block=d.blocks.find(b=>b.id===id);
+ if(el.dataset.block!==undefined)block.text=el.value;
+ if(el.dataset.caption!==undefined)block.caption=el.value;
+ if(el.dataset.item!==undefined)block.items[el.dataset.item].text=el.value;
+ if(el.dataset.check!==undefined)block.items[el.dataset.check].done=el.checked;
 });
 document.addEventListener('change',event=>{const el=event.target;if(el.dataset.filter){filters[el.dataset.filter]=el.type==='checkbox'?el.checked:el.value;results();}});
 $('reset').addEventListener('click',()=>{
  records=copy(initialRecords);places=copy(initialPlaces);drafts={};draftMeta={};trash=[];
- activeDraft=null;sort='event';seq=10;editClock=0;closeSheet();$('toast').style.display='none';rootPage('capture');
+ activeDraft=null;sort='event';seq=10;blockSeq=0;editClock=0;closeSheet();$('toast').style.display='none';rootPage('capture');
 });
 render();

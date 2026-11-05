@@ -50,3 +50,10 @@
   background: radial-gradient(circle, #90674d 0 22%, #f8f4e9 24% 32%, #e6e0ce 34%);
 }
 #sheet, .draft-link, #screen { overflow-wrap: anywhere; }
+.block-toolbar button {
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 20px;
+  line-height: 1;
+}
+#sheet .sheet-options button:disabled { opacity: .45; }
