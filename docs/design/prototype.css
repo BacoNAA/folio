@@ -57,3 +57,38 @@
   line-height: 1;
 }
 #sheet .sheet-options button:disabled { opacity: .45; }
+
+.card-body { cursor: pointer; border-radius: 6px; }
+.card-body:focus-visible { outline: 2px solid var(--green); outline-offset: 5px; }
+.preview-block { margin: 10px 0; }
+.preview-block .photo { height: 112px; }
+.preview-block .photo:after { top: 38px; }
+.preview-block .audio { padding: 8px; }
+.preview-block .audio i { min-width: 0; overflow: hidden; white-space: nowrap; }
+.preview-checklist { display: grid; gap: 5px; font-size: 12px; line-height: 1.7; }
+.remaining { color: var(--muted); font-size: 11px; line-height: 1.8; margin-top: 8px; }
+.audio-play { flex-shrink: 0; min-width: 44px; }
+.audio-play[aria-pressed="true"] { background: var(--soft); color: var(--green); }
+.timeline-year { margin: 28px 0 12px; }
+.timeline-year > .section-label { font-size: 18px; font-weight: 500; color: var(--ink); }
+.timeline-year > .section-label span { font-size: 11px; color: var(--muted); }
+.time-group { margin: 14px 0 12px; }
+.filter-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; padding: 6px 0; position: sticky; top: 0; z-index: 1; background: var(--paper); }
+.filter-chip { min-height: 36px; padding: 6px 10px; background: var(--soft); font-size: 11px; text-align: left; overflow-wrap: anywhere; }
+.filter-summary { margin: 10px 0; color: var(--muted); font-size: 11px; line-height: 1.8; }
+.filter-options { min-width: 0; border: 1px solid var(--line); padding: 10px; margin: 10px 0; border-radius: 6px; }
+.filter-options legend { color: var(--muted); font-size: 11px; padding: 0 5px; }
+.filter-options fieldset { min-width: 0; border: 0; padding: 0; margin: 8px 0 0; }
+.filter-options label { display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px 6px 0; font-size: 12px; }
+.filter-options input[type="checkbox"] { width: 17px; height: 17px; flex-shrink: 0; accent-color: var(--green); }
+.empty-actions { display: grid; gap: 8px; margin-top: 14px; }
+.empty-actions button { border: 1px solid var(--line); padding: 8px 12px; font-size: 12px; }
+.time-fields { margin: 10px 0; }
+.time-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.time-row > * { min-width: 0; }
+.season-row { display: grid; grid-template-columns: 40px repeat(2, minmax(0, 1fr)); gap: 8px; align-items: center; margin: 12px 0; font-size: 12px; }
+.season-row label { min-width: 0; color: var(--muted); }
+.season-row select { margin-top: 5px; }
+.time-range-note { font-size: 11px; line-height: 1.8; color: var(--muted); margin: 10px 0; }
+#screen details > summary { cursor: pointer; font-size: 12px; padding: 10px 0; }
+#sheet input, #sheet select { min-width: 0; }
