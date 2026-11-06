@@ -92,3 +92,12 @@
 .time-range-note { font-size: 11px; line-height: 1.8; color: var(--muted); margin: 10px 0; }
 #screen details > summary { cursor: pointer; font-size: 12px; padding: 10px 0; }
 #sheet input, #sheet select { min-width: 0; }
+.sheet-options .place-choice { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; width: 100%; padding: 10px 12px; }
+.place-choice strong { font-size: 13px; font-weight: 500; }
+.place-choice small { color: var(--muted); font-size: 11px; line-height: 1.7; }
+.sheet-options .place-choice.selected { border-color: var(--green); background: var(--soft); }
+.place-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+.draft-notice { margin: 12px 0; padding: 10px 12px; background: var(--soft); color: var(--green); border-radius: 6px; font-size: 12px; line-height: 1.8; }
+.draft-notice button { display: block; text-align: left; padding-left: 0; font-size: 12px; }
+.trash-preview { display: block; width: 100%; text-align: left; padding: 0; }
+.trash-preview p { font-size: 12px; line-height: 1.8; color: var(--muted); margin-top: 8px; }

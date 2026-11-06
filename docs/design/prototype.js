@@ -2,7 +2,7 @@
 // Design prototype: fictional data, memory only, no device or network access.
 const copy = value => JSON.parse(JSON.stringify(value));
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const initialPlaces = [{id:'p1',name:'巷口咖啡',city:'杭州 · 老街',address:'梧桐巷 18 号',position:null},{id:'p2',name:'西湖',city:'杭州',address:'',position:null}];
+const initialPlaces = [{id:'p1',name:'巷口咖啡',city:'杭州',address:'梧桐巷 18 号',note:'老街里，靠窗的位置很安静',position:null},{id:'p2',name:'西湖',city:'杭州',address:'',note:'',position:null},{id:'p3',name:'巷口咖啡',city:'苏州',address:'平江路 86 号',note:'运河边的另一家店',position:null}];
 const initialRecords = [
  {id:'r1',title:'秋天的第一杯热咖啡',created:'2026-11-03',time:{kind:'date',value:'2026-11-02'},placeId:'p1',tags:['日常','值得再去'],star:true,pin:false,person:'',object:'',blocks:[{type:'text',text:'靠窗的位置，能看见梧桐叶慢慢落下来。今天的拿铁有一点坚果香。'},{type:'photo',caption:'窗边的下午'}]},
  {id:'r2',title:'西湖边的那阵风',created:'2026-11-02',time:{kind:'date',value:'2026-10-26'},placeId:'p2',tags:['散步'],star:false,pin:false,person:'',object:'',blocks:[{type:'text',text:'沿着湖边走了一小段，想记住风吹过树叶的声音。'},{type:'audio',caption:'湖边，傍晚',duration:'00:18'}]},
@@ -22,20 +22,21 @@ const emptyFilters={q:'',media:[],tag:[],time:null,star:false,placeId:null};
 const filters=copy(emptyFilters);
 const defaultSeasons={spring:[3,5],summer:[6,8],autumn:[9,11],winter:[12,2]};
 const seasonNames={spring:'春天',summer:'夏天',autumn:'秋天',winter:'冬天'};
-let seasonMonths=copy(defaultSeasons), timeForm=null, playing=null, searchPanels={media:false,tag:false};
+let seasonMonths=copy(defaultSeasons), timeForm=null, placeForm=null, playing=null, searchPanels={media:false,tag:false}, deletionOrigins={};
 const $ = id => document.getElementById(id);
 const meaningfulBlock = b => b.type==='text'?Boolean(b.text.trim()):b.type==='checklist'?b.items.some(i=>i.text.trim()):true;
 const newDraft = key => key.startsWith('new-');
 function hasChanges(key){
  const d=drafts[key], meta=draftMeta[key];
+ if(!d||!meta)return false;
  const canRecoverContent=Boolean(meta.removed&&meaningfulBlock(meta.removed.block));
  if(newDraft(key)){
   return canRecoverContent||d.blocks.some(meaningfulBlock)||Boolean(d.title.trim()||d.person.trim()||d.object.trim()||d.tags.length||d.pendingPlace||d.placeId!==meta.placeId||JSON.stringify(d.time)!==JSON.stringify(meta.time));
  }
- const original=records.find(r=>r.id===key);
+ const original=records.find(r=>r.id===key)||trash.find(r=>r.id===key);
  return Boolean(original)&&(canRecoverContent||JSON.stringify(original)!==JSON.stringify(d));
 }
-const availableDrafts = () => Object.entries(drafts).filter(([key])=>hasChanges(key)).sort(([a],[b])=>draftMeta[b].updated-draftMeta[a].updated);
+const availableDrafts = () => Object.entries(drafts).filter(([key])=>(newDraft(key)||records.some(r=>r.id===key))&&hasChanges(key)).sort(([a],[b])=>draftMeta[b].updated-draftMeta[a].updated);
 const btn = (text,action,id='',cls='') => `<button class="${cls}" data-action="${action}" data-id="${esc(id)}">${text}</button>`;
 const placeFor = record => record.pendingPlace || places.find(p=>p.id===record.placeId);
 function timeLabel(t){
@@ -117,7 +118,7 @@ function timeline(items){
 }
 function frame(){
  if(route==='search')document.querySelectorAll('[data-search-panel]').forEach(el=>{searchPanels[el.dataset.searchPanel]=el.open;});
- return {route,selected,placeId,sort,placeQuery,filters:copy(filters),searchPanels:copy(searchPanels),scroll:$('screen').scrollTop};
+ return {route,selected,activeDraft,placeId,sort,placeQuery,filters:copy(filters),searchPanels:copy(searchPanels),scroll:$('screen').scrollTop};
 }
 function enter(next){trail.push(frame());route=next;$('screen').scrollTop=0;}
 function forgetDraft(key){delete drafts[key];delete draftMeta[key];}
@@ -127,14 +128,28 @@ function leaveEditor(){
  if(!hasChanges(activeDraft)) forgetDraft(activeDraft);
  activeDraft=null;
 }
+function validFrame(previous){
+ if(previous.route==='detail')return records.some(r=>r.id===previous.selected);
+ if(previous.route==='trash-detail')return trash.some(r=>r.id===previous.selected);
+ if(previous.route==='place')return places.some(p=>p.id===previous.placeId);
+ if(previous.route==='edit')return Boolean(drafts[previous.activeDraft])&&(newDraft(previous.activeDraft)||records.some(r=>r.id===previous.activeDraft));
+ return true;
+}
 function restoreFrame(previous){
+ if(!validFrame(previous))return back();
  ({route,selected,placeId,sort,placeQuery}=previous);
+ activeDraft=route==='edit'?previous.activeDraft:null;
  Object.assign(filters,copy(previous.filters));searchPanels=copy(previous.searchPanels);render();$('screen').scrollTop=previous.scroll;
 }
 function back(){
  leaveEditor();
- if(trail.length)restoreFrame(trail.pop());
- else rootPage('home');
+ while(trail.length){const previous=trail.pop();if(validFrame(previous)){restoreFrame(previous);return;}}
+ rootPage('home');
+}
+function pruneRecordFrames(id){
+ const keep=previous=>!(['detail','trash-detail'].includes(previous.route)&&previous.selected===id)&&!(previous.route==='edit'&&previous.activeDraft===id);
+ trail=trail.filter(keep);
+ Object.values(draftMeta).forEach(meta=>{if(meta.detailTrail)meta.detailTrail=meta.detailTrail.filter(keep);});
 }
 function rootPage(next){
  leaveEditor();trail=[];route=next;placeQuery='';placeId=null;selected=null;searchPanels={media:false,tag:false};Object.assign(filters,copy(emptyFilters));
@@ -152,6 +167,7 @@ function render(){
  if(route==='places') placeList();
  if(route==='place') booklet();
  if(route==='trash') recycle();
+ if(route==='trash-detail') trashDetail();
  if(['capture','home','places'].includes(route)) $('bottom').innerHTML=`<nav class="navigation" aria-label="主导航">${btn('随手记','capture','',route==='capture'?'active':'')}${btn('记录','home','',route!=='capture'?'active':'')}</nav>`;
 }
 function capture(){
@@ -167,10 +183,19 @@ function recordHeader(){
 function home(){
  $('screen').innerHTML=recordHeader()+`<div class="segment">${btn('事件时间','sort','event',sort==='event'?'active':'')}${btn('最近记录','sort','created',sort==='created'?'active':'')}</div>${sort==='created'?list(sorted(records)):timeline(records)}`;
 }
+function recordContent(r,readOnly=false){
+ const p=placeFor(r);
+ return `<div class="meta">${esc(timeLabel(r.time))}</div>${r.title?`<h2>${esc(r.title)}</h2>`:''}${rangeNote(r.time)?`<p class="hint">时间范围 ${esc(rangeNote(r.time))}</p>`:''}${r.blocks.map(b=>b.type==='text'?`<p>${esc(b.text)}</p>`:b.type==='photo'?photo(b.caption):b.type==='audio'?audioPreview(b):`<div>${b.items.map(i=>`<div class="check"><span>${i.done?'☑':'☐'}</span><span>${esc(i.text)}</span></div>`).join('')}</div>`).join('')}<div class="meta">${r.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join('')}${p?(readOnly?`<span>⌖ ${esc(p.name)}</span>`:btn(`⌖ ${esc(p.name)}`,'place',r.placeId)):''}</div><div class="hint">记录于 ${esc(r.created)}${r.modified?' · 修改于 '+esc(r.modified):''}</div>`;
+}
 function detail(){
- const r=records.find(r=>r.id===selected); if(!r){route='home';return render();}
+ const r=records.find(r=>r.id===selected);if(!r)return back();
  compact('记录',btn('编辑','edit',r.id));
- $('screen').innerHTML=`<article class="detail"><div class="meta">${esc(timeLabel(r.time))}</div>${r.title?`<h2>${esc(r.title)}</h2>`:''}${rangeNote(r.time)?`<p class="hint">时间范围 ${esc(rangeNote(r.time))}</p>`:''}${r.blocks.map(b=>b.type==='text'?`<p>${esc(b.text)}</p>`:b.type==='photo'?photo(b.caption):b.type==='audio'?audioPreview(b):`<div>${b.items.map(i=>`<div class="check"><span>${i.done?'☑':'☐'}</span><span>${esc(i.text)}</span></div>`).join('')}</div>`).join('')}<div class="meta">${r.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join('')}${placeFor(r)?btn(`⌖ ${esc(placeFor(r).name)}`,'place',r.placeId):''}</div><div class="hint">记录于 ${r.created}${r.modified?' · 修改于 '+esc(r.modified):''}</div><div class="detail-actions">${btn(r.star?'★ 已加星':'☆ 加星','star',r.id)}${btn(r.pin?'取消置顶':'置顶','pin',r.id)}${btn('删除','delete',r.id,'danger')}</div></article>`;
+ $('screen').innerHTML=`<article class="detail">${hasChanges(r.id)?`<div class="draft-notice">另有未完成修改，当前显示上次完成的内容。${btn('继续未完成修改','resume',r.id)}</div>`:''}${recordContent(r)}<div class="detail-actions">${btn(r.star?'★ 已加星':'☆ 加星','star',r.id)}${btn(r.pin?'取消置顶':'置顶','pin',r.id)}${btn('删除','delete',r.id,'danger')}</div></article>`;
+}
+function trashDetail(){
+ const r=trash.find(r=>r.id===selected);if(!r)return back();
+ compact('回收站中的记录');
+ $('screen').innerHTML=`<article class="detail"><p class="hint">只读查看上次完成的内容，恢复后可以继续编辑。</p>${hasChanges(r.id)?'<div class="draft-notice">另有未完成修改，已随记录保留。恢复后可以单独续写。</div>':''}${recordContent(r,true)}<div class="detail-actions">${btn('恢复记录','restore',r.id,'primary')}${btn('彻底删除','erase',r.id,'danger')}</div></article>`;
 }
 function blockOf(type){
  const id='item-'+(++blockSeq);
@@ -215,7 +240,11 @@ function restoreEditor(restoreFocus=false){
 }
 function refreshEditor(){touchDraft();rememberEditor();editor();restoreEditor();}
 function resumeDraft(key){
- if(!drafts[key])return;
+ if(!drafts[key]||(!newDraft(key)&&!records.some(r=>r.id===key)))return;
+ if(!newDraft(key)){
+  const origin=frame();
+  draftMeta[key].detailTrail=route==='detail'&&selected===key?[...trail,origin]:[...trail,origin,{...copy(origin),route:'detail',selected:key,activeDraft:null,scroll:0}];
+ }
  if($('sheet').open)closeSheet();
  enter('edit');activeDraft=key;render();restoreEditor(true);
 }
@@ -252,7 +281,7 @@ function search(){
  compact(filters.placeId?'地点内查找':'搜索全部记录');
  const tags=[...new Set([...records.flatMap(r=>r.tags),...filters.tag])];
  const choices=(name,items)=>items.map(([value,label])=>`<label class="filter-option"><input type="checkbox" data-multi="${name}" value="${esc(value)}" ${filters[name].includes(value)?'checked':''}>${esc(label)}</label>`).join('');
- $('screen').innerHTML=`<input id="query" class="searchbox" aria-label="搜索记录" placeholder="文字、地点，或一个人的名字" value="${esc(filters.q)}">${btn('清空搜索词','clear-query')}<div id="filter-chips" class="filter-chips" aria-label="当前筛选条件"></div><div class="filters">${btn('选择时间','filter-time','','secondary')}<label class="filter-star"><input type="checkbox" data-filter="star" ${filters.star?'checked':''}>只看星标</label></div><label class="field" for="filter-place">限定地点</label><select id="filter-place" data-filter="placeId"><option value="">全部地点</option>${places.map(p=>`<option value="${p.id}" ${filters.placeId===p.id?'selected':''}>${esc(p.name)}${p.city?' · '+esc(p.city):''}</option>`).join('')}</select><details class="filter-options" data-search-panel="media" ${searchPanels.media?'open':''}><summary>内容类型 · 多选满足任一种</summary><fieldset><legend>内容类型</legend>${choices('media',Object.entries(mediaNames))}</fieldset></details><details class="filter-options" data-search-panel="tag" ${searchPanels.tag?'open':''}><summary>文字标签 · 多选满足任一个</summary><fieldset><legend>文字标签</legend>${choices('tag',tags.map(t=>[t,t]))}</fieldset></details><p class="hint">不同类别同时满足，同一类别满足任一个。首版搜索文字和手动说明，暂不识别录音里的话或照片里的文字。</p><div id="results" aria-live="polite"></div>`;
+ $('screen').innerHTML=`<input id="query" class="searchbox" aria-label="搜索记录" placeholder="文字、地点，或一个人的名字" value="${esc(filters.q)}">${btn('清空搜索词','clear-query')}<div id="filter-chips" class="filter-chips" aria-label="当前筛选条件"></div><div class="filters">${btn('选择时间','filter-time','','secondary')}<label class="filter-star"><input type="checkbox" data-filter="star" ${filters.star?'checked':''}>只看星标</label></div><label class="field" for="filter-place">限定地点</label><select id="filter-place" data-filter="placeId"><option value="">全部地点</option>${places.map(p=>`<option value="${p.id}" ${filters.placeId===p.id?'selected':''}>${esc(placeIdentity(p))}</option>`).join('')}</select><details class="filter-options" data-search-panel="media" ${searchPanels.media?'open':''}><summary>内容类型 · 多选满足任一种</summary><fieldset><legend>内容类型</legend>${choices('media',Object.entries(mediaNames))}</fieldset></details><details class="filter-options" data-search-panel="tag" ${searchPanels.tag?'open':''}><summary>文字标签 · 多选满足任一个</summary><fieldset><legend>文字标签</legend>${choices('tag',tags.map(t=>[t,t]))}</fieldset></details><p class="hint">不同类别同时满足，同一类别满足任一个。首版搜索文字和手动说明，暂不识别录音里的话或照片里的文字。</p><div id="results" aria-live="polite"></div>`;
  results();
 }
 function filterChips(){
@@ -260,7 +289,11 @@ function filterChips(){
  if(filters.q.trim())chips.push(btn(`搜索词：${esc(filters.q)}　×`,'clear-query','','filter-chip'));
  const hasFilters=Boolean(filters.time||filters.placeId||filters.star||filters.media.length||filters.tag.length);
  if(filters.time)chips.push(btn(`时间：${esc(timeLabel(filters.time))}　×`,'remove-filter','time','filter-chip'));
- if(filters.placeId)chips.push(btn(`地点：${esc(places.find(p=>p.id===filters.placeId)?.name||'未知地点')}　×`,'clear-scope','','filter-chip'));
+ if(filters.placeId){
+  const p=places.find(item=>item.id===filters.placeId);
+  const label=p?[p.name,placeDescription(p)||p.note].filter(Boolean).join(' · '):'未知地点';
+  chips.push(`<button class="filter-chip" data-action="clear-scope" title="${esc(p?placeIdentity(p):label)}">地点：${esc(label)}　×</button>`);
+ }
  if(filters.media.length)chips.push(`<span class="filter-summary">内容满足任一种 ${filters.media.map(t=>btn(`${esc(mediaNames[t])}　×`,'remove-media',t,'filter-chip')).join('<span>或</span>')}</span>`);
  if(filters.tag.length)chips.push(`<span class="filter-summary">标签满足任一个 ${filters.tag.map(t=>btn(`${esc(t)}　×`,'remove-tag',t,'filter-chip')).join('<span>或</span>')}</span>`);
  if(filters.star)chips.push(btn('已加星　×','remove-filter','star','filter-chip'));
@@ -286,21 +319,70 @@ function results(){
  $('results').innerHTML=`<div class="section-label">${count} 条记录</div>${timeNote}${body}${unknown?`<div class="hint">另有 ${unknown} 条符合其他条件、时间未定的记录。</div>${btn('查看时间未定记录','unknown-time','','secondary wide')}`:''}`;
 }
 function placeList(){
- $('screen').innerHTML=recordHeader()+`<input id="place-query" aria-label="查找地点" placeholder="查找店名、城市或地址" value="${esc(placeQuery)}"><div id="place-results"></div>`;
+ $('screen').innerHTML=recordHeader()+`<input id="place-query" aria-label="查找地点" placeholder="查找店名、城市、地址或备注" value="${esc(placeQuery)}"><div id="place-results"></div>`;
  placeResults(placeQuery);
 }
 function placeMatches(p,q){
  const normalize=value=>value.toLowerCase().replace(/\s+/g,'');
- return [p.name,p.city,p.address].some(value=>normalize(value||'').includes(normalize(q)));
+ return [p.name,p.city,p.address,p.note].some(value=>normalize(value||'').includes(normalize(q)));
 }
-function placeResults(query){$('place-results').innerHTML=places.filter(p=>placeMatches(p,query)).map(p=>btn(`<span class="place-icon">⌖</span><span><strong>${esc(p.name)}</strong><small>${esc([p.city,p.address].filter(Boolean).join(' · ')||'地点')} · ${records.filter(r=>r.placeId===p.id).length} 条记录</small></span>`,'place',p.id,'place-row')).join('')||'<div class="empty">没有找到这个地点。</div>';}
-function booklet(){const p=places.find(p=>p.id===placeId);if(!p){route='places';return render();}compact('地点小册');$('screen').innerHTML=`<section class="place-intro"><div class="eyebrow">地 点 小 册</div><h2>${esc(p.name)}</h2><p>${esc([p.city,p.address].filter(Boolean).join(' · ')||'城市未填写')}<br>${p.position?'已附示例坐标':'未附位置，照样可以找回记录'}</p>${btn(`在${esc(p.name)}中查找`,'place-search',p.id,'secondary wide')}${btn('在这里记一条','new','','secondary wide')}</section>${timeline(records.filter(r=>r.placeId===p.id))}`;}
-function recycle(){compact('回收站');$('screen').innerHTML=`<p class="hint">保留到你手动清理。恢复后仍可继续查看和编辑。</p>${trash.length?trash.map(r=>`<article class="trash-item"><h3>${esc(r.title||'一条记录')}</h3><div class="meta">${esc(timeLabel(r.time))}</div><div class="tools">${btn('恢复','restore',r.id)}${btn('彻底删除','erase',r.id,'danger')}</div></article>`).join(''):'<div class="empty">回收站是空的。</div>'}`;}
+function placeDescription(p){return [p.city,p.address].filter(Boolean).join(' · ');}
+function placeIdentity(p){return [p.name,p.city,p.address,p.note?'备注：'+p.note:''].filter(Boolean).join(' · ');}
+function placeResults(query){$('place-results').innerHTML=places.filter(p=>placeMatches(p,query)).map(p=>btn(`<span class="place-icon">⌖</span><span><strong>${esc(p.name)}</strong><small>${esc(placeDescription(p)||'城市与地址未填写')}</small>${p.note?`<small class="place-note">备注：${esc(p.note)}</small>`:''}<small>${records.filter(r=>r.placeId===p.id).length} 条记录</small></span>`,'place',p.id,'place-row')).join('')||'<div class="empty">没有找到这个地点。</div>';}
+function booklet(){
+ const p=places.find(p=>p.id===placeId);if(!p){route='places';return render();}
+ compact('地点小册',btn('编辑地点资料','edit-place',p.id));
+ $('screen').innerHTML=`<section class="place-intro"><div class="eyebrow">地 点 小 册</div><h2>${esc(p.name)}</h2><p>${esc(placeDescription(p)||'城市与地址未填写')}</p>${p.note?`<p class="place-note">备注：${esc(p.note)}</p>`:''}<p>${p.position?'已附示例位置 30.25, 120.15':'未附位置，照样可以找回记录'}</p>${btn(`在${esc(p.name)}中查找`,'place-search',p.id,'secondary wide')}${btn('在这里记一条','new','','secondary wide')}</section>${timeline(records.filter(r=>r.placeId===p.id))}`;
+}
+function recordSummary(r){
+ if(r.title)return r.title;
+ const b=r.blocks.find(meaningfulBlock);
+ if(!b)return '记录内容';
+ return b.text||b.caption||(b.type==='audio'?'录音 '+b.duration:b.type==='photo'?'照片':b.items.find(i=>i.text.trim())?.text)||'清单';
+}
+function recycle(){
+ compact('回收站');
+ $('screen').innerHTML=`<p class="hint">保留到你手动清理。可打开查看上次完成的内容，恢复后再编辑。</p>${trash.length?trash.map(r=>`<article class="trash-item" data-trash-id="${r.id}">${btn(`<strong>${esc(recordSummary(r).slice(0,80))}</strong><span class="meta">${esc(timeLabel(r.time))}</span>`,'open-trash',r.id,'trash-preview')}${hasChanges(r.id)?'<div class="draft-notice">另有未完成修改，已保留</div>':''}<div class="tools">${btn('恢复','restore',r.id)}${btn('彻底删除','erase',r.id,'danger')}</div></article>`).join(''):'<div class="empty">回收站是空的。</div>'}`;
+}
 function sheet(content){$('sheet-content').innerHTML=content;if(!$('sheet').open)$('sheet').showModal();}
 function closeSheet(){$('sheet').close();}
 function message(text,action='',id='',label='撤销'){clearTimeout(toastTimer);$('toast').innerHTML=`<span>${esc(text)}</span>${action?btn(label,action,id):''}`;$('toast').style.display='flex';toastTimer=setTimeout(()=>$('toast').style.display='none',6000);}
-function placePicker(){sheet(`<h3>选择一个地点</h3><input id="pick-query" aria-label="搜索或新建地点" placeholder="搜索已有地点，或填写新名字"><div id="pick-results"></div><div class="sheet-footer">${btn('取消','close')}${btn('新建此地点','create-place','','primary')}</div>`);pickResults('');}
-function pickResults(q){$('pick-results').innerHTML=`<div class="sheet-options">${places.filter(p=>placeMatches(p,q)).map(p=>btn(`${esc(p.name)} <span class="hint">${esc([p.city,p.address].filter(Boolean).join(' · '))}</span>`,'choose-place',p.id)).join('')}${btn('不附地点','choose-place','')}</div>`;}
+function placePicker(query=''){
+ const d=drafts[activeDraft];if(!d)return;
+ const current=placeFor(d);
+ sheet(`<h3>选择一个地点</h3><p>当前选中：${esc(current?.name||'不附地点')}。选择只影响这份草稿，点击完成后更新正式记录。</p><input id="pick-query" aria-label="搜索或新建地点" placeholder="搜索名称、城市、地址或备注" value="${esc(query)}"><div id="pick-results"></div><div class="sheet-footer">${btn('取消','close')}${btn('新建地点（可同名）','create-place','','primary')}</div>`);pickResults(query);
+}
+function pickResults(q){
+ const d=drafts[activeDraft];if(!d)return;
+ const candidates=d.pendingPlace?[d.pendingPlace,...places]:places;
+ const rows=candidates.filter(p=>placeMatches(p,q)).map(p=>`<button class="place-choice ${d.placeId===p.id?'selected':''}" data-action="choose-place" data-id="${p.id}" aria-pressed="${d.placeId===p.id}"><strong>${esc(p.name)}${d.placeId===p.id?' · 已选中':''}</strong><small>${esc(placeDescription(p)||'城市与地址未填写')}</small>${p.note?`<small class="place-note">备注：${esc(p.note)}</small>`:''}${d.pendingPlace?.id===p.id?'<small>新地点，待随记录完成后保存</small>':''}</button>`).join('');
+ $('pick-results').innerHTML=`<div class="sheet-options">${rows||'<p class="hint">没有匹配的地点，可以直接新建。</p>'}<button class="place-choice ${!d.placeId?'selected':''}" data-action="choose-place" data-id="" aria-pressed="${!d.placeId}">不附地点${!d.placeId?' · 已选中':''}</button></div>`;
+}
+function openPlaceForm(mode,id='',name=''){
+ const p=mode==='existing'?places.find(item=>item.id===id):{name,city:'',address:'',note:'',position:null};
+ if(!p)return;
+ placeForm={mode,id,position:copy(p.position||null),query:name};
+ const field=(key,label,value,multiline=false)=>`<label class="field" for="place-${key}">${label}</label>${multiline?`<textarea id="place-${key}">${esc(value||'')}</textarea>`:`<input id="place-${key}" value="${esc(value||'')}">`}`;
+ sheet(`<h3>${mode==='existing'?'编辑地点资料':'新建地点'}</h3><p>${mode==='existing'?'保存后，所有引用这个地点的记录与小册都会显示更新后的资料。':'同名地点会独立保存；这个新地点随当前记录点击完成后一起保存。'}</p>${field('name','地点名称',p.name)}${field('city','城市（选填）',p.city)}${field('address','地址（选填）',p.address)}${field('note','备注（选填）',p.note,true)}<p id="position-note" class="hint"></p>${btn('获取当前位置（模拟）','get-position','','secondary wide')}<div id="place-error" class="hint danger" role="alert"></div><div class="sheet-footer">${btn('取消','cancel-place-form')}${btn(mode==='existing'?'保存地点资料':'选用这个新地点','save-place','','primary')}</div>`);
+ renderPositionNote();
+}
+function renderPositionNote(){
+ $('position-note').innerHTML=placeForm.position?`已附示例位置 30.25, 120.15。${btn('移除位置','remove-position','','secondary')}`:'位置选填，不影响保存地点。';
+}
+function savePlace(){
+ const name=$('place-name').value.trim();
+ if(!name){$('place-error').textContent='请填写地点名称。';return;}
+ const values={name,city:$('place-city').value.trim(),address:$('place-address').value.trim(),note:$('place-note').value.trim(),position:copy(placeForm.position)};
+ if(placeForm.mode==='existing'){
+  const p=places.find(item=>item.id===placeForm.id);if(!p)return;
+  Object.assign(p,values);
+  closeSheet();render();message('地点资料已保存');
+ }else{
+  const d=drafts[activeDraft];if(!d)return;
+  d.pendingPlace={id:'p'+(++seq),...values};d.placeId=d.pendingPlace.id;
+  closeSheet();refreshEditor();
+ }
+}
 function timePicker(purpose='record'){
  const original=copy(purpose==='filter'?(filters.time||{kind:'year',value:'2025'}):drafts[activeDraft].time);
  timeForm={purpose,original,kind:original.kind,values:{},useCurrentSeason:false};
@@ -384,19 +466,69 @@ function playAudio(id){
  });
  message(playing?'正在演示试听状态；不会播放真实音频。':'已暂停试听示意。');
 }
+function stopRecordAudio(r){
+ const ids=[...r.blocks,...(drafts[r.id]?.blocks||[])].map(b=>b.id);
+ if(ids.includes(playing))playing=null;
+}
+function deleteRecord(id){
+ const index=records.findIndex(r=>r.id===id);if(index<0)return;
+ const preserved=hasChanges(id);
+ const origin=[...trail].reverse().find(validFrame);
+ const r=records.splice(index,1)[0];trash.push(r);stopRecordAudio(r);
+ pruneRecordFrames(id);
+ if(draftMeta[id])delete draftMeta[id].detailTrail;
+ back();
+ deletionOrigins[id]=origin&&validFrame(origin)?copy(origin):frame();
+ message(preserved?'记录与未完成修改已移入回收站。':'记录已移入回收站。','undo-delete',id);
+}
+function restoreRelations(r){
+ if(r.placeId&&r.pendingPlace?.id!==r.placeId&&!places.some(p=>p.id===r.placeId))r.placeId=null;
+}
+function restoreRecord(id,undo=false){
+ const index=trash.findIndex(r=>r.id===id);if(index<0)return;
+ const r=trash.splice(index,1)[0],origin=deletionOrigins[id];
+ restoreRelations(r);if(drafts[id])restoreRelations(drafts[id]);records.push(r);
+ delete deletionOrigins[id];pruneRecordFrames(id);
+ $('toast').style.display='none';
+ if(undo){
+  if(origin&&validFrame(origin))restoreFrame(origin);
+  else {const scroll=$('screen').scrollTop;render();$('screen').scrollTop=scroll;}
+  message(hasChanges(id)?'已撤销删除，未完成修改仍需单独完成。':'已撤销删除');
+ }else{
+  if(route==='trash-detail')back();
+  else {const scroll=$('screen').scrollTop;render();$('screen').scrollTop=scroll;}
+  message('已恢复 ·','view-saved',id,'查看');
+ }
+}
+function confirmErase(id){
+ const r=trash.find(item=>item.id===id);if(!r)return;
+ stopRecordAudio(r);trash=trash.filter(item=>item.id!==id);forgetDraft(id);delete deletionOrigins[id];pruneRecordFrames(id);
+ if(activeDraft===id)activeDraft=null;
+ closeSheet();
+ if(route==='trash-detail'||route==='edit')back();
+ else render();
+ message('已彻底删除');
+}
 function finish(){
- const d=drafts[activeDraft], blocks=d.blocks.filter(meaningfulBlock);
+ const key=activeDraft,d=drafts[key];
+ if(!d){activeDraft=null;return back();}
+ if(!newDraft(key)&&!records.some(r=>r.id===key)){
+  activeDraft=null;back();message('这条记录已移出正式记录，恢复后再继续编辑。');return;
+ }
+ const blocks=d.blocks.filter(meaningfulBlock);
  if(!blocks.length){message('先留下一点内容，再点完成。');return;}
  const r=copy({...d,blocks});
  if(r.pendingPlace){places.push(r.pendingPlace);r.placeId=r.pendingPlace.id;delete r.pendingPlace;}
  const index=records.findIndex(item=>item.id===r.id);
- const origin=draftMeta[activeDraft].detailTrail;
- forgetDraft(activeDraft);activeDraft=null;
+ const origin=(draftMeta[key].detailTrail||[]).filter(validFrame);
+ forgetDraft(key);activeDraft=null;
  if(index===-1){
   records.unshift(r);rootPage('capture');message('已保存 ·','view-saved',r.id,'查看');return;
  }
  r.modified='2026-11-06 09:41';records[index]=r;
- trail=[...origin];restoreFrame(trail.pop());message('已保存');
+ if(origin.length){trail=[...origin];restoreFrame(trail.pop());}
+ else {rootPage('home');openRecord(r.id);}
+ message('已保存');
 }
 function openRecord(id){
  if(!records.some(r=>r.id===id))return;
@@ -504,18 +636,24 @@ const actions={
  'return-time':renderTimeForm,
  'save-seasons':()=>{document.querySelectorAll('[data-season]').forEach(el=>{seasonMonths[el.dataset.season][Number(el.dataset.index)]=Number(el.value);});renderTimeForm();},
  'current-season':()=>{rememberTimeForm();timeForm.useCurrentSeason=true;renderTimeForm();},
- 'pick-place':placePicker,
- 'choose-place':id=>{const d=drafts[activeDraft];d.placeId=id||null;delete d.pendingPlace;closeSheet();refreshEditor();},
- 'create-place':()=>{const name=$('pick-query').value.trim();if(!name){message('先填写地点名称。');return;}sheet(`<h3>新建地点</h3><p>${esc(name)} · 同名也会保留为独立地点</p><input id="new-place-name" type="hidden" value="${esc(name)}"><label class="field" for="new-place-city">城市或区别说明（选填）</label><input id="new-place-city"><label class="field" for="new-place-address">地址（选填）</label><input id="new-place-address"><p id="position-note" class="hint">坐标选填，不影响保存地点。</p>${btn('获取当前位置（模拟）','get-position','','secondary wide')}<input id="new-position" type="hidden" value=""><div class="sheet-footer">${btn('取消','close')}${btn('选用这个新地点','use-new-place','','primary')}</div>`);},
- 'get-position':()=>{$('position-note').innerHTML=`示例位置：30.25, 120.15。<br>仅演示主动获取后确认，不代表当前位置。${btn('确认附上示例位置','attach-position','','secondary wide')}`;},
- 'attach-position':()=>{$('new-position').value='demo';$('position-note').textContent='已附示例位置，提交记录时一起保存。';},
- 'use-new-place':()=>{const d=drafts[activeDraft];d.pendingPlace={id:'p'+(++seq),name:$('new-place-name').value,city:$('new-place-city').value.trim(),address:$('new-place-address').value.trim(),position:$('new-position').value||null};d.placeId=d.pendingPlace.id;closeSheet();refreshEditor();},
+ 'pick-place':()=>placePicker(),
+ 'choose-place':id=>{const d=drafts[activeDraft];if(!d)return;d.placeId=id||null;if(d.pendingPlace?.id!==id)delete d.pendingPlace;closeSheet();refreshEditor();},
+ 'create-place':()=>openPlaceForm('new','',$('pick-query').value.trim()),
+ 'edit-place':id=>openPlaceForm('existing',id),
+ 'save-place':savePlace,
+ 'cancel-place-form':()=>{if(placeForm.mode==='new')placePicker(placeForm.query);else closeSheet();},
+ 'get-position':()=>{$('position-note').innerHTML=`示例位置：30.25, 120.15。<br>这不是设备的真实位置，确认后才附上。${btn('确认附上示例位置','attach-position','','secondary wide')}${btn('取消本次获取','dismiss-position','','secondary wide')}`;},
+ 'dismiss-position':renderPositionNote,
+ 'attach-position':()=>{placeForm.position={latitude:30.25,longitude:120.15,source:'demo',coordinateType:'prototype'};renderPositionNote();},
+ 'remove-position':()=>{placeForm.position=null;renderPositionNote();},
  star:id=>{const r=records.find(r=>r.id===id);r.star=!r.star;if(drafts[id])drafts[id].star=r.star;detail();},
  pin:id=>{const r=records.find(r=>r.id===id);r.pin=!r.pin;if(drafts[id])drafts[id].pin=r.pin;detail();},
- delete:id=>{const index=records.findIndex(r=>r.id===id);trash.push(records.splice(index,1)[0]);back();message('记录已移入回收站。','restore',id);},
- restore:id=>{const index=trash.findIndex(r=>r.id===id);if(index<0)return;const r=trash.splice(index,1)[0];if(r.placeId&&!places.some(p=>p.id===r.placeId))r.placeId=null;records.push(r);$('toast').style.display='none';render();},
- erase:id=>sheet(`<h3>彻底删除这条记录？</h3><p>彻底删除后，无法从回收站恢复。</p><div class="sheet-footer">${btn('取消','close')}${btn('彻底删除','confirm-erase',id,'danger')}</div>`),
- 'confirm-erase':id=>{trash=trash.filter(r=>r.id!==id);forgetDraft(id);closeSheet();render();},
+ delete:deleteRecord,
+ 'open-trash':id=>{if(!trash.some(r=>r.id===id))return;enter('trash-detail');selected=id;render();},
+ restore:id=>restoreRecord(id),
+ 'undo-delete':id=>restoreRecord(id,true),
+ erase:id=>{if(!trash.some(r=>r.id===id))return;sheet(`<h3>彻底删除这条记录？</h3><p>${hasChanges(id)?'上次完成的内容与未完成修改都会一起删除。':'这条记录的内容会被永久删除。'}彻底删除后无法恢复。</p><div class="sheet-footer">${btn('取消','close')}${btn('彻底删除','confirm-erase',id,'danger')}</div>`);},
+ 'confirm-erase':confirmErase,
  'clear-filters':()=>{const q=filters.q;Object.assign(filters,copy(emptyFilters),{q});search();},
  'clear-query':()=>{filters.q='';search();},
  'remove-filter':key=>{filters[key]=copy(emptyFilters[key]);search();},
@@ -574,6 +712,6 @@ document.addEventListener('change',event=>{
 });
 $('reset').addEventListener('click',()=>{
  records=copy(initialRecords);places=copy(initialPlaces);drafts={};draftMeta={};trash=[];
- activeDraft=null;sort='event';seq=10;blockSeq=0;editClock=0;playing=null;timeForm=null;seasonMonths=copy(defaultSeasons);closeSheet();$('toast').style.display='none';rootPage('capture');
+ activeDraft=null;sort='event';seq=10;blockSeq=0;editClock=0;playing=null;timeForm=null;placeForm=null;deletionOrigins={};seasonMonths=copy(defaultSeasons);closeSheet();$('toast').style.display='none';rootPage('capture');
 });
 render();
