@@ -15,10 +15,12 @@ initialRecords.push(
  {id:'r7',title:'',created:'2026-11-05',time:{kind:'free',value:'大学时',start:'2018-01-01',end:'2022-12-31',startInput:'2018',endInput:'2022'},placeId:null,tags:['校园'],star:false,pin:false,person:'',object:'',blocks:[{type:'text',text:'晚课结束后，和朋友一起去食堂吃夜宵。'}]},
  {id:'r8',title:'',created:'2026-11-06',time:{kind:'month',value:'2025-10'},placeId:'p1',tags:['日常'],star:false,pin:false,person:'',object:'',blocks:[{type:'photo',caption:'十月留下的一张照片'}]}
 );
+const sampleRelations = {r1: ['li-work', 'cup'], r2: ['li-school'], r3: ['mother', 'cup']};
+initialRecords.forEach(record => { record.clueIds = sampleRelations[record.id] || []; });
 initialRecords.forEach(record=>record.blocks.forEach((block,i)=>{block.id=record.id+'-item-'+i;}));
 let blockSeq=0;
 let records=copy(initialRecords), places=copy(initialPlaces), drafts={}, draftMeta={}, trash=[], route='capture', selected=null, activeDraft=null, placeId=null, sort='event', placeQuery='', trail=[], seq=10, editClock=0, toastTimer;
-const emptyFilters={q:'',media:[],tag:[],time:null,star:false,placeId:null};
+const emptyFilters={q:'',media:[],tag:[],person:[],object:[],time:null,star:false,placeId:null};
 const filters=copy(emptyFilters);
 const defaultSeasons={spring:[3,5],summer:[6,8],autumn:[9,11],winter:[12,2]};
 const seasonNames={spring:'春天',summer:'夏天',autumn:'秋天',winter:'冬天'};
@@ -31,7 +33,7 @@ function hasChanges(key){
  if(!d||!meta)return false;
  const canRecoverContent=Boolean(meta.removed&&meaningfulBlock(meta.removed.block));
  if(newDraft(key)){
-  return canRecoverContent||d.blocks.some(meaningfulBlock)||Boolean(d.title.trim()||d.person.trim()||d.object.trim()||d.tags.length||d.pendingPlace||d.placeId!==meta.placeId||JSON.stringify(d.time)!==JSON.stringify(meta.time));
+  return canRecoverContent||d.blocks.some(meaningfulBlock)||Boolean(d.title.trim()||d.clueIds.length||d.tags.length||d.pendingPlace||d.placeId!==meta.placeId||JSON.stringify(d.time)!==JSON.stringify(meta.time));
  }
  const original=records.find(r=>r.id===key)||trash.find(r=>r.id===key);
  return Boolean(original)&&(canRecoverContent||JSON.stringify(original)!==JSON.stringify(d));
@@ -77,9 +79,9 @@ function timeMatch(recordTime,condition=filters.time){
  if(!bounds||!wanted||bounds.end<wanted.start||bounds.start>wanted.end)return 'none';
  return bounds.start>=wanted.start&&bounds.end<=wanted.end?'certain':'possible';
 }
-const searchable = r => [r.title,...r.blocks.map(b=>b.text||b.caption||(b.items||[]).map(i=>i.text).join(' ')),r.tags.join(' '),placeFor(r)?.name,r.person,r.object,r.time.kind==='free'?r.time.value:''].join(' ').toLowerCase();
+const searchable = r => [r.title,...r.blocks.map(b=>b.text||b.caption||(b.items||[]).map(i=>i.text).join(' ')),r.tags.join(' '),placeFor(r)?.name,...recordClues(r).map(clueLabel),r.time.kind==='free'?r.time.value:''].join(' ').toLowerCase();
 const mediaNames={photo:'有照片',audio:'有录音',text:'纯文字',checklist:'有清单'};
-const matchesOther = r => (!filters.placeId||r.placeId===filters.placeId) && searchable(r).includes(filters.q.trim().toLowerCase()) && (!filters.star||r.star) && (!filters.media.length||filters.media.some(type=>type==='text'?r.blocks.length>0&&r.blocks.every(b=>b.type==='text'):r.blocks.some(b=>b.type===type))) && (!filters.tag.length||filters.tag.some(tag=>r.tags.includes(tag)));
+const matchesOther = r => matchesClues(r) && (!filters.placeId||r.placeId===filters.placeId) && searchable(r).includes(filters.q.trim().toLowerCase()) && (!filters.star||r.star) && (!filters.media.length||filters.media.some(type=>type==='text'?r.blocks.length>0&&r.blocks.every(b=>b.type==='text'):r.blocks.some(b=>b.type===type))) && (!filters.tag.length||filters.tag.some(tag=>r.tags.includes(tag)));
 const matches = r => matchesOther(r)&&timeMatch(r.time)!=='none';
 function header(title,tools='',subtitle='') {
  $('header').innerHTML=`<div class="topline"><h2>${title}</h2><div class="tools">${tools}</div></div>${subtitle?`<p class="subtitle">${subtitle}</p>`:''}`;
@@ -158,6 +160,11 @@ function rootPage(next){
  render();$('screen').scrollTop=0;
 }
 function render(){
+ document.querySelector('.phone').dataset.page=route;
+ document.querySelectorAll('.guide-links [data-route]').forEach(link => {
+  if (link.dataset.route === route) link.setAttribute('aria-current', 'page');
+  else link.removeAttribute('aria-current');
+ });
  $('bottom').innerHTML='';
  if(route==='capture') capture();
  if(route==='home') home();
@@ -171,8 +178,15 @@ function render(){
  if(['capture','home','places'].includes(route)) $('bottom').innerHTML=`<nav class="navigation" aria-label="主导航">${btn('随手记','capture','',route==='capture'?'active':'')}${btn('记录','home','',route!=='capture'?'active':'')}</nav>`;
 }
 function capture(){
- header('随手记','','此刻，想留下些什么？');
- $('screen').innerHTML=`<section aria-label="开始一条记录">${btn('<strong>写一句…</strong><small>从此刻的一句话开始</small>','write','','capture-write')}<div class="capture-tools">${[['拍照','camera','◎'],['选图','album','▧'],['录音','audio','♩'],['清单','checklist','☑']].map(([label,type,icon])=>btn(`<span aria-hidden="true">${icon}</span>${label}`,'quick',type)).join('')}</div></section>`;
+ header('随手记');
+ const sources = [['camera','拍照'], ['album','选图'], ['audio','录音'], ['checklist','清单']];
+ const tools = sources.map(([type, label]) => btn(
+  `<svg class="tool-art" aria-hidden="true" focusable="false"><use href="#art-${type}"></use></svg><strong>${label}</strong>`,
+  'quick', type, 'capture-tool'
+ )).join('');
+ $('screen').innerHTML = `<section class="capture-page" aria-label="开始一条记录">
+  ${btn('<svg class="nib-art" aria-hidden="true" focusable="false"><use href="#art-nib"></use></svg><strong>写一句</strong><span class="write-forward" aria-hidden="true">↗</span>', 'write', '', 'capture-write')}
+  <div class="capture-tools">${tools}</div></section>`;
 }
 function recordHeader(){
  header('记录',btn('搜索全部记录','search')+btn('更多','more'));
@@ -185,7 +199,7 @@ function home(){
 }
 function recordContent(r,readOnly=false){
  const p=placeFor(r);
- return `<div class="meta">${esc(timeLabel(r.time))}</div>${r.title?`<h2>${esc(r.title)}</h2>`:''}${rangeNote(r.time)?`<p class="hint">时间范围 ${esc(rangeNote(r.time))}</p>`:''}${r.blocks.map(b=>b.type==='text'?`<p>${esc(b.text)}</p>`:b.type==='photo'?photo(b.caption):b.type==='audio'?audioPreview(b):`<div>${b.items.map(i=>`<div class="check"><span>${i.done?'☑':'☐'}</span><span>${esc(i.text)}</span></div>`).join('')}</div>`).join('')}<div class="meta">${r.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join('')}${p?(readOnly?`<span>⌖ ${esc(p.name)}</span>`:btn(`⌖ ${esc(p.name)}`,'place',r.placeId)):''}</div><div class="hint">记录于 ${esc(r.created)}${r.modified?' · 修改于 '+esc(r.modified):''}</div>`;
+ return `<div class="meta">${esc(timeLabel(r.time))}</div>${r.title?`<h2>${esc(r.title)}</h2>`:''}${rangeNote(r.time)?`<p class="hint">时间范围 ${esc(rangeNote(r.time))}</p>`:''}${r.blocks.map(b=>b.type==='text'?`<p>${esc(b.text)}</p>`:b.type==='photo'?photo(b.caption):b.type==='audio'?audioPreview(b):`<div>${b.items.map(i=>`<div class="check"><span>${i.done?'☑':'☐'}</span><span>${esc(i.text)}</span></div>`).join('')}</div>`).join('')}<div class="meta">${r.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join('')}${p?(readOnly?`<span>⌖ ${esc(p.name)}</span>`:btn(`⌖ ${esc(p.name)}`,'place',r.placeId)):''}</div><div class="meta">${recordClues(r).map(clue=>'<span class="tag">'+esc(clueLabel(clue))+'</span>').join('')}</div><div class="hint">记录于 ${esc(r.created)}${r.modified?' · 修改于 '+esc(r.modified):''}</div>`;
 }
 function detail(){
  const r=records.find(r=>r.id===selected);if(!r)return back();
@@ -209,7 +223,7 @@ function startEdit(id=null,type='text',focusText=false){
  if(id&&!original)return;
  const key=id||'new-'+(++seq);
  if(!drafts[key]){
-  drafts[key]=original?copy(original):{id:'r'+seq,title:'',created:'2026-11-06',time:{kind:'date',value:'2026-11-06'},placeId:route==='place'?placeId:null,tags:[],star:false,pin:false,person:'',object:'',blocks:[blockOf(type)]};
+  drafts[key]=original?copy(original):{id:'r'+seq,title:'',created:'2026-11-06',time:{kind:'date',value:'2026-11-06'},placeId:route==='place'?placeId:null,tags:[],star:false,pin:false,clueIds:[],blocks:[blockOf(type)]};
   draftMeta[key]={updated:++editClock,scroll:0,placeId:drafts[key].placeId,time:copy(drafts[key].time)};
  }
  if(original)draftMeta[key].detailTrail=[...trail,frame()];
@@ -273,7 +287,7 @@ function editBlock(block,index){
 function editor(){
  const d=drafts[activeDraft]; if(!d){route='home';return render();}
  compact('记录这一刻',btn('完成','finish','','primary'));
- $('screen').innerHTML=`<input class="title-input" aria-label="标题（选填）" placeholder="标题，留空也可以" data-field="title" value="${esc(d.title)}">${d.blocks.map(editBlock).join('')}${btn('＋ 添加内容','add','','add-content')}<details class="clues"><summary>时间、地点与其他线索 <span class="hint">选填</span></summary>${btn(`时间　${esc(timeLabel(d.time))}`,'time')}${btn(`地点　${esc(placeFor(d)?.name||'选择或新建')}`,'pick-place')}<label class="field" for="tags">文字标签（用逗号分开）</label><input id="tags" data-field="tags" value="${esc(d.tags.join('，'))}"><label class="field" for="person">人物线索（此样稿演示一位）</label><input id="person" data-field="person" value="${esc(d.person)}"><label class="field" for="object">物件线索（此样稿演示一件）</label><input id="object" data-field="object" value="${esc(d.object)}"></details>`;
+ $('screen').innerHTML=`<input class="title-input" aria-label="标题（选填）" placeholder="标题，留空也可以" data-field="title" value="${esc(d.title)}">${d.blocks.map(editBlock).join('')}${btn('＋ 添加内容','add','','add-content')}<details class="clues"><summary>时间、地点与其他线索 <span class="hint">选填</span></summary>${btn(`时间　${esc(timeLabel(d.time))}`,'time')}${btn(`地点　${esc(placeFor(d)?.name||'选择或新建')}`,'pick-place')}<label class="field" for="tags">文字标签（用逗号分开）</label><input id="tags" data-field="tags" value="${esc(d.tags.join('，'))}">${clueButtons(d)}</details>`;
  const feedback=draftMeta[activeDraft].removed?`已移除一项　${btn('撤销','undo-remove',activeDraft)}`:'草稿保留在本次预览中';
  $('bottom').innerHTML=`<div class="editor-bottom"><span class="saved">${feedback}</span>${btn('放弃修改','discard','','danger')}</div>`;
 }
@@ -281,13 +295,13 @@ function search(){
  compact(filters.placeId?'地点内查找':'搜索全部记录');
  const tags=[...new Set([...records.flatMap(r=>r.tags),...filters.tag])];
  const choices=(name,items)=>items.map(([value,label])=>`<label class="filter-option"><input type="checkbox" data-multi="${name}" value="${esc(value)}" ${filters[name].includes(value)?'checked':''}>${esc(label)}</label>`).join('');
- $('screen').innerHTML=`<input id="query" class="searchbox" aria-label="搜索记录" placeholder="文字、地点，或一个人的名字" value="${esc(filters.q)}">${btn('清空搜索词','clear-query')}<div id="filter-chips" class="filter-chips" aria-label="当前筛选条件"></div><div class="filters">${btn('选择时间','filter-time','','secondary')}<label class="filter-star"><input type="checkbox" data-filter="star" ${filters.star?'checked':''}>只看星标</label></div><label class="field" for="filter-place">限定地点</label><select id="filter-place" data-filter="placeId"><option value="">全部地点</option>${places.map(p=>`<option value="${p.id}" ${filters.placeId===p.id?'selected':''}>${esc(placeIdentity(p))}</option>`).join('')}</select><details class="filter-options" data-search-panel="media" ${searchPanels.media?'open':''}><summary>内容类型 · 多选满足任一种</summary><fieldset><legend>内容类型</legend>${choices('media',Object.entries(mediaNames))}</fieldset></details><details class="filter-options" data-search-panel="tag" ${searchPanels.tag?'open':''}><summary>文字标签 · 多选满足任一个</summary><fieldset><legend>文字标签</legend>${choices('tag',tags.map(t=>[t,t]))}</fieldset></details><p class="hint">不同类别同时满足，同一类别满足任一个。首版搜索文字和手动说明，暂不识别录音里的话或照片里的文字。</p><div id="results" aria-live="polite"></div>`;
+ $('screen').innerHTML=`<input id="query" class="searchbox" aria-label="搜索记录" placeholder="文字、地点，或一个人的名字" value="${esc(filters.q)}">${btn('清空搜索词','clear-query')}<div id="filter-chips" class="filter-chips" aria-label="当前筛选条件"></div><div class="filters">${btn('选择时间','filter-time','','secondary')}<label class="filter-star"><input type="checkbox" data-filter="star" ${filters.star?'checked':''}>只看星标</label></div><label class="field" for="filter-place">限定地点</label><select id="filter-place" data-filter="placeId"><option value="">全部地点</option>${places.map(p=>`<option value="${p.id}" ${filters.placeId===p.id?'selected':''}>${esc(placeIdentity(p))}</option>`).join('')}</select>${clueFilters()}<details class="filter-options" data-search-panel="media" ${searchPanels.media?'open':''}><summary>内容类型 · 多选满足任一种</summary><fieldset><legend>内容类型</legend>${choices('media',Object.entries(mediaNames))}</fieldset></details><details class="filter-options" data-search-panel="tag" ${searchPanels.tag?'open':''}><summary>文字标签 · 多选满足任一个</summary><fieldset><legend>文字标签</legend>${choices('tag',tags.map(t=>[t,t]))}</fieldset></details><p class="hint">不同类别同时满足，同一类别满足任一个。首版搜索文字和手动说明，暂不识别录音里的话或照片里的文字。</p><div id="results" aria-live="polite"></div>`;
  results();
 }
 function filterChips(){
  const chips=[];
  if(filters.q.trim())chips.push(btn(`搜索词：${esc(filters.q)}　×`,'clear-query','','filter-chip'));
- const hasFilters=Boolean(filters.time||filters.placeId||filters.star||filters.media.length||filters.tag.length);
+ const hasFilters=Boolean(filters.time||filters.placeId||filters.star||filters.person.length||filters.object.length||filters.media.length||filters.tag.length);
  if(filters.time)chips.push(btn(`时间：${esc(timeLabel(filters.time))}　×`,'remove-filter','time','filter-chip'));
  if(filters.placeId){
   const p=places.find(item=>item.id===filters.placeId);
@@ -296,6 +310,12 @@ function filterChips(){
  }
  if(filters.media.length)chips.push(`<span class="filter-summary">内容满足任一种 ${filters.media.map(t=>btn(`${esc(mediaNames[t])}　×`,'remove-media',t,'filter-chip')).join('<span>或</span>')}</span>`);
  if(filters.tag.length)chips.push(`<span class="filter-summary">标签满足任一个 ${filters.tag.map(t=>btn(`${esc(t)}　×`,'remove-tag',t,'filter-chip')).join('<span>或</span>')}</span>`);
+ for (const kind of Object.keys(clueKinds)) {
+  for (const id of filters[kind]) {
+   const clue = savedClues.find(item => item.id === id);
+   if (clue) chips.push(btn(clueKinds[kind] + '　' + esc(clueLabel(clue)) + '　×', 'remove-clue-filter', id, 'filter-chip'));
+  }
+ }
  if(filters.star)chips.push(btn('已加星　×','remove-filter','star','filter-chip'));
  $('filter-chips').innerHTML=chips.join('')+(hasFilters?btn('清除筛选','clear-filters','','secondary'):'<span class="hint">全部正式记录 · 未设置筛选</span>');
 }
@@ -313,7 +333,7 @@ function results(){
   if(timeFiltered)body=`<section data-certainty="certain"><h3 class="section-label">明确符合 <span>${certain.length} 条</span></h3>${certain.length?list(sorted(certain,'created')):'<p class="hint">没有时间明确符合的记录。</p>'}</section><section data-certainty="possible"><h3 class="section-label">可能符合 <span>${possible.length} 条</span></h3>${possible.length?'<p class="hint">这些记录的已知时间范围与筛选范围有重合，无法确定具体发生时间。</p>'+list(sorted(possible,'created'),'possible'):'<p class="hint">没有可能符合的记录。</p>'}</section>`;
   else body=list(sorted(certain,'created'));
  }else{
-  const relax=(filters.time?btn('移除时间限制','remove-filter','time','secondary'):'')+(filters.media.length?btn('移除媒体类型限制','remove-filter','media','secondary'):'')+([filters.time,filters.placeId,filters.star,filters.media.length,filters.tag.length].some(Boolean)?btn('清除全部筛选，保留搜索词','clear-filters','','secondary'):'');
+  const relax=(filters.time?btn('移除时间限制','remove-filter','time','secondary'):'')+(filters.media.length?btn('移除媒体类型限制','remove-filter','media','secondary'):'')+([filters.time,filters.placeId,filters.star,filters.person.length,filters.object.length,filters.media.length,filters.tag.length].some(Boolean)?btn('清除全部筛选，保留搜索词','clear-filters','','secondary'):'');
   body=`<div class="empty">没有同时符合这些条件的记录。${filters.q?'<br>可以修改搜索词，或清空后继续查找。':''}<div class="empty-actions">${relax}${filters.q?btn('清空搜索词','clear-query','','secondary'):''}</div></div>`;
  }
  $('results').innerHTML=`<div class="section-label">${count} 条记录</div>${timeNote}${body}${unknown?`<div class="hint">另有 ${unknown} 条符合其他条件、时间未定的记录。</div>${btn('查看时间未定记录','unknown-time','','secondary wide')}`:''}`;
@@ -332,7 +352,23 @@ function placeResults(query){$('place-results').innerHTML=places.filter(p=>place
 function booklet(){
  const p=places.find(p=>p.id===placeId);if(!p){route='places';return render();}
  compact('地点小册',btn('编辑地点资料','edit-place',p.id));
- $('screen').innerHTML=`<section class="place-intro"><div class="eyebrow">地 点 小 册</div><h2>${esc(p.name)}</h2><p>${esc(placeDescription(p)||'城市与地址未填写')}</p>${p.note?`<p class="place-note">备注：${esc(p.note)}</p>`:''}<p>${p.position?'已附示例位置 30.25, 120.15':'未附位置，照样可以找回记录'}</p>${btn(`在${esc(p.name)}中查找`,'place-search',p.id,'secondary wide')}${btn('在这里记一条','new','','secondary wide')}</section>${timeline(records.filter(r=>r.placeId===p.id))}`;
+ $('screen').innerHTML=`<section class="place-intro"><h2>${esc(p.name)}</h2><p>${esc(placeDescription(p)||'城市与地址未填写')}</p>${p.note?`<p class="place-note">备注：${esc(p.note)}</p>`:''}<p>${p.position?'已附示例位置 30.25, 120.15':'未附位置，照样可以找回记录'}</p>${btn(`在${esc(p.name)}中查找`,'place-search',p.id,'secondary wide')}${btn('在这里记一条','new','','secondary wide')}${btn('关联已有记录','link-existing','','secondary wide')}</section>${timeline(records.filter(r=>r.placeId===p.id))}`;
+}
+function chooseExistingRecord(){
+ const candidates=records.filter(record=>record.placeId!==placeId);
+ const options=candidates.map(record=>btn(`<strong>${esc(recordSummary(record))}</strong><small>${esc(timeLabel(record.time))} · ${esc(placeFor(record)?.name||'未选地点')}</small>`,'link-record',record.id,'place-choice')).join('');
+ sheet(`<h3>关联已有记录</h3><div class="sheet-options">${options||'<p>没有其他可关联的记录。</p>'}</div><div class="sheet-footer">${btn('取消','close')}</div>`);
+}
+function editRecordPlace(id){
+ const targetPlace=placeId;
+ closeSheet();
+ openRecord(id);
+ startEdit(id);
+ const draft=drafts[activeDraft];
+ delete draft.pendingPlace;
+ draft.placeId=targetPlace;
+ $('screen').querySelector('.clues').open=true;
+ refreshEditor();
 }
 function recordSummary(r){
  if(r.title)return r.title;
@@ -518,6 +554,10 @@ function finish(){
  const blocks=d.blocks.filter(meaningfulBlock);
  if(!blocks.length){message('先留下一点内容，再点完成。');return;}
  const r=copy({...d,blocks});
+ if (r.pendingClues) {
+  savedClues.push(...r.pendingClues);
+  delete r.pendingClues;
+ }
  if(r.pendingPlace){places.push(r.pendingPlace);r.placeId=r.pendingPlace.id;delete r.pendingPlace;}
  const index=records.findIndex(item=>item.id===r.id);
  const origin=(draftMeta[key].detailTrail||[]).filter(validFrame);
@@ -612,7 +652,15 @@ function quick(type,after=''){
  sheet(`<h3>${label}示意</h3><p>本次使用示例照片，确认后加入当前记录。</p><div class="sheet-footer" data-after="${after}">${btn('取消','close')}${btn('使用示例照片','add-block','photo','primary')}</div>`);
 }
 const actions={
+ 'pick-clues':openCluePicker, 'new-clue':createDraftClue, 'apply-clues':applyClues,
+ 'remove-clue-filter':id=>{
+  const clue = savedClues.find(item=>item.id===id);
+  if (!clue) return;
+  filters[clue.kind] = filters[clue.kind].filter(value=>value!==id);
+  search();
+ },
  capture:()=>rootPage('capture'),home:()=>rootPage('home'),places:()=>rootPage('places'),
+ 'link-existing':chooseExistingRecord,'link-record':editRecordPlace,
  search:()=>beginSearch(),'place-search':id=>beginSearch(id),
  new:()=>startEdit(null,'text',true),write:()=>startEdit(null,'text',true),quick,edit:id=>startEdit(id),
  open:openRecord,'view-saved':id=>{if(route==='edit')back();$('toast').style.display='none';openRecord(id);},
@@ -674,6 +722,7 @@ document.addEventListener('focusout',event=>{
 });
 document.addEventListener('input',event=>{
  const el=event.target,d=drafts[activeDraft];
+ if(el.id==='clue-query')renderClueOptions();
  if(el.id==='query'){filters.q=el.value;results();}
  if(el.dataset.timeField!==undefined&&timeForm?.kind==='season')timeRangePreview();
  if(el.id==='place-query'){placeQuery=el.value;placeResults(placeQuery);}
@@ -703,6 +752,11 @@ document.addEventListener('change',event=>{
   rememberTimeForm();timeForm.kind=el.value;renderTimeForm();return;
  }
  if(el.dataset.timeField!==undefined){timeRangePreview();return;}
+ if(el.dataset.clueId){
+  if(el.checked)clueSelection.ids.add(el.dataset.clueId);
+  else clueSelection.ids.delete(el.dataset.clueId);
+  return;
+ }
  if(el.dataset.multi){
   const field=el.dataset.multi;
   filters[field]=el.checked?[...new Set([...filters[field],el.value])]:filters[field].filter(v=>v!==el.value);
@@ -711,6 +765,7 @@ document.addEventListener('change',event=>{
  if(el.dataset.filter){filters[el.dataset.filter]=el.type==='checkbox'?el.checked:el.value||null;results();}
 });
 $('reset').addEventListener('click',()=>{
+ savedClues=sampleClues.slice();clueSelection=null;
  records=copy(initialRecords);places=copy(initialPlaces);drafts={};draftMeta={};trash=[];
  activeDraft=null;sort='event';seq=10;blockSeq=0;editClock=0;playing=null;timeForm=null;placeForm=null;deletionOrigins={};seasonMonths=copy(defaultSeasons);closeSheet();$('toast').style.display='none';rootPage('capture');
 });
