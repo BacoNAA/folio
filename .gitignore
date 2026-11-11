@@ -1,0 +1,7 @@
+# Android local configuration and generated output
+/.gradle/
+/.kotlin/
+/.idea/
+/local.properties
+**/build/
+*.iml
