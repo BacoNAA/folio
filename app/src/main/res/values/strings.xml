@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Folio</string>
+    <string name="quick_note">随手记</string>
+    <string name="records">记录</string>
+    <string name="quick_note_status">文字编辑尚未开放</string>
+    <string name="records_status">记录浏览尚未开放</string>
+</resources>

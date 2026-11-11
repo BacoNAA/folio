@@ -6,15 +6,27 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 ## 当前进度
 
-项目处于需求评审与设计探索阶段，尚未开始应用开发，也没有可安装或运行的版本。
+已建立 Kotlin／Compose 安卓工程。调试 APK 可打开「随手记」并切换到「记录」。文字录入、持久化、搜索和照片随首轮功能开发接入。
 
 已按[整体需求审查](docs/requirements/整体需求审查.md)整理正文、子操作、共同规则和前置关系，并将已确认的功能边界写入正文。剩余范围与已确认结论索引集中见[待确认问题](docs/requirements/待确认问题.md)。
 
 首个目标平台为安卓（Android），首版内容与技术主线均已确认。采用 Kotlin＋Jetpack Compose，数据使用 Room／SQLite，媒体复用现有组件；具体见[技术主线](docs/requirements/版本规划与审核事项.md#技术主线已确认)。首版面向 Android 10（API 29）及以上手机，基础功能不强制依赖 Google Play 服务；每轮可用版本通过已签名 APK 交付，见[设备兼容与交付](docs/requirements/版本规划与审核事项.md#设备兼容与交付已确认)。首版迭代顺序与范围已确认，最终界面方案随原型细化，应用商店上架和付费方案在发布前讨论。需求文档中的后续建议与视觉概念不代表已经实现或确定上线。
 
-当前可查看[首版交互原型](docs/design/prototype.html)与[关键数据设计草案](docs/design/首版原型与关键数据设计.md)。原型使用内存示例，供设计评审，尚未实现安卓运行能力。
+可通过[首版交互原型](docs/design/prototype.html)与[关键数据设计草案](docs/design/首版原型与关键数据设计.md)核对后续功能。浏览器原型使用内存示例。
 
 开发者和 AI 从[开发入口](AGENTS.md)定位本轮需求，按[开发流程](docs/engineering/开发流程.md)领卡、联调和验收。
+
+## 构建和试用调试版
+
+使用 JDK 17 和仓库的 Gradle Wrapper。Android SDK 需安装 `platforms;android-37.0`、`build-tools;36.0.0` 及 `platform-tools`。在 Android Studio 设置 SDK，或令 `ANDROID_HOME` 指向本机 SDK 目录。从仓库根目录在 PowerShell 执行以下命令。
+
+```powershell
+.\gradlew.bat :app:testDebugUnitTest :app:assembleDebug
+```
+
+产物位于 `app/build/outputs/apk/debug/app-debug.apk`。连接 Android 10（API 29）及以上测试设备后，运行 `.\gradlew.bat :app:installDebug` 安装，再从桌面打开 Folio。运行 `.\gradlew.bat :app:connectedDebugAndroidTest` 验证首页导航。macOS 和 Linux 使用 `bash ./gradlew` 和相同任务名。
+
+[Android CI](.github/workflows/android.yml) 在面向 `main` 的 PR 和 `main` 推送时运行单测、组装调试包并上传 `folio-debug`。应用或构建配置变更的 PR，以及合入 `main` 后的构建，还在 API 29 模拟器执行导航测试。
 
 ## 已确定的方向
 
@@ -48,4 +60,4 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 现存需求编号用于定位正文，数量不代表独立功能数或开发进度。审核统计只在总索引维护；[整体需求审查](docs/requirements/整体需求审查.md)维护能力关系，[待确认问题](docs/requirements/待确认问题.md)集中维护未决范围，[工作分工](docs/requirements/协作分工.md)说明共同交付要求。归属同一能力不要求所有增强同时实现；去留已确认也不代表可以跳过范围确认。
 
-核心功能边界、P01—P09 九条产品原则、首版内容、五项技术主线、设备兼容与交付及首版主流程均已确认。首版迭代安排也已确认；当前先推进整体原型与关键数据设计，具体工期与负责人待落实。按相关事项批量讨论，确认结果集中更新文档；使用示例只帮助理解已有功能。
+核心功能边界、P01—P09 九条产品原则、首版内容、五项技术主线、设备兼容与交付及首版主流程均已确认。工程起步后的首批任务是文字草稿与正式记录查找。按相关事项批量讨论，确认结果集中更新文档；使用示例只帮助理解已有功能。
