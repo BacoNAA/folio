@@ -22,7 +22,9 @@ data class DraftPreview(
     val firstPhotoId: PhotoId? = null,
 )
 
-data class RecordPreview(val id: RecordId, val excerpt: String)
+data class RecordPreview(val id: RecordId, val excerpt: String, val firstPhotoId: PhotoId? = null)
+
+data class RecordContent(val text: String, val photos: List<PhotoId>)
 
 /** 存储操作失败时向调用方抛出异常。 */
 interface TextDrafts {
@@ -49,7 +51,8 @@ interface TextDrafts {
 
     /**
      * 最终输入写入正式记录、本次草稿移除须一起成功。
-     * 编辑草稿更新原记录并返回同一 ID。正文未变时保留修改时间。
+     * 正文和已追加的照片一起提交，至少要有一项内容。
+     * 编辑草稿更新原记录并返回同一 ID。内容未变时保留修改时间。
      * 失败保留草稿与原正式版本，重复完成返回已提交的 ID。
      */
     suspend fun completeDraft(id: DraftId, finalEdit: TextEdit): RecordId
@@ -57,6 +60,9 @@ interface TextDrafts {
 
 /** 使用同一正式记录 ID 查找和打开最后完成的版本。读取失败须向调用方抛出异常。 */
 interface PublishedTextRecords {
+    /** 从同一正式版本读取正文和有序原图；不可查看的记录返回 null。 */
+    suspend fun openRecordContent(id: RecordId): RecordContent?
+
     /** 按正文匹配，排除草稿与回收站。没有匹配时返回空列表。 */
     suspend fun search(keyword: String): List<RecordPreview>
 

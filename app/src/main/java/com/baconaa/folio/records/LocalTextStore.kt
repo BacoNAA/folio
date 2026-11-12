@@ -55,6 +55,7 @@ class LocalTextStore internal constructor(
         val draftId = UUID.randomUUID().toString()
         dao.insertDraft(DraftRow(draftId, record.body, record.body.length, record.firstRecordedAt, now()))
         dao.insertEdit(RecordEditRow(draftId, record.id, record.revision))
+        photoDao.insertDraftPhotos(draftId, photoDao.recordPhotos(record.id))
         DraftId(draftId)
     }
 
@@ -91,18 +92,24 @@ class LocalTextStore internal constructor(
         database.withTransaction {
             // A retry can arrive after the first transaction committed and removed the draft.
             dao.completedRecordId(id.value)?.let { return@withTransaction RecordId(it) }
-            require(finalEdit.text.isNotBlank()) { "请填写正文后再完成" }
             val draft = checkNotNull(dao.draft(id.value)) { "草稿已不存在" }
-            check(photoDao.draftPhotos(id.value).isEmpty()) { "含照片的草稿不能按纯文字提交" }
+            val photos = photoDao.draftPhotos(id.value)
+            require(finalEdit.text.isNotBlank() || photos.isNotEmpty()) { "请填写正文或添加照片后再完成" }
+            requireReadableOriginals(photos.map { it.photoId.asPhotoId() })
             val edit = dao.recordEdit(id.value)
             val recordId = if (edit == null) {
                 val newId = UUID.randomUUID().toString()
                 dao.insertRecord(RecordRow(newId, draft.id, finalEdit.text, draft.firstRecordedAt, now()))
+                if (photos.isNotEmpty()) photoDao.replaceRecordPhotos(newId, photos)
                 newId
             } else {
                 val record = checkNotNull(dao.activeRecord(edit.recordId)) { "正式记录已不存在" }
                 check(record.revision == edit.baseRevision) { "正式记录已更新，本次草稿已保留" }
-                if (record.body != finalEdit.text) dao.updateRecordBody(record.id, finalEdit.text, now())
+                val photosChanged = photos != photoDao.recordPhotos(record.id)
+                if (record.body != finalEdit.text || photosChanged) {
+                    dao.updateRecordContent(record.id, finalEdit.text, now())
+                    if (photosChanged) photoDao.replaceRecordPhotos(record.id, photos)
+                }
                 record.id
             }
             check(dao.deleteDraft(draft.id) == 1) { "未能移除已完成的草稿" }
@@ -110,7 +117,12 @@ class LocalTextStore internal constructor(
         }
 
     override suspend fun search(keyword: String): List<RecordPreview> =
-        dao.searchRecords(keyword).map { RecordPreview(RecordId(it.id), it.excerpt) }
+        dao.searchRecords(keyword).map { RecordPreview(RecordId(it.id), it.excerpt, it.firstPhotoId?.asPhotoId()) }
+
+    override suspend fun openRecordContent(id: RecordId): RecordContent? = database.withTransaction {
+        val text = dao.recordBody(id.value) ?: return@withTransaction null
+        RecordContent(text, photoDao.recordPhotos(id.value).map { it.photoId.asPhotoId() })
+    }
 
     override suspend fun openRecord(id: RecordId): String? = dao.recordBody(id.value)
 

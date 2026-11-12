@@ -109,7 +109,7 @@ internal interface TextDao {
     suspend fun insertRecord(row: RecordRow)
 
     @Query("UPDATE text_records SET body = :body, modifiedAt = :modifiedAt, revision = revision + 1 WHERE id = :id")
-    suspend fun updateRecordBody(id: String, body: String, modifiedAt: Long)
+    suspend fun updateRecordContent(id: String, body: String, modifiedAt: Long)
 
     @Query("DELETE FROM text_drafts WHERE id = :id AND EXISTS (SELECT 1 FROM editable_text_drafts WHERE id = :id)")
     suspend fun deleteDraft(id: String): Int

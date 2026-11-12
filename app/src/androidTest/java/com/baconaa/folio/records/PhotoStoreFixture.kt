@@ -18,7 +18,7 @@ internal abstract class PhotoStoreFixture {
     private val databaseName = "photo-records-${UUID.randomUUID()}.db"
     private val originals = LocalPhotoOriginals.get(context)
     private val imported = mutableListOf<PhotoId>()
-    private lateinit var database: FolioDatabase
+    protected lateinit var database: FolioDatabase
     protected lateinit var store: LocalTextStore
 
     @Before
