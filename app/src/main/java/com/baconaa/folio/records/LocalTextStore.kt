@@ -11,6 +11,21 @@ class LocalTextStore internal constructor(
 ) : TextDrafts, PublishedTextRecords {
     private val dao = database.textDao()
 
+    override suspend fun editRecord(id: RecordId): DraftId = database.withTransaction {
+        dao.activeEditId(id.value)?.let { return@withTransaction DraftId(it) }
+        val record = checkNotNull(dao.activeRecord(id.value)) { "正式记录已不存在" }
+        val draftId = UUID.randomUUID().toString()
+        dao.insertDraft(DraftRow(draftId, record.body, record.body.length, record.firstRecordedAt, now()))
+        dao.insertEdit(RecordEditRow(draftId, record.id, record.revision))
+        DraftId(draftId)
+    }
+
+    override suspend fun discardDraft(id: DraftId) {
+        database.withTransaction {
+            if (dao.deleteDraft(id.value) == 1) dao.deleteEdit(id.value)
+        }
+    }
+
     override suspend fun saveDraft(id: DraftId?, edit: TextEdit): DraftId? {
         if (id != null) {
             check(dao.updateDraft(id.value, edit.text, edit.cursor, now()) == 1) {
@@ -27,7 +42,7 @@ class LocalTextStore internal constructor(
     }
 
     override suspend fun listDrafts(): List<DraftPreview> =
-        dao.listDrafts().map { DraftPreview(DraftId(it.id), it.excerpt) }
+        dao.listDrafts().map { DraftPreview(DraftId(it.id), it.excerpt, it.recordId?.let(::RecordId)) }
 
     override suspend fun openDraft(id: DraftId): TextEdit? =
         dao.draft(id.value)?.let { TextEdit(it.body, it.cursor) }
@@ -38,6 +53,7 @@ class LocalTextStore internal constructor(
             dao.completedRecordId(id.value)?.let { return@withTransaction RecordId(it) }
             require(finalEdit.text.isNotBlank()) { "请填写正文后再完成" }
             val draft = checkNotNull(dao.draft(id.value)) { "草稿已不存在" }
+            check(dao.recordEdit(id.value) == null) { "编辑草稿不能发布为新记录" }
             val recordId = RecordId(UUID.randomUUID().toString())
             dao.insertRecord(
                 RecordRow(recordId.value, draft.id, finalEdit.text, draft.firstRecordedAt, now()),

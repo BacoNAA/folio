@@ -13,12 +13,18 @@ data class TextEdit(val text: String, val cursor: Int) {
     }
 }
 
-data class DraftPreview(val id: DraftId, val excerpt: String)
+data class DraftPreview(val id: DraftId, val excerpt: String, val recordId: RecordId? = null)
 
 data class RecordPreview(val id: RecordId, val excerpt: String)
 
 /** 存储操作失败时向调用方抛出异常。 */
 interface TextDrafts {
+    /** 开始修改有效正式记录；已有编辑草稿时继续同一份。 */
+    suspend fun editRecord(id: RecordId): DraftId
+
+    /** 放弃新建或编辑草稿，保留正式记录。重复放弃不会影响后来建立的草稿。 */
+    suspend fun discardDraft(id: DraftId)
+
     /** 新建传 null，成功落盘后返回 ID。新建且内容为空时返回 null。 */
     suspend fun saveDraft(id: DraftId?, edit: TextEdit): DraftId?
 
