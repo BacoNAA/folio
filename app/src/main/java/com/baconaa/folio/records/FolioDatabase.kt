@@ -43,6 +43,15 @@ internal interface TextDao {
 
     @Query("SELECT id, substr(body, 1, 80) AS excerpt FROM text_drafts ORDER BY lastEditedAt DESC, rowid DESC")
     suspend fun listDrafts(): List<TextPreviewRow>
+
+    @Query("SELECT id FROM text_records WHERE sourceDraftId = :draftId")
+    suspend fun completedRecordId(draftId: String): String?
+
+    @Insert
+    suspend fun insertRecord(row: RecordRow)
+
+    @Query("DELETE FROM text_drafts WHERE id = :id")
+    suspend fun deleteDraft(id: String)
 }
 
 @Database(entities = [DraftRow::class, RecordRow::class], version = 1)

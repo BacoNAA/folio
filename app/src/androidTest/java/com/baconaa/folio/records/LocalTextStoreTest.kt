@@ -87,4 +87,64 @@ class LocalTextStoreTest {
         assertNull(store.openDraft(missing))
         assertTrue(store.listDrafts().isEmpty())
     }
+
+    @Test
+    fun completionKeepsFinalInputAndFirstRecordedTimeAcrossRetries() = runBlocking {
+        val firstRecordedAt = millis
+        val draftId = requireNotNull(store.saveDraft(null, TextEdit("青", 1)))
+        millis += 100
+        store.saveDraft(draftId, TextEdit("青瓦", 2))
+        millis += 100
+        val committedAt = millis
+        val finalEdit = TextEdit("青瓦桥", 3)
+        val recordId = store.completeDraft(draftId, finalEdit)
+        assertNull(store.openDraft(draftId))
+
+        millis += 100
+        assertEquals(recordId, store.completeDraft(draftId, finalEdit))
+        reopenDatabase()
+        assertEquals(recordId, store.completeDraft(draftId, finalEdit))
+        val lateSave = runCatching { store.saveDraft(draftId, TextEdit("青", 1)) }
+        assertTrue(lateSave.exceptionOrNull() is IllegalStateException)
+        assertTrue(store.listDrafts().isEmpty())
+
+        val sql = database.openHelper.readableDatabase
+        sql.query("SELECT id, sourceDraftId, body, firstRecordedAt, modifiedAt, deletedAt FROM text_records").use {
+            assertEquals(1, it.count)
+            assertTrue(it.moveToFirst())
+            assertEquals(recordId.value, it.getString(0))
+            assertEquals(draftId.value, it.getString(1))
+            assertEquals(finalEdit.text, it.getString(2))
+            assertEquals(firstRecordedAt, it.getLong(3))
+            assertEquals(committedAt, it.getLong(4))
+            assertTrue(it.isNull(5))
+        }
+    }
+
+    @Test
+    fun draftDeleteFailureRollsBackRecordAndCanBeRetried() = runBlocking {
+        val saved = TextEdit("青瓦", 1)
+        val draftId = requireNotNull(store.saveDraft(null, saved))
+        val finalEdit = TextEdit("青瓦桥", 3)
+        val sql = database.openHelper.writableDatabase
+        sql.execSQL(
+            """CREATE TRIGGER reject_draft_delete BEFORE DELETE ON text_drafts
+               BEGIN SELECT RAISE(ABORT, 'test_reject_delete'); END""",
+        )
+        try {
+            val failure = runCatching { store.completeDraft(draftId, finalEdit) }.exceptionOrNull()
+            assertTrue(generateSequence(failure) { it.cause }.any { it.message?.contains("test_reject_delete") == true })
+            assertEquals(saved, store.openDraft(draftId))
+            sql.query("SELECT COUNT(*) FROM text_records").use {
+                assertTrue(it.moveToFirst())
+                assertEquals(0, it.getInt(0))
+            }
+        } finally {
+            sql.execSQL("DROP TRIGGER reject_draft_delete")
+        }
+
+        val recordId = store.completeDraft(draftId, finalEdit)
+        assertNull(store.openDraft(draftId))
+        assertEquals(recordId.value, database.textDao().completedRecordId(draftId.value))
+    }
 }
