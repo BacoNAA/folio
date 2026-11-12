@@ -147,4 +147,42 @@ class LocalTextStoreTest {
         assertNull(store.openDraft(draftId))
         assertEquals(recordId.value, database.textDao().completedRecordId(draftId.value))
     }
+
+    private suspend fun completeText(body: String): RecordId {
+        val edit = TextEdit(body, body.length)
+        val draftId = requireNotNull(store.saveDraft(null, edit))
+        return store.completeDraft(draftId, edit)
+    }
+
+    @Test
+    fun searchAfterReopenFindsOnlyCurrentRecordAndOpensItsFullText() = runBlocking {
+        val keyword = "青瓦桥"
+        val body = "沿河走了一段路。".repeat(32) + keyword
+        val published = completeText(body)
+        val deleted = completeText("旧路线也经过青瓦桥")
+        database.openHelper.writableDatabase.execSQL(
+            "UPDATE text_records SET deletedAt = ? WHERE id = ?",
+            arrayOf<Any>(millis, deleted.value),
+        )
+        val draft = requireNotNull(store.saveDraft(null, TextEdit("青瓦桥的草稿", 3)))
+        reopenDatabase()
+
+        assertEquals(listOf(draft), store.listDrafts().map { it.id })
+        val match = store.search(keyword).single()
+        assertEquals(published, match.id)
+        assertTrue(match.excerpt.isNotBlank() && match.excerpt.length < body.length)
+        assertEquals(body, store.openRecord(match.id))
+        assertNull(store.openRecord(deleted))
+        assertTrue(store.search("白石塔").isEmpty())
+    }
+
+    @Test
+    fun searchTreatsSqlWildcardCharactersAsLiteralText() = runBlocking {
+        val percent = completeText("进度 50%")
+        val underscore = completeText("文件名 north_bridge")
+        completeText("进度 50，文件名 northXbridge")
+
+        assertEquals(listOf(percent), store.search("%").map { it.id })
+        assertEquals(listOf(underscore), store.search("_").map { it.id })
+    }
 }

@@ -52,6 +52,16 @@ internal interface TextDao {
 
     @Query("DELETE FROM text_drafts WHERE id = :id")
     suspend fun deleteDraft(id: String)
+
+    @Query(
+        """SELECT id, substr(body, 1, 80) AS excerpt FROM text_records
+           WHERE deletedAt IS NULL AND instr(lower(body), lower(:keyword)) > 0
+           ORDER BY firstRecordedAt DESC, rowid DESC""",
+    )
+    suspend fun searchRecords(keyword: String): List<TextPreviewRow>
+
+    @Query("SELECT body FROM text_records WHERE id = :id AND deletedAt IS NULL")
+    suspend fun recordBody(id: String): String?
 }
 
 @Database(entities = [DraftRow::class, RecordRow::class], version = 1)

@@ -8,7 +8,7 @@ import java.util.UUID
 class LocalTextStore internal constructor(
     private val database: FolioDatabase,
     private val now: () -> Long = System::currentTimeMillis,
-) : TextDrafts {
+) : TextDrafts, PublishedTextRecords {
     private val dao = database.textDao()
 
     override suspend fun saveDraft(id: DraftId?, edit: TextEdit): DraftId? {
@@ -45,6 +45,11 @@ class LocalTextStore internal constructor(
             dao.deleteDraft(draft.id)
             recordId
         }
+
+    override suspend fun search(keyword: String): List<RecordPreview> =
+        dao.searchRecords(keyword).map { RecordPreview(RecordId(it.id), it.excerpt) }
+
+    override suspend fun openRecord(id: RecordId): String? = dao.recordBody(id.value)
 
     companion object {
         private var instance: LocalTextStore? = null
