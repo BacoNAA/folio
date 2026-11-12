@@ -14,6 +14,8 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 可通过[首版交互原型](docs/design/prototype.html)与[关键数据设计草案](docs/design/首版原型与关键数据设计.md)核对后续功能。浏览器原型使用内存示例。
 
+照片原图通过 [LocalPhotoOriginals](app/src/main/java/com/baconaa/folio/media/LocalPhotoOriginals.kt) 导入。将拍照或系统选图返回的 URI 传给 `importPhoto`，成功后可用返回的 `PhotoId` 重新读取原始文件。照片与草稿的关联随图文编辑接入。
+
 开发者和 AI 从[开发入口](AGENTS.md)定位本轮需求，按[开发流程](docs/engineering/开发流程.md)领卡、联调和验收。
 
 ## 构建和试用调试版
