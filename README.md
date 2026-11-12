@@ -6,7 +6,7 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 ## 当前进度
 
-已建立 Kotlin／Compose 安卓工程。调试 APK 可打开「随手记」并切换到「记录」。文字录入、持久化、搜索和照片随首轮功能开发接入。
+已建立 Kotlin／Compose 安卓工程，当前 APK 可打开「随手记」并切换到「记录」。本机 Room 后端已支持文字草稿落盘与续写、完成记录、按正文查找和读取详情。前端可通过 `LocalTextStore.get(context)` 获取 [TextDrafts 和 PublishedTextRecords](app/src/main/java/com/baconaa/folio/records/TextRecords.kt)；编辑与搜索页面待接入。
 
 已按[整体需求审查](docs/requirements/整体需求审查.md)整理正文、子操作、共同规则和前置关系，并将已确认的功能边界写入正文。剩余范围与已确认结论索引集中见[待确认问题](docs/requirements/待确认问题.md)。
 
