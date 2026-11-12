@@ -3,13 +3,51 @@ package com.baconaa.folio.records
 import android.content.Context
 import androidx.room.Room
 import androidx.room.withTransaction
+import com.baconaa.folio.media.LocalPhotoOriginals
+import com.baconaa.folio.media.PhotoId
+import java.io.IOException
 import java.util.UUID
 
 class LocalTextStore internal constructor(
     private val database: FolioDatabase,
+    private val originals: LocalPhotoOriginals,
     private val now: () -> Long = System::currentTimeMillis,
 ) : TextDrafts, PublishedTextRecords {
     private val dao = database.textDao()
+    private val photoDao = database.photoDao()
+
+    override suspend fun appendPhotos(id: DraftId?, photos: List<PhotoId>): DraftId {
+        require(photos.isNotEmpty()) { "请选择照片" }
+        return database.withTransaction {
+            requireReadableOriginals(photos)
+            val timestamp = now()
+            val draftId = id ?: DraftId(UUID.randomUUID().toString())
+            if (id == null) {
+                dao.insertDraft(DraftRow(draftId.value, "", 0, timestamp, timestamp))
+            } else {
+                check(dao.touchDraft(id.value, timestamp) == 1) { "草稿已不存在" }
+            }
+            val start = photoDao.nextDraftPosition(draftId.value)
+            photoDao.insertDraftPhotos(draftId.value, photos.mapIndexed { offset, photo ->
+                PhotoSlot(itemId = UUID.randomUUID().toString(), photoId = photo.value.toString(), position = start + offset)
+            })
+            draftId
+        }
+    }
+
+    private fun requireReadableOriginals(photos: List<PhotoId>) {
+        for (photo in photos.distinct()) {
+            originals.openOriginal(photo).use {
+                if (it.read() == -1) throw IOException("原图为空，请重新导入照片")
+            }
+        }
+    }
+
+    override suspend fun openDraftPhotos(id: DraftId): List<PhotoId>? = database.withTransaction {
+        if (dao.draft(id.value) == null) null else photoDao.draftPhotos(id.value).map { it.photoId.asPhotoId() }
+    }
+
+    private fun String.asPhotoId() = PhotoId(UUID.fromString(this))
 
     override suspend fun editRecord(id: RecordId): DraftId = database.withTransaction {
         dao.activeEditId(id.value)?.let { return@withTransaction DraftId(it) }
@@ -42,7 +80,9 @@ class LocalTextStore internal constructor(
     }
 
     override suspend fun listDrafts(): List<DraftPreview> =
-        dao.listDrafts().map { DraftPreview(DraftId(it.id), it.excerpt, it.recordId?.let(::RecordId)) }
+        dao.listDrafts().map { row ->
+            DraftPreview(DraftId(row.id), row.excerpt, row.recordId?.let(::RecordId), row.firstPhotoId?.asPhotoId())
+        }
 
     override suspend fun openDraft(id: DraftId): TextEdit? =
         dao.draft(id.value)?.let { TextEdit(it.body, it.cursor) }
@@ -53,6 +93,7 @@ class LocalTextStore internal constructor(
             dao.completedRecordId(id.value)?.let { return@withTransaction RecordId(it) }
             require(finalEdit.text.isNotBlank()) { "请填写正文后再完成" }
             val draft = checkNotNull(dao.draft(id.value)) { "草稿已不存在" }
+            check(photoDao.draftPhotos(id.value).isEmpty()) { "含照片的草稿不能按纯文字提交" }
             val edit = dao.recordEdit(id.value)
             val recordId = if (edit == null) {
                 val newId = UUID.randomUUID().toString()
@@ -79,6 +120,7 @@ class LocalTextStore internal constructor(
         @Synchronized
         fun get(context: Context): LocalTextStore = instance ?: LocalTextStore(
             Room.databaseBuilder(context.applicationContext, FolioDatabase::class.java, "folio.db").build(),
+            LocalPhotoOriginals.get(context),
         ).also { instance = it }
     }
 }

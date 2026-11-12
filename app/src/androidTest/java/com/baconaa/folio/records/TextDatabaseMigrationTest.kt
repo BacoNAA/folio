@@ -1,9 +1,12 @@
 package com.baconaa.folio.records
 
 import android.content.Context
+import android.database.sqlite.SQLiteDatabase
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.baconaa.folio.media.LocalPhotoOriginals
+import com.baconaa.folio.media.PhotoId
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
@@ -25,11 +28,14 @@ class TextDatabaseMigrationTest {
 
     @Test
     fun oldDraftAndPublishedRecordSurviveUpgradeAndRemainEditable() = runBlocking {
-        createVersionOneDatabase()
+        createDatabase(1) { sql ->
+            sql.execSQL("INSERT INTO text_drafts VALUES ('unfinished', '等雨停', 1, 300, 400)")
+            sql.execSQL("INSERT INTO text_records VALUES ('published', 'submitted', '旧桥', 100, 200, NULL)")
+        }
 
         val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
         try {
-            val store = LocalTextStore(database)
+            val store = LocalTextStore(database, LocalPhotoOriginals.get(context))
             val record = RecordId("published")
             val oldDraft = DraftId("unfinished")
             assertEquals(TextEdit("等雨停", 1), store.openDraft(oldDraft))
@@ -50,8 +56,32 @@ class TextDatabaseMigrationTest {
         }
     }
 
-    private fun createVersionOneDatabase() {
-        val schemaFile = "${FolioDatabase::class.java.name}/1.json"
+    @Test
+    fun versionTwoEditKeepsItsParentAndCursorWhenPhotosAreIntroduced() = runBlocking {
+        createDatabase(2) { sql ->
+            sql.execSQL("INSERT INTO text_records VALUES ('record', 'source', '原文', 100, 200, NULL, 3)")
+            sql.execSQL("INSERT INTO text_drafts VALUES ('edit', '编辑中', 1, 100, 300)")
+            sql.execSQL("INSERT INTO text_record_edits VALUES ('edit', 'record', 3)")
+        }
+
+        val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(database, LocalPhotoOriginals.get(context))
+            val record = RecordId("record")
+            val draft = DraftId("edit")
+            assertEquals(draft, store.editRecord(record))
+            assertEquals(TextEdit("编辑中", 1), store.openDraft(draft))
+            assertEquals(emptyList<PhotoId>(), store.openDraftPhotos(draft))
+            assertEquals("原文", store.openRecord(record))
+            assertEquals(record, store.completeDraft(draft, TextEdit("新正文", 3)))
+            assertEquals("新正文", store.openRecord(record))
+        } finally {
+            database.close()
+        }
+    }
+
+    private fun createDatabase(version: Int, seed: (SQLiteDatabase) -> Unit) {
+        val schemaFile = "${FolioDatabase::class.java.name}/$version.json"
         val schema = instrumentation.context.assets.open(schemaFile).bufferedReader().use {
             JSONObject(it.readText()).getJSONObject("database")
         }
@@ -66,10 +96,15 @@ class TextDatabaseMigrationTest {
                     sql.execSQL(indices.getJSONObject(j).getString("createSql").replace("\${TABLE_NAME}", table))
                 }
             }
+            schema.optJSONArray("views")?.let { views ->
+                for (i in 0 until views.length()) {
+                    val view = views.getJSONObject(i)
+                    sql.execSQL(view.getString("createSql").replace("\${VIEW_NAME}", view.getString("viewName")))
+                }
+            }
             val setup = schema.getJSONArray("setupQueries")
             for (i in 0 until setup.length()) sql.execSQL(setup.getString(i))
-            sql.execSQL("INSERT INTO text_drafts VALUES ('unfinished', '等雨停', 1, 300, 400)")
-            sql.execSQL("INSERT INTO text_records VALUES ('published', 'submitted', '旧桥', 100, 200, NULL)")
+            seed(sql)
             sql.version = schema.getInt("version")
         }
     }

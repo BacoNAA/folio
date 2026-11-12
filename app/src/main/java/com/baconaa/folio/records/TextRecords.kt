@@ -1,5 +1,7 @@
 package com.baconaa.folio.records
 
+import com.baconaa.folio.media.PhotoId
+
 @JvmInline
 value class DraftId(val value: String)
 
@@ -13,12 +15,23 @@ data class TextEdit(val text: String, val cursor: Int) {
     }
 }
 
-data class DraftPreview(val id: DraftId, val excerpt: String, val recordId: RecordId? = null)
+data class DraftPreview(
+    val id: DraftId,
+    val excerpt: String,
+    val recordId: RecordId? = null,
+    val firstPhotoId: PhotoId? = null,
+)
 
 data class RecordPreview(val id: RecordId, val excerpt: String)
 
 /** 存储操作失败时向调用方抛出异常。 */
 interface TextDrafts {
+    /** 按传入顺序追加已导入的原图。传 null 可直接建立纯照片草稿。 */
+    suspend fun appendPhotos(id: DraftId?, photos: List<PhotoId>): DraftId
+
+    /** 返回草稿中的原图 ID，草稿不存在或不可续写时返回 null。 */
+    suspend fun openDraftPhotos(id: DraftId): List<PhotoId>?
+
     /** 开始修改有效正式记录；已有编辑草稿时继续同一份。 */
     suspend fun editRecord(id: RecordId): DraftId
 

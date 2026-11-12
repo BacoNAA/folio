@@ -57,8 +57,8 @@ internal data class EditableDraftRow(
     val recordId: String?,
 )
 
-internal data class TextPreviewRow(val id: String, val excerpt: String)
-internal data class DraftPreviewRow(val id: String, val excerpt: String, val recordId: String?)
+internal data class TextPreviewRow(val id: String, val excerpt: String, val firstPhotoId: String?)
+internal data class DraftPreviewRow(val id: String, val excerpt: String, val recordId: String?, val firstPhotoId: String?)
 
 @Dao
 internal interface TextDao {
@@ -69,10 +69,16 @@ internal interface TextDao {
               WHERE id = :id AND EXISTS (SELECT 1 FROM editable_text_drafts WHERE id = :id)""")
     suspend fun updateDraft(id: String, body: String, cursor: Int, editedAt: Long): Int
 
+    @Query("""UPDATE text_drafts SET lastEditedAt = :editedAt
+              WHERE id = :id AND EXISTS (SELECT 1 FROM editable_text_drafts WHERE id = :id)""")
+    suspend fun touchDraft(id: String, editedAt: Long): Int
+
     @Query("SELECT id, body, cursor, firstRecordedAt, lastEditedAt FROM editable_text_drafts WHERE id = :id")
     suspend fun draft(id: String): DraftRow?
 
-    @Query("""SELECT id, substr(body, 1, 80) AS excerpt, recordId FROM editable_text_drafts
+    @Query("""SELECT d.id, substr(d.body, 1, 80) AS excerpt, d.recordId,
+              (SELECT photoId FROM draft_photos WHERE draftId = d.id ORDER BY position LIMIT 1) AS firstPhotoId
+              FROM editable_text_drafts d
               ORDER BY lastEditedAt DESC, insertionOrder DESC""")
     suspend fun listDrafts(): List<DraftPreviewRow>
 
@@ -109,9 +115,11 @@ internal interface TextDao {
     suspend fun deleteDraft(id: String): Int
 
     @Query(
-        """SELECT id, substr(body, 1, 80) AS excerpt FROM text_records
+        """SELECT r.id, substr(r.body, 1, 80) AS excerpt,
+           (SELECT photoId FROM record_photos WHERE recordId = r.id ORDER BY position LIMIT 1) AS firstPhotoId
+           FROM text_records r
            WHERE deletedAt IS NULL AND instr(lower(body), lower(:keyword)) > 0
-           ORDER BY firstRecordedAt DESC, rowid DESC""",
+           ORDER BY firstRecordedAt DESC, r.rowid DESC""",
     )
     suspend fun searchRecords(keyword: String): List<TextPreviewRow>
 
@@ -120,11 +128,12 @@ internal interface TextDao {
 }
 
 @Database(
-    entities = [DraftRow::class, RecordRow::class, RecordEditRow::class],
+    entities = [DraftRow::class, RecordRow::class, RecordEditRow::class, DraftPhotoRow::class, RecordPhotoRow::class],
     views = [EditableDraftRow::class],
-    version = 2,
-    autoMigrations = [AutoMigration(from = 1, to = 2)],
+    version = 3,
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
 )
 internal abstract class FolioDatabase : RoomDatabase() {
     abstract fun textDao(): TextDao
+    abstract fun photoDao(): RecordPhotoDao
 }
