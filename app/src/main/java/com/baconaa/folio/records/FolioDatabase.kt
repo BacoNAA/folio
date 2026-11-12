@@ -91,11 +91,19 @@ internal interface TextDao {
     @Query("SELECT * FROM text_records WHERE id = :id AND deletedAt IS NULL")
     suspend fun activeRecord(id: String): RecordRow?
 
-    @Query("SELECT id FROM text_records WHERE sourceDraftId = :draftId")
+    // An edit keeps its link after completion so older retries can find the record.
+    // Discard removes both the draft and its link.
+    @Query("""SELECT id FROM text_records WHERE sourceDraftId = :draftId
+              UNION ALL
+              SELECT recordId FROM text_record_edits WHERE draftId = :draftId
+              AND NOT EXISTS (SELECT 1 FROM text_drafts WHERE id = :draftId)""")
     suspend fun completedRecordId(draftId: String): String?
 
     @Insert
     suspend fun insertRecord(row: RecordRow)
+
+    @Query("UPDATE text_records SET body = :body, modifiedAt = :modifiedAt, revision = revision + 1 WHERE id = :id")
+    suspend fun updateRecordBody(id: String, body: String, modifiedAt: Long)
 
     @Query("DELETE FROM text_drafts WHERE id = :id AND EXISTS (SELECT 1 FROM editable_text_drafts WHERE id = :id)")
     suspend fun deleteDraft(id: String): Int

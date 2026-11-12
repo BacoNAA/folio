@@ -53,13 +53,19 @@ class LocalTextStore internal constructor(
             dao.completedRecordId(id.value)?.let { return@withTransaction RecordId(it) }
             require(finalEdit.text.isNotBlank()) { "请填写正文后再完成" }
             val draft = checkNotNull(dao.draft(id.value)) { "草稿已不存在" }
-            check(dao.recordEdit(id.value) == null) { "编辑草稿不能发布为新记录" }
-            val recordId = RecordId(UUID.randomUUID().toString())
-            dao.insertRecord(
-                RecordRow(recordId.value, draft.id, finalEdit.text, draft.firstRecordedAt, now()),
-            )
-            dao.deleteDraft(draft.id)
-            recordId
+            val edit = dao.recordEdit(id.value)
+            val recordId = if (edit == null) {
+                val newId = UUID.randomUUID().toString()
+                dao.insertRecord(RecordRow(newId, draft.id, finalEdit.text, draft.firstRecordedAt, now()))
+                newId
+            } else {
+                val record = checkNotNull(dao.activeRecord(edit.recordId)) { "正式记录已不存在" }
+                check(record.revision == edit.baseRevision) { "正式记录已更新，本次草稿已保留" }
+                if (record.body != finalEdit.text) dao.updateRecordBody(record.id, finalEdit.text, now())
+                record.id
+            }
+            check(dao.deleteDraft(draft.id) == 1) { "未能移除已完成的草稿" }
+            RecordId(recordId)
         }
 
     override suspend fun search(keyword: String): List<RecordPreview> =

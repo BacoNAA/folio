@@ -36,7 +36,8 @@ interface TextDrafts {
 
     /**
      * 最终输入写入正式记录、本次草稿移除须一起成功。
-     * 失败保留草稿与原正式版本，重试不得重复创建正式记录。
+     * 编辑草稿更新原记录并返回同一 ID。正文未变时保留修改时间。
+     * 失败保留草稿与原正式版本，重复完成返回已提交的 ID。
      */
     suspend fun completeDraft(id: DraftId, finalEdit: TextEdit): RecordId
 }
