@@ -101,3 +101,167 @@
 .draft-notice button { display: block; text-align: left; padding-left: 0; font-size: 12px; }
 .trash-preview { display: block; width: 100%; text-align: left; padding: 0; }
 .trash-preview p { font-size: 12px; line-height: 1.8; color: var(--muted); margin-top: 8px; }
+
+/* Interface study: paper surfaces, pine ink and brass accents. */
+:root {
+  --ink: #193a31;
+  --paper: #fbf8f1;
+  --muted: #646c60;
+  --line: #d9dacb;
+  --green: #234e40;
+  --soft: #e6ecdf;
+  --accent: #8f563b;
+  background: #e8e9df;
+}
+body {
+  gap: clamp(34px, 8vw, 110px);
+  background: radial-gradient(ellipse at 64% 12%, #f7f5ed, transparent 58%), #e8e9df;
+}
+.guide { width: clamp(200px, 24vw, 305px); }
+.wordmark {
+  font: italic 76px/.95 "Baskervville", Georgia, serif;
+  letter-spacing: -6px;
+  margin: 0 0 52px;
+}
+.wordmark span { font-size: 13px; letter-spacing: 4px; margin: 14px 0 0 4px; }
+.guide h1 { font-family: inherit; font-weight: 500; font-size: 15px; letter-spacing: 1px; margin: 0; }
+.guide-links { margin: 15px 0 32px; border-top: 1px solid #bfc5b6; }
+.guide-links button { min-height: 47px; font-size: 14px; padding: 0 12px; }
+.guide-links button[aria-current="page"] { background: var(--soft); font-weight: 650; }
+.guide-links button[aria-current="page"]::after { content: "↗"; float: right; }
+.guide .prototype-note { font-size: 12px; line-height: 1.8; }
+.phone { border: 5px solid #34483d; box-shadow: 0 24px 62px #263a3224; }
+header { padding: 13px 22px 18px; }
+.topline h2 { font-size: 34px; letter-spacing: -.04em; }
+main { padding-inline: 20px; }
+.capture-art { position: absolute; width: 0; height: 0; overflow: hidden; }
+.phone {
+  --paper: #f9f6ee;
+  --ink: #222a44;
+  --green: #334476;
+  --soft: #e6e9f2;
+  --line: #d4d3ca;
+  color: var(--ink);
+}
+.phone[data-page="capture"] header { padding: 17px 22px 15px; }
+.phone[data-page="capture"] .topline h2 {
+  font: 600 32px/1.3 "Source Han Serif SC", "Songti SC", SimSun, serif;
+  letter-spacing: .04em;
+}
+.capture-page {
+  min-height: 100%;
+  display: grid;
+  grid-template-rows: minmax(170px, 1fr) minmax(208px, 1.12fr);
+  gap: 14px;
+}
+.capture-write {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 22px;
+  color: #fff5de;
+  background: radial-gradient(ellipse at 80% 8%, #53659b, transparent 60%), #304173;
+  border: 1px solid #2c3964;
+  border-radius: 17px 17px 5px 5px;
+}
+.capture-write::before {
+  content: "";
+  position: absolute;
+  inset: 12px;
+  z-index: -1;
+  opacity: .25;
+  background-image: radial-gradient(#f4dfc2 1px, transparent 1.1px);
+  background-size: 8px 8px;
+  mask-image: linear-gradient(135deg, transparent 16%, black 80%);
+}
+.nib-art {
+  position: absolute;
+  z-index: -1;
+  top: -12%;
+  right: 0;
+  width: 61%;
+  height: 106%;
+  filter: drop-shadow(5px 6px 0 #19295165);
+  pointer-events: none;
+}
+.capture-write strong {
+  font: 600 clamp(36px, 11vw, 48px)/1.15 "Source Han Serif SC", "Songti SC", SimSun, serif;
+  letter-spacing: .02em;
+}
+.write-forward {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  background: #ffedcb;
+  color: #283958;
+  border-radius: 50%;
+  font-size: 20px;
+}
+.capture-page .capture-tools {
+  margin: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
+  gap: 10px;
+}
+.capture-tools .capture-tool {
+  --art-light: #fef3da;
+  --art-mid: #c9b791;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  justify-items: start;
+  align-items: center;
+  padding: 11px 16px 12px;
+  border: 1px solid #27324a22;
+  border-radius: 5px;
+  background: #f0e4ca;
+  color: #4f452f;
+}
+.capture-tool[data-id="album"] { --art-light: #fff5eb; --art-mid: #dbab97; background: #f2dbd1; color: #6f423c; }
+.capture-tool[data-id="audio"] { --art-light: #edfaf0; --art-mid: #99b6ac; background: #dce7df; color: #34554d; }
+.capture-tool[data-id="checklist"] { --art-light: #fbf9ff; --art-mid: #b7bbd4; background: #e3e3ef; color: #4b5075; }
+.tool-art { width: min(80%, 104px); height: clamp(43px, 8vh, 76px); justify-self: center; }
+.capture-tool strong {
+  width: 100%;
+  border-top: 1px solid #27324a30;
+  padding-top: 7px;
+  text-align: left;
+  font-size: 15px;
+  font-weight: 600;
+}
+.capture-tool:active, .capture-write:active { filter: brightness(.94); }
+@media (hover: hover) {
+  .capture-tool:hover, .capture-write:hover { box-shadow: inset 0 0 0 2px currentColor; }
+}
+.navigation { gap: 5px; margin: 6px 16px 12px; padding: 5px; border: 1px solid var(--line); border-radius: 16px; background: #efefe5; }
+.navigation button { flex: 1; color: var(--muted); font-size: 14px; }
+.navigation .active { border-radius: 11px; background: var(--green); color: #fffdf4; }
+.timeline-year > .section-label { font: 500 24px/1.4 Georgia,"Songti SC",serif; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.record { background: #fffdf8; border: 1px solid var(--line); border-radius: 11px; padding: 14px; margin-bottom: 12px; }
+.record h3 { font-size: 17px; color: var(--ink); }
+.record p { font-size: 14px; color: #4a544a; }
+.meta, .hint, .draft-link, .filter-chip { font-size: 12px; }
+.phone[data-page="edit"] textarea { background: #fffdf8; border-color: var(--line); padding: 14px; }
+.phone[data-page="edit"] .block { border-left: 2px solid #c6cebd; padding-left: 12px; }
+.clues, .filter-options, .new-clue { background: #f1f2e9; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+.clues summary, .new-clue summary { min-height: 42px; cursor: pointer; }
+.clues button { background: var(--paper); overflow-wrap: anywhere; }
+.clue-option { display: flex; gap: 12px; align-items: center; min-height: 46px; border-bottom: 1px solid var(--line); }
+.clue-option input { width: 18px; accent-color: var(--green); }
+.new-clue { margin-top: 16px; }
+@media (max-width: 640px) {
+  body { background: var(--paper); }
+  .phone { border: none; box-shadow: none; }
+  .mobile-note { color: #4f5c4e; background: #e8ebdf; }
+  .navigation { margin-bottom: max(9px, env(safe-area-inset-bottom)); }
+}
+
+.timeline-year > .section-label { border-color: var(--ink); }
+.record { border-radius: 2px 8px 8px 2px; border-left: 3px solid #9ba996; }
+.record h3 { font-family: "Songti SC", SimSun, serif; font-weight: 600; }
+.guide-links button[aria-current="page"] { box-shadow: inset 3px 0 var(--green); }
+.phone[data-page="edit"] .title-input { border-bottom-color: var(--green); }

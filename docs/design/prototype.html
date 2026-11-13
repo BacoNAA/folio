@@ -5,19 +5,63 @@
 <title>Folio · 首版交互原型</title>
 <link rel="stylesheet" href="prototype.css">
 <body>
+<svg class="capture-art" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+  <symbol id="art-nib" viewBox="0 0 160 220">
+    <g transform="rotate(34 80 110)">
+      <path fill="#cbd4e7" stroke="#1a2b51" stroke-width="3" d="M53 -40h54v104H53z"/>
+      <path fill="#94a3c6" d="M61 -40h8V59h-8zM97 -40h4V59h-4z"/>
+      <rect x="49" y="52" width="62" height="17" rx="3" fill="#eab58b" stroke="#1a2b51" stroke-width="3"/>
+      <path fill="#ffebc8" stroke="#1a2b51" stroke-width="3" d="M53 69h54l12 55-39 78-39-78z"/>
+      <path fill="#e5b485" d="M105 73l10 50-33 69 15-71z"/>
+      <g fill="none" stroke="#795c4a" stroke-width="2"><path d="M59 78l-9 44 19 36M65 81l-7 39 12 22M101 78l9 44-19 36M95 81l7 39-12 22"/><path d="M80 120v79"/></g>
+      <circle cx="80" cy="117" r="5" fill="#1a2b51"/>
+    </g>
+  </symbol>
+  <symbol id="art-camera" viewBox="0 0 96 70">
+    <g transform="rotate(-7 48 35)" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round">
+      <path d="M14 21h16l5-8h23l6 8h16q5 0 5 5v29q0 5-5 5H15q-5 0-5-5V26q0-5 4-5Z" fill="var(--art-light)"/>
+      <path d="M11 31h73v21H11z" fill="var(--art-mid)"/>
+      <circle cx="49" cy="39" r="17" fill="var(--art-light)"/><circle cx="49" cy="39" r="11" fill="currentColor"/>
+      <path d="M43 38q1-5 6-6" fill="none" stroke="var(--art-light)" stroke-linecap="round"/>
+      <path d="M69 25h8M18 17h8"/>
+    </g>
+  </symbol>
+  <symbol id="art-album" viewBox="0 0 96 70">
+    <g stroke="currentColor" stroke-width="2.2" stroke-linejoin="round">
+      <path d="m10 18 49-11 10 44-49 12z" fill="var(--art-mid)"/>
+      <g transform="rotate(8 55 37)"><path d="M28 10h53v53H28z" fill="var(--art-light)"/>
+        <path d="M34 16h41v34H34z" fill="var(--art-mid)"/>
+        <path d="m34 45 13-15 10 11 6-7 12 13v3H34z" fill="currentColor"/>
+        <circle cx="63" cy="26" r="4" fill="var(--art-light)" stroke="none"/>
+      </g>
+    </g>
+  </symbol>
+  <symbol id="art-audio" viewBox="0 0 96 70">
+    <g transform="rotate(8 48 35)" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+      <rect x="37" y="5" width="25" height="38" rx="12" fill="var(--art-mid)"/>
+      <path d="M38 16h13m-14 6h13m-13 6h14M30 30v2a19.5 19.5 0 0 0 39 0v-2M49 52v8" fill="none"/>
+      <path d="M38 60h22l5 4H33z" fill="var(--art-light)"/>
+    </g>
+  </symbol>
+  <symbol id="art-checklist" viewBox="0 0 96 70">
+    <g transform="rotate(-8 48 35)" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round">
+      <rect x="23" y="11" width="52" height="53" rx="4" fill="var(--art-mid)"/>
+      <rect x="20" y="8" width="52" height="53" rx="4" fill="var(--art-light)"/>
+      <path d="M31 4v9m10-9v9m10-9v9m10-9v9M31 26l3 3 6-7m5 5h16M31 38l3 3 6-7m5 5h16M31 49h6m8 1h14" fill="none" stroke-linecap="round"/>
+    </g>
+  </symbol>
+</svg>
 <aside class="guide">
-  <div class="wordmark">folio<span>私 人 生 活 记 录</span></div>
-  <p class="eyebrow">入口与找回 · 2026.11</p>
-  <h1>把日子留下，<br>慢慢找回来。</h1>
-  <p>从「随手记」留下一张照片或一句话。以后打开「记录」，接着写草稿，也可以按时间或地点找回。</p>
-  <div class="guide-links" aria-label="样稿预览快捷入口">
-    <button data-route="capture">01　随手记 <span>↗</span></button>
-    <button data-route="home">02　记录与草稿 <span>↗</span></button>
-    <button data-route="search">03　搜索全部记录 <span>↗</span></button>
-    <button data-route="places">04　记录 · 按地点 <span>↗</span></button>
-    <button data-route="trash">05　回收站 <span>↗</span></button>
-  </div>
-  <div class="prototype-note"><strong>可操作的设计样稿</strong><br>使用虚构示例；内容仅保留在本页内存，刷新即重置。照片、录音与位置以示意呈现，不调用设备。此原型覆盖首版主要流程，视觉与控件待评审。</div>
+  <div class="wordmark">Folio<span>私人生活手记</span></div>
+  <h1>界面预览</h1>
+  <nav class="guide-links" aria-label="样稿预览快捷入口">
+    <button data-route="capture">随手记</button>
+    <button data-route="home">记录与草稿</button>
+    <button data-route="search">搜索记录</button>
+    <button data-route="places">地点小册</button>
+    <button data-route="trash">回收站</button>
+  </nav>
+  <p class="prototype-note">示例内容刷新后重置。拍照、录音与定位使用模拟数据。</p>
   <button class="reset" id="reset">重置示例</button>
 </aside>
 <div class="mobile-note">Folio 交互样稿 · 示例数据 · 刷新重置 · 媒体与定位为模拟</div>
@@ -29,6 +73,7 @@
   <div id="toast" role="status" aria-live="polite"></div>
   <dialog id="sheet"><div id="sheet-content"></div></dialog>
 </section>
+<script src="prototype-clues.js"></script>
 <script src="prototype.js"></script>
 </body>
 </html>
