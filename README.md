@@ -6,13 +6,15 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 ## 当前进度
 
-已建立 Kotlin／Compose 安卓工程，当前 APK 可打开「随手记」并切换到「记录」。本机 Room 后端已支持文字草稿落盘与续写、完成记录、按正文查找和读取详情。前端可通过 `LocalTextStore.get(context)` 获取 [TextDrafts 和 PublishedTextRecords](app/src/main/java/com/baconaa/folio/records/TextRecords.kt)；编辑与搜索页面待接入。
+当前 APK 可打开「随手记」并切换到「记录」。本机 Room 后端支持新建、续写和放弃文字草稿，也可按正文搜索并打开正式记录。编辑已有记录时，搜索和详情继续显示原文，完成后按原 ID 读取新正文。前端可通过 `LocalTextStore.get(context)` 获取 [TextDrafts 和 PublishedTextRecords](app/src/main/java/com/baconaa/folio/records/TextRecords.kt)，编辑与搜索页面待接入。
 
 已按[整体需求审查](docs/requirements/整体需求审查.md)整理正文、子操作、共同规则和前置关系，并将已确认的功能边界写入正文。剩余范围与已确认结论索引集中见[待确认问题](docs/requirements/待确认问题.md)。
 
 首个目标平台为安卓（Android），首版内容与技术主线均已确认。采用 Kotlin＋Jetpack Compose，数据使用 Room／SQLite，媒体复用现有组件；具体见[技术主线](docs/requirements/版本规划与审核事项.md#技术主线已确认)。首版面向 Android 10（API 29）及以上手机，基础功能不强制依赖 Google Play 服务；每轮可用版本通过已签名 APK 交付，见[设备兼容与交付](docs/requirements/版本规划与审核事项.md#设备兼容与交付已确认)。首版迭代顺序与范围已确认，最终界面方案随原型细化，应用商店上架和付费方案在发布前讨论。需求文档中的后续建议与视觉概念不代表已经实现或确定上线。
 
 可通过[首版交互原型](docs/design/prototype.html)与[关键数据设计草案](docs/design/首版原型与关键数据设计.md)核对后续功能。浏览器原型使用内存示例。
+
+照片原图通过 [LocalPhotoOriginals](app/src/main/java/com/baconaa/folio/media/LocalPhotoOriginals.kt) 导入。将返回的 `PhotoId` 按顺序传给 `appendPhotos` 即可新建纯照片草稿或追加到已有草稿，重开后可用 `openDraftPhotos` 取回原图顺序。调用 `completeDraft` 后，`openRecordContent` 按正式记录 ID 一次读出正文和照片列表；打开其中任意原图使用 `openOriginal`。
 
 开发者和 AI 从[开发入口](AGENTS.md)定位本轮需求，按[开发流程](docs/engineering/开发流程.md)领卡、联调和验收。
 

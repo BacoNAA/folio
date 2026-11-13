@@ -1,5 +1,7 @@
 package com.baconaa.folio.records
 
+import com.baconaa.folio.media.PhotoId
+
 @JvmInline
 value class DraftId(val value: String)
 
@@ -13,12 +15,31 @@ data class TextEdit(val text: String, val cursor: Int) {
     }
 }
 
-data class DraftPreview(val id: DraftId, val excerpt: String)
+data class DraftPreview(
+    val id: DraftId,
+    val excerpt: String,
+    val recordId: RecordId? = null,
+    val firstPhotoId: PhotoId? = null,
+)
 
-data class RecordPreview(val id: RecordId, val excerpt: String)
+data class RecordPreview(val id: RecordId, val excerpt: String, val firstPhotoId: PhotoId? = null)
+
+data class RecordContent(val text: String, val photos: List<PhotoId>)
 
 /** 存储操作失败时向调用方抛出异常。 */
 interface TextDrafts {
+    /** 按传入顺序追加已导入的原图。传 null 可直接建立纯照片草稿。 */
+    suspend fun appendPhotos(id: DraftId?, photos: List<PhotoId>): DraftId
+
+    /** 返回草稿中的原图 ID，草稿不存在或不可续写时返回 null。 */
+    suspend fun openDraftPhotos(id: DraftId): List<PhotoId>?
+
+    /** 开始修改有效正式记录；已有编辑草稿时继续同一份。 */
+    suspend fun editRecord(id: RecordId): DraftId
+
+    /** 放弃新建或编辑草稿，保留正式记录。重复放弃不会影响后来建立的草稿。 */
+    suspend fun discardDraft(id: DraftId)
+
     /** 新建传 null，成功落盘后返回 ID。新建且内容为空时返回 null。 */
     suspend fun saveDraft(id: DraftId?, edit: TextEdit): DraftId?
 
@@ -30,13 +51,18 @@ interface TextDrafts {
 
     /**
      * 最终输入写入正式记录、本次草稿移除须一起成功。
-     * 失败保留草稿与原正式版本，重试不得重复创建正式记录。
+     * 正文和已追加的照片一起提交，至少要有一项内容。
+     * 编辑草稿更新原记录并返回同一 ID。内容未变时保留修改时间。
+     * 失败保留草稿与原正式版本，重复完成返回已提交的 ID。
      */
     suspend fun completeDraft(id: DraftId, finalEdit: TextEdit): RecordId
 }
 
 /** 使用同一正式记录 ID 查找和打开最后完成的版本。读取失败须向调用方抛出异常。 */
 interface PublishedTextRecords {
+    /** 从同一正式版本读取正文和有序原图；不可查看的记录返回 null。 */
+    suspend fun openRecordContent(id: RecordId): RecordContent?
+
     /** 按正文匹配，排除草稿与回收站。没有匹配时返回空列表。 */
     suspend fun search(keyword: String): List<RecordPreview>
 

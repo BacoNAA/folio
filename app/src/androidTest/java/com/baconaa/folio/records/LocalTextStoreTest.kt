@@ -3,6 +3,7 @@ package com.baconaa.folio.records
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.baconaa.folio.media.LocalPhotoOriginals
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -24,7 +25,7 @@ class LocalTextStoreTest {
     @Before
     fun openDatabase() {
         database = Room.databaseBuilder(context, FolioDatabase::class.java, databaseName).build()
-        store = LocalTextStore(database, now = { millis })
+        store = LocalTextStore(database, LocalPhotoOriginals.get(context), now = { millis })
     }
 
     @After
@@ -155,11 +156,38 @@ class LocalTextStoreTest {
     }
 
     @Test
+    fun editingResumesItsOwnDraftAndDiscardPreservesPublishedText() = runBlocking {
+        val record = completeText("旧桥")
+        val editId = store.editRecord(record)
+        assertEquals(TextEdit("旧桥", 2), store.openDraft(editId))
+        val changed = TextEdit("新桥边", 1)
+        store.saveDraft(editId, changed)
+        reopenDatabase()
+
+        assertEquals(editId, store.editRecord(record))
+        assertEquals(changed, store.openDraft(editId))
+        assertEquals(listOf(DraftPreview(editId, changed.text, record)), store.listDrafts())
+        assertEquals("旧桥", store.openRecord(record))
+        assertEquals(record, store.search("旧桥").single().id)
+        assertTrue(store.search("新桥").isEmpty())
+
+        val independent = requireNotNull(store.saveDraft(null, TextEdit("独立", 2)))
+        store.discardDraft(editId)
+        assertEquals(listOf(independent), store.listDrafts().map { it.id })
+        assertNull(store.openDraft(editId))
+        assertEquals("旧桥", store.openRecord(record))
+        store.discardDraft(independent)
+        assertTrue(store.listDrafts().isEmpty())
+        assertTrue(runCatching { store.completeDraft(editId, changed) }.isFailure)
+    }
+
+    @Test
     fun searchAfterReopenFindsOnlyCurrentRecordAndOpensItsFullText() = runBlocking {
         val keyword = "青瓦桥"
         val body = "沿河走了一段路。".repeat(32) + keyword
         val published = completeText(body)
         val deleted = completeText("旧路线也经过青瓦桥")
+        val hiddenEdit = store.editRecord(deleted)
         database.openHelper.writableDatabase.execSQL(
             "UPDATE text_records SET deletedAt = ? WHERE id = ?",
             arrayOf<Any>(millis, deleted.value),
@@ -173,6 +201,8 @@ class LocalTextStoreTest {
         assertTrue(match.excerpt.isNotBlank() && match.excerpt.length < body.length)
         assertEquals(body, store.openRecord(match.id))
         assertNull(store.openRecord(deleted))
+        assertNull(store.openDraft(hiddenEdit))
+        assertTrue(runCatching { store.editRecord(deleted) }.isFailure)
         assertTrue(store.search("白石塔").isEmpty())
     }
 
