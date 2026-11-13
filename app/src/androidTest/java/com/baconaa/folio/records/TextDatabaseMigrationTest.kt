@@ -80,6 +80,42 @@ class TextDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun versionThreePhotosKeepTheirItemIdsAndTheEditKeepsItsCursor() = runBlocking {
+        val photo = PhotoId(UUID.randomUUID())
+        val first = ItemId(UUID.randomUUID().toString())
+        val second = ItemId(UUID.randomUUID().toString())
+        createDatabase(3) { sql ->
+            sql.execSQL("INSERT INTO text_records VALUES ('record', 'source', '旧桥', 100, 200, NULL, 3)")
+            sql.execSQL("INSERT INTO text_drafts VALUES ('edit', '新🌉桥', 3, 100, 300)")
+            sql.execSQL("INSERT INTO text_record_edits VALUES ('edit', 'record', 3)")
+            for ((item, position) in listOf(second to 1, first to 0)) {
+                val values = arrayOf<Any>(item.value, photo.value.toString(), position)
+                sql.execSQL("INSERT INTO record_photos (recordId,itemId,photoId,position) VALUES ('record',?,?,?)", values)
+                sql.execSQL("INSERT INTO draft_photos (draftId,itemId,photoId,position) VALUES ('edit',?,?,?)", values)
+            }
+        }
+
+        val db = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(db, LocalPhotoOriginals.get(context))
+            val record = RecordId("record")
+            val content = requireNotNull(store.openRecordContent(record))
+            val textId = content.items.first().id
+            val photos = listOf(ContentItem.Photo(first, photo), ContentItem.Photo(second, photo))
+            assertEquals(listOf(ContentItem.Text(textId, "旧桥")) + photos, content.items)
+
+            val draft = store.editRecord(record)
+            assertEquals(DraftId("edit"), draft)
+            val resumed = requireNotNull(store.openMixedDraft(draft))
+            assertEquals(listOf(ContentItem.Text(textId, "新🌉桥")) + photos, resumed.items)
+            assertEquals(textId, resumed.activeItemId)
+            assertEquals(3, resumed.cursor)
+        } finally {
+            db.close()
+        }
+    }
+
     private fun createDatabase(version: Int, seed: (SQLiteDatabase) -> Unit) {
         val schemaFile = "${FolioDatabase::class.java.name}/$version.json"
         val schema = instrumentation.context.assets.open(schemaFile).bufferedReader().use {

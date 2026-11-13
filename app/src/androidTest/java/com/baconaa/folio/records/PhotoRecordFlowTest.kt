@@ -68,7 +68,7 @@ internal class PhotoRecordFlowTest : PhotoStoreFixture() {
 
         val sql = database.openHelper.writableDatabase
         sql.execSQL(
-            """CREATE TRIGGER reject_photo BEFORE INSERT ON record_photos
+            """CREATE TRIGGER reject_photo BEFORE INSERT ON record_items WHEN NEW.photoId IS NOT NULL
                BEGIN SELECT RAISE(ABORT, 'reject_photo'); END""",
         )
         val failure = runCatching { store.completeDraft(editing, updated) }.exceptionOrNull()

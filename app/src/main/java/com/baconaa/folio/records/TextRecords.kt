@@ -24,7 +24,10 @@ data class DraftPreview(
 
 data class RecordPreview(val id: RecordId, val excerpt: String, val firstPhotoId: PhotoId? = null)
 
-data class RecordContent(val text: String, val photos: List<PhotoId>)
+data class RecordContent(val items: List<ContentItem>) {
+    val text: String get() = items.body()
+    val photos: List<PhotoId> get() = items.photos()
+}
 
 /** 存储操作失败时向调用方抛出异常。 */
 interface TextDrafts {
