@@ -125,16 +125,21 @@ internal interface TextDao {
 }
 
 @Database(
-    entities = [DraftRow::class, RecordRow::class, RecordEditRow::class, DraftItemRow::class, RecordItemRow::class],
+    entities = [
+        DraftRow::class, RecordRow::class, RecordEditRow::class,
+        DraftItemRow::class, RecordItemRow::class, RemovedItem::class,
+    ],
     views = [EditableDraftRow::class],
-    version = 4,
+    version = 5,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
         AutoMigration(from = 3, to = 4, spec = MixedContentMigration::class),
+        AutoMigration(from = 4, to = 5),
     ],
 )
 internal abstract class FolioDatabase : RoomDatabase() {
     abstract fun textDao(): TextDao
     abstract fun itemDao(): ContentItemDao
+    abstract fun removedItemDao(): RemovedItemDao
 }

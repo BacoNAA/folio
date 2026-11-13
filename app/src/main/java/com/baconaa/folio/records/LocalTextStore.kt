@@ -15,6 +15,7 @@ class LocalTextStore internal constructor(
 ) : TextDrafts, PublishedTextRecords, MixedContentDrafts {
     private val dao = database.textDao()
     private val itemDao = database.itemDao()
+    private val itemActions = ContentItemActions(database, now)
 
     private suspend fun createDraft(): DraftId {
         val id = DraftId(UUID.randomUUID().toString())
@@ -83,6 +84,15 @@ class LocalTextStore internal constructor(
     }
 
     override suspend fun openDraftPhotos(id: DraftId): List<PhotoId>? = openMixedDraft(id)?.items?.photos()
+
+    override suspend fun moveItem(id: DraftId, itemId: ItemId, direction: MoveDirection) =
+        itemActions.move(id, itemId, direction)
+
+    override suspend fun removeItem(id: DraftId, itemId: ItemId) = itemActions.remove(id, itemId)
+
+    override suspend fun canUndoRemoval(id: DraftId) = itemActions.canUndo(id)
+
+    override suspend fun undoRemoval(id: DraftId) = itemActions.undo(id)
 
     override suspend fun editRecord(id: RecordId): DraftId = database.withTransaction {
         dao.activeEditId(id.value)?.let { return@withTransaction DraftId(it) }

@@ -24,6 +24,11 @@ interface MixedContentDrafts {
     suspend fun insertPhoto(id: DraftId, after: ItemId?, photo: PhotoId, caption: String = ""): ItemId
     suspend fun editTextItem(id: DraftId, itemId: ItemId, edit: TextEdit)
     suspend fun editPhotoCaption(id: DraftId, itemId: ItemId, caption: String)
+    suspend fun moveItem(id: DraftId, itemId: ItemId, direction: MoveDirection)
+    suspend fun removeItem(id: DraftId, itemId: ItemId)
+    /** 每份草稿可撤销最近一次移除；完成或放弃草稿后，该操作结束。 */
+    suspend fun canUndoRemoval(id: DraftId): Boolean
+    suspend fun undoRemoval(id: DraftId): Boolean
     suspend fun completeMixedDraft(id: DraftId): RecordId
     suspend fun completeMixedDraft(id: DraftId, itemId: ItemId, finalEdit: TextEdit): RecordId
 }
