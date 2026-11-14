@@ -14,7 +14,11 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 可通过[首版交互原型](docs/design/prototype.html)与[关键数据设计草案](docs/design/首版原型与关键数据设计.md)核对后续功能。浏览器原型使用内存示例。
 
-照片原图通过 [LocalPhotoOriginals](app/src/main/java/com/baconaa/folio/media/LocalPhotoOriginals.kt) 导入。将返回的 `PhotoId` 按顺序传给 `appendPhotos` 即可新建纯照片草稿或追加到已有草稿，重开后可用 `openDraftPhotos` 取回原图顺序。调用 `completeDraft` 后，`openRecordContent` 按正式记录 ID 一次读出正文和照片列表；打开其中任意原图使用 `openOriginal`。
+照片原图通过 [LocalPhotoOriginals](app/src/main/java/com/baconaa/folio/media/LocalPhotoOriginals.kt) 导入，用返回的 `PhotoId` 读取原图。同一原图可以出现在记录的多个位置，每处都有自己的内容项 ID 和照片说明。
+
+后端支持同一草稿内交错排列多段文字和照片。用 `saveDraft` 或 `appendPhotos` 起草，随后通过 [MixedContentDrafts](app/src/main/java/com/baconaa/folio/records/MixedContent.kt) 的 `insertText`、`insertPhoto` 追加或紧接指定项插入。`openMixedDraft` 一次读回完整顺序、当前项和光标。`completeMixedDraft` 提交后，`openRecordContent` 的 `items` 按相同顺序返回正式内容。
+
+`moveItem` 按相邻位置移动一项，`removeItem` 和 `undoRemoval` 支持移除和恢复最近一项。草稿重开后可以通过 `canUndoRemoval` 查询是否还能撤销；移除后对其他项的修改会保留。
 
 开发者和 AI 从[开发入口](AGENTS.md)定位本轮需求，按[开发流程](docs/engineering/开发流程.md)领卡、联调和验收。
 

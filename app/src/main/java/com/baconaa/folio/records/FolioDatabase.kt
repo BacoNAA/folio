@@ -21,6 +21,7 @@ internal data class DraftRow(
     val cursor: Int,
     val firstRecordedAt: Long,
     val lastEditedAt: Long,
+    val activeItemId: String? = null,
 )
 
 @Entity(tableName = "text_records", indices = [Index(value = ["sourceDraftId"], unique = true)])
@@ -65,19 +66,15 @@ internal interface TextDao {
     @Insert
     suspend fun insertDraft(row: DraftRow)
 
-    @Query("""UPDATE text_drafts SET body = :body, cursor = :cursor, lastEditedAt = :editedAt
+    @Query("""UPDATE text_drafts SET body = :body, cursor = :cursor, activeItemId = :activeItemId, lastEditedAt = :editedAt
               WHERE id = :id AND EXISTS (SELECT 1 FROM editable_text_drafts WHERE id = :id)""")
-    suspend fun updateDraft(id: String, body: String, cursor: Int, editedAt: Long): Int
+    suspend fun updateDraft(id: String, body: String, cursor: Int, activeItemId: String?, editedAt: Long): Int
 
-    @Query("""UPDATE text_drafts SET lastEditedAt = :editedAt
-              WHERE id = :id AND EXISTS (SELECT 1 FROM editable_text_drafts WHERE id = :id)""")
-    suspend fun touchDraft(id: String, editedAt: Long): Int
-
-    @Query("SELECT id, body, cursor, firstRecordedAt, lastEditedAt FROM editable_text_drafts WHERE id = :id")
+    @Query("SELECT id, body, cursor, firstRecordedAt, lastEditedAt, activeItemId FROM editable_text_drafts WHERE id = :id")
     suspend fun draft(id: String): DraftRow?
 
     @Query("""SELECT d.id, substr(d.body, 1, 80) AS excerpt, d.recordId,
-              (SELECT photoId FROM draft_photos WHERE draftId = d.id ORDER BY position LIMIT 1) AS firstPhotoId
+              (SELECT photoId FROM draft_items WHERE draftId = d.id AND photoId IS NOT NULL ORDER BY position LIMIT 1) AS firstPhotoId
               FROM editable_text_drafts d
               ORDER BY lastEditedAt DESC, insertionOrder DESC""")
     suspend fun listDrafts(): List<DraftPreviewRow>
@@ -116,7 +113,7 @@ internal interface TextDao {
 
     @Query(
         """SELECT r.id, substr(r.body, 1, 80) AS excerpt,
-           (SELECT photoId FROM record_photos WHERE recordId = r.id ORDER BY position LIMIT 1) AS firstPhotoId
+           (SELECT photoId FROM record_items WHERE recordId = r.id AND photoId IS NOT NULL ORDER BY position LIMIT 1) AS firstPhotoId
            FROM text_records r
            WHERE deletedAt IS NULL AND instr(lower(body), lower(:keyword)) > 0
            ORDER BY firstRecordedAt DESC, r.rowid DESC""",
@@ -128,12 +125,21 @@ internal interface TextDao {
 }
 
 @Database(
-    entities = [DraftRow::class, RecordRow::class, RecordEditRow::class, DraftPhotoRow::class, RecordPhotoRow::class],
+    entities = [
+        DraftRow::class, RecordRow::class, RecordEditRow::class,
+        DraftItemRow::class, RecordItemRow::class, RemovedItem::class,
+    ],
     views = [EditableDraftRow::class],
-    version = 3,
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
+    version = 5,
+    autoMigrations = [
+        AutoMigration(from = 1, to = 2),
+        AutoMigration(from = 2, to = 3),
+        AutoMigration(from = 3, to = 4, spec = MixedContentMigration::class),
+        AutoMigration(from = 4, to = 5),
+    ],
 )
 internal abstract class FolioDatabase : RoomDatabase() {
     abstract fun textDao(): TextDao
-    abstract fun photoDao(): RecordPhotoDao
+    abstract fun itemDao(): ContentItemDao
+    abstract fun removedItemDao(): RemovedItemDao
 }

@@ -12,28 +12,20 @@ class LocalTextStore internal constructor(
     private val database: FolioDatabase,
     private val originals: LocalPhotoOriginals,
     private val now: () -> Long = System::currentTimeMillis,
-) : TextDrafts, PublishedTextRecords {
+) : TextDrafts, PublishedTextRecords, MixedContentDrafts {
     private val dao = database.textDao()
-    private val photoDao = database.photoDao()
+    private val itemDao = database.itemDao()
+    private val itemActions = ContentItemActions(database, now)
 
-    override suspend fun appendPhotos(id: DraftId?, photos: List<PhotoId>): DraftId {
-        require(photos.isNotEmpty()) { "请选择照片" }
-        return database.withTransaction {
-            requireReadableOriginals(photos)
-            val timestamp = now()
-            val draftId = id ?: DraftId(UUID.randomUUID().toString())
-            if (id == null) {
-                dao.insertDraft(DraftRow(draftId.value, "", 0, timestamp, timestamp))
-            } else {
-                check(dao.touchDraft(id.value, timestamp) == 1) { "草稿已不存在" }
-            }
-            val start = photoDao.nextDraftPosition(draftId.value)
-            photoDao.insertDraftPhotos(draftId.value, photos.mapIndexed { offset, photo ->
-                PhotoSlot(itemId = UUID.randomUUID().toString(), photoId = photo.value.toString(), position = start + offset)
-            })
-            draftId
-        }
+    private suspend fun createDraft(): DraftId {
+        val id = DraftId(UUID.randomUUID().toString())
+        val timestamp = now()
+        dao.insertDraft(DraftRow(id.value, "", 0, timestamp, timestamp))
+        return id
     }
+
+    private suspend fun requireDraft(id: DraftId) =
+        checkNotNull(database.loadMixedDraft(id)) { "草稿已不存在" }
 
     private fun requireReadableOriginals(photos: List<PhotoId>) {
         for (photo in photos.distinct()) {
@@ -43,20 +35,76 @@ class LocalTextStore internal constructor(
         }
     }
 
-    override suspend fun openDraftPhotos(id: DraftId): List<PhotoId>? = database.withTransaction {
-        if (dao.draft(id.value) == null) null else photoDao.draftPhotos(id.value).map { it.photoId.asPhotoId() }
+    override suspend fun appendPhotos(id: DraftId?, photos: List<PhotoId>): DraftId {
+        require(photos.isNotEmpty()) { "请选择照片" }
+        return database.withTransaction {
+            val draftId = id ?: createDraft()
+            val items = photos.map { ContentItem.Photo(newItemId(), it) }
+            insertItems(draftId, null, items, 0)
+            draftId
+        }
     }
 
-    private fun String.asPhotoId() = PhotoId(UUID.fromString(this))
+    override suspend fun insertText(id: DraftId, after: ItemId?, edit: TextEdit): ItemId =
+        database.withTransaction {
+            val item = ContentItem.Text(newItemId(), edit.text)
+            insertItems(id, after, listOf(item), edit.cursor)
+            item.id
+        }
+
+    override suspend fun insertPhoto(id: DraftId, after: ItemId?, photo: PhotoId, caption: String): ItemId =
+        database.withTransaction {
+            val item = ContentItem.Photo(newItemId(), photo, caption)
+            insertItems(id, after, listOf(item), 0)
+            item.id
+        }
+
+    private suspend fun insertItems(id: DraftId, after: ItemId?, added: List<ContentItem>, cursor: Int) {
+        val draft = requireDraft(id)
+        val position = after?.let { draft.items.indexOfItem(it) + 1 } ?: draft.items.size
+        requireReadableOriginals(added.photos())
+        val items = draft.items.toMutableList().apply { addAll(position, added) }
+        database.writeMixedDraft(id, MixedDraft(items, added.last().id, cursor), now())
+    }
+
+    override suspend fun editTextItem(id: DraftId, itemId: ItemId, edit: TextEdit) = database.withTransaction {
+        database.writeMixedDraft(id, requireDraft(id).withText(itemId, edit), now())
+    }
+
+    override suspend fun editPhotoCaption(id: DraftId, itemId: ItemId, caption: String) = database.withTransaction {
+        val items = requireDraft(id).items.toMutableList()
+        val index = items.indexOfItem(itemId)
+        val photo = items[index] as? ContentItem.Photo ?: error("该项不是照片")
+        items[index] = photo.copy(caption = caption)
+        database.writeMixedDraft(id, MixedDraft(items, itemId, 0), now())
+    }
+
+    override suspend fun openMixedDraft(id: DraftId): MixedDraft? = database.withTransaction {
+        database.loadMixedDraft(id)
+    }
+
+    override suspend fun openDraftPhotos(id: DraftId): List<PhotoId>? = openMixedDraft(id)?.items?.photos()
+
+    override suspend fun moveItem(id: DraftId, itemId: ItemId, direction: MoveDirection) =
+        itemActions.move(id, itemId, direction)
+
+    override suspend fun removeItem(id: DraftId, itemId: ItemId) = itemActions.remove(id, itemId)
+
+    override suspend fun canUndoRemoval(id: DraftId) = itemActions.canUndo(id)
+
+    override suspend fun undoRemoval(id: DraftId) = itemActions.undo(id)
 
     override suspend fun editRecord(id: RecordId): DraftId = database.withTransaction {
         dao.activeEditId(id.value)?.let { return@withTransaction DraftId(it) }
         val record = checkNotNull(dao.activeRecord(id.value)) { "正式记录已不存在" }
-        val draftId = UUID.randomUUID().toString()
-        dao.insertDraft(DraftRow(draftId, record.body, record.body.length, record.firstRecordedAt, now()))
-        dao.insertEdit(RecordEditRow(draftId, record.id, record.revision))
-        photoDao.insertDraftPhotos(draftId, photoDao.recordPhotos(record.id))
-        DraftId(draftId)
+        val draftId = DraftId(UUID.randomUUID().toString())
+        val items = itemDao.recordItems(id.value)
+        val focus = items.firstOrNull()
+        dao.insertDraft(DraftRow(draftId.value, record.body, focus?.text?.length ?: 0,
+            record.firstRecordedAt, now(), activeItemId = focus?.itemId))
+        dao.insertEdit(RecordEditRow(draftId.value, record.id, record.revision))
+        itemDao.replaceDraftItems(draftId.value, items)
+        draftId
     }
 
     override suspend fun discardDraft(id: DraftId) {
@@ -66,18 +114,31 @@ class LocalTextStore internal constructor(
     }
 
     override suspend fun saveDraft(id: DraftId?, edit: TextEdit): DraftId? {
-        if (id != null) {
-            check(dao.updateDraft(id.value, edit.text, edit.cursor, now()) == 1) {
-                "草稿已不存在"
-            }
-            return id
+        if (id == null && edit.text.isBlank()) return null
+        return database.withTransaction {
+            val draftId = id ?: createDraft()
+            database.writeMixedDraft(draftId, requireDraft(draftId).withLegacyText(edit), now())
+            draftId
         }
-        if (edit.text.isBlank()) return null
+    }
 
-        val newId = DraftId(UUID.randomUUID().toString())
-        val timestamp = now()
-        dao.insertDraft(DraftRow(newId.value, edit.text, edit.cursor, timestamp, timestamp))
-        return newId
+    private fun MixedDraft.withLegacyText(edit: TextEdit): MixedDraft {
+        val paragraphs = items.filterIsInstance<ContentItem.Text>()
+        val first = paragraphs.firstOrNull()
+        if (first == null) {
+            if (edit.text.isEmpty()) return this
+            val item = ContentItem.Text(newItemId(), edit.text)
+            return MixedDraft(listOf(item) + items, item.id, edit.cursor)
+        }
+        if (paragraphs.size == 1) return withText(first.id, edit)
+        // A full-body replacement has no information about which side of a photo the edits belong to.
+        require(edit.text == items.body()) { "多段图文请按内容项保存文字" }
+        var remaining = edit.cursor
+        for (paragraph in paragraphs) {
+            if (remaining <= paragraph.text.length) return copy(activeItemId = paragraph.id, cursor = remaining)
+            remaining -= paragraph.text.length + 1
+        }
+        error("编辑位置超出正文范围")
     }
 
     override suspend fun listDrafts(): List<DraftPreview> =
@@ -88,27 +149,36 @@ class LocalTextStore internal constructor(
     override suspend fun openDraft(id: DraftId): TextEdit? =
         dao.draft(id.value)?.let { TextEdit(it.body, it.cursor) }
 
-    override suspend fun completeDraft(id: DraftId, finalEdit: TextEdit): RecordId =
+    override suspend fun completeDraft(id: DraftId, finalEdit: TextEdit) =
+        publish(id) { it.withLegacyText(finalEdit) }
+
+    override suspend fun completeMixedDraft(id: DraftId) = publish(id) { it }
+
+    override suspend fun completeMixedDraft(id: DraftId, itemId: ItemId, finalEdit: TextEdit) =
+        publish(id) { it.withText(itemId, finalEdit) }
+
+    private suspend fun publish(id: DraftId, finalState: (MixedDraft) -> MixedDraft): RecordId =
         database.withTransaction {
-            // A retry can arrive after the first transaction committed and removed the draft.
             dao.completedRecordId(id.value)?.let { return@withTransaction RecordId(it) }
             val draft = checkNotNull(dao.draft(id.value)) { "草稿已不存在" }
-            val photos = photoDao.draftPhotos(id.value)
-            require(finalEdit.text.isNotBlank() || photos.isNotEmpty()) { "请填写正文或添加照片后再完成" }
-            requireReadableOriginals(photos.map { it.photoId.asPhotoId() })
+            val items = finalState(requireDraft(id)).items
+            val body = items.body()
+            val photos = items.photos()
+            require(body.isNotBlank() || photos.isNotEmpty()) { "请填写正文或添加照片后再完成" }
+            requireReadableOriginals(photos)
+            val slots = items.map { it.asSlot() }
             val edit = dao.recordEdit(id.value)
             val recordId = if (edit == null) {
                 val newId = UUID.randomUUID().toString()
-                dao.insertRecord(RecordRow(newId, draft.id, finalEdit.text, draft.firstRecordedAt, now()))
-                if (photos.isNotEmpty()) photoDao.replaceRecordPhotos(newId, photos)
+                dao.insertRecord(RecordRow(newId, draft.id, body, draft.firstRecordedAt, now()))
+                itemDao.replaceRecordItems(newId, slots)
                 newId
             } else {
                 val record = checkNotNull(dao.activeRecord(edit.recordId)) { "正式记录已不存在" }
                 check(record.revision == edit.baseRevision) { "正式记录已更新，本次草稿已保留" }
-                val photosChanged = photos != photoDao.recordPhotos(record.id)
-                if (record.body != finalEdit.text || photosChanged) {
-                    dao.updateRecordContent(record.id, finalEdit.text, now())
-                    if (photosChanged) photoDao.replaceRecordPhotos(record.id, photos)
+                if (slots != itemDao.recordItems(record.id)) {
+                    dao.updateRecordContent(record.id, body, now())
+                    itemDao.replaceRecordItems(record.id, slots)
                 }
                 record.id
             }
@@ -119,9 +189,11 @@ class LocalTextStore internal constructor(
     override suspend fun search(keyword: String): List<RecordPreview> =
         dao.searchRecords(keyword).map { RecordPreview(RecordId(it.id), it.excerpt, it.firstPhotoId?.asPhotoId()) }
 
+    private fun String.asPhotoId() = PhotoId(UUID.fromString(this))
+
     override suspend fun openRecordContent(id: RecordId): RecordContent? = database.withTransaction {
-        val text = dao.recordBody(id.value) ?: return@withTransaction null
-        RecordContent(text, photoDao.recordPhotos(id.value).map { it.photoId.asPhotoId() })
+        if (dao.recordBody(id.value) == null) return@withTransaction null
+        RecordContent(itemDao.recordItems(id.value).map { it.asItem() })
     }
 
     override suspend fun openRecord(id: RecordId): String? = dao.recordBody(id.value)
