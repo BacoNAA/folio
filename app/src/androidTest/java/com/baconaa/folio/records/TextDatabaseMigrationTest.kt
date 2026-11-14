@@ -12,6 +12,9 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -113,6 +116,67 @@ class TextDatabaseMigrationTest {
             assertEquals(3, resumed.cursor)
         } finally {
             db.close()
+        }
+    }
+
+    @Test
+    fun versionFiveTrashKeepsMixedDraftAndRemovalWhenCleanupQueueIsIntroduced() = runBlocking {
+        val oldPhoto = PhotoId(UUID.randomUUID())
+        val draftPhoto = PhotoId(UUID.randomUUID())
+        val removedPhoto = PhotoId(UUID.randomUUID())
+        val text = ItemId("text")
+        val first = ItemId("first-photo")
+        val second = ItemId("second-photo")
+        val removed = ItemId("removed-photo")
+        createDatabase(5) { sql ->
+            sql.execSQL("INSERT INTO text_records VALUES ('record', 'source', '旧桥', 100, 200, 400, 3)")
+            sql.execSQL("INSERT INTO text_drafts VALUES ('edit', '新🌉桥', 3, 100, 300, 'text')")
+            sql.execSQL("INSERT INTO text_record_edits VALUES ('edit', 'record', 3)")
+            sql.execSQL("INSERT INTO record_items VALUES ('record', 0, 'text', '旧桥', NULL, '')")
+            sql.execSQL("INSERT INTO record_items VALUES ('record', 1, 'first-photo', NULL, ?, '原图说明')",
+                arrayOf(oldPhoto.value.toString()))
+            sql.execSQL("INSERT INTO draft_items VALUES ('edit', 0, 'text', '新🌉桥', NULL, '')")
+            sql.execSQL("INSERT INTO draft_items VALUES ('edit', 1, 'second-photo', NULL, ?, '草稿照片')",
+                arrayOf(draftPhoto.value.toString()))
+            sql.execSQL("""INSERT INTO removed_draft_items
+                (draftId, position, previousItemId, nextItemId, cursor, itemId, text, photoId, caption)
+                VALUES ('edit', 1, 'text', 'second-photo', 0, 'removed-photo', NULL, ?, '可撤销照片')""",
+                arrayOf(removedPhoto.value.toString()))
+        }
+
+        val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(database, LocalPhotoOriginals.get(context))
+            val record = RecordId("record")
+            val draft = DraftId("edit")
+            val publishedItems = listOf(ContentItem.Text(text, "旧桥"), ContentItem.Photo(first, oldPhoto, "原图说明"))
+            val draftItems = listOf(ContentItem.Text(text, "新🌉桥"), ContentItem.Photo(second, draftPhoto, "草稿照片"))
+            val trashed = requireNotNull(store.openTrashRecord(record))
+            assertEquals(publishedItems, trashed.content.items)
+            assertEquals(400L, trashed.deletedAt)
+            assertTrue(trashed.hasDraft)
+            assertEquals(listOf(record), store.listTrash().map { it.id })
+            assertNull(store.openRecordContent(record))
+            assertNull(store.openMixedDraft(draft))
+            assertTrue(store.listDrafts().isEmpty())
+            assertFalse(store.canUndoRemoval(draft))
+
+            assertTrue(store.restoreRecord(record))
+            assertEquals(publishedItems, store.openRecordContent(record)!!.items)
+            assertEquals(MixedDraft(draftItems, text, 3), store.openMixedDraft(draft))
+            assertEquals(draft, store.editRecord(record))
+            val restored = requireNotNull(database.textDao().activeRecord(record.value))
+            assertEquals(100L, restored.firstRecordedAt)
+            assertEquals(200L, restored.modifiedAt)
+            assertEquals(3L, restored.revision)
+            assertTrue(store.canUndoRemoval(draft))
+            assertTrue(store.undoRemoval(draft))
+            val restoredItems = listOf(draftItems[0], ContentItem.Photo(removed, removedPhoto, "可撤销照片"), draftItems[1])
+            assertEquals(MixedDraft(restoredItems, removed, 0), store.openMixedDraft(draft))
+            assertEquals(publishedItems, store.openRecordContent(record)!!.items)
+            assertFalse(store.canUndoRemoval(draft))
+        } finally {
+            database.close()
         }
     }
 

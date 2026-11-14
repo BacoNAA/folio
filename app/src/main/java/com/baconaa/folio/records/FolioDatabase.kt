@@ -96,9 +96,10 @@ internal interface TextDao {
 
     // An edit keeps its link after completion so older retries can find the record.
     // Discard removes both the draft and its link.
-    @Query("""SELECT id FROM text_records WHERE sourceDraftId = :draftId
+    @Query("""SELECT id FROM text_records WHERE sourceDraftId = :draftId AND deletedAt IS NULL
               UNION ALL
-              SELECT recordId FROM text_record_edits WHERE draftId = :draftId
+              SELECT e.recordId FROM text_record_edits e JOIN text_records r ON r.id = e.recordId
+              WHERE e.draftId = :draftId AND r.deletedAt IS NULL
               AND NOT EXISTS (SELECT 1 FROM text_drafts WHERE id = :draftId)""")
     suspend fun completedRecordId(draftId: String): String?
 
@@ -127,19 +128,22 @@ internal interface TextDao {
 @Database(
     entities = [
         DraftRow::class, RecordRow::class, RecordEditRow::class,
-        DraftItemRow::class, RecordItemRow::class, RemovedItem::class,
+        DraftItemRow::class, RecordItemRow::class, RemovedItem::class, PhotoCleanupEntry::class,
     ],
     views = [EditableDraftRow::class],
-    version = 5,
+    version = 6,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
         AutoMigration(from = 3, to = 4, spec = MixedContentMigration::class),
         AutoMigration(from = 4, to = 5),
+        AutoMigration(from = 5, to = 6),
     ],
 )
 internal abstract class FolioDatabase : RoomDatabase() {
     abstract fun textDao(): TextDao
     abstract fun itemDao(): ContentItemDao
     abstract fun removedItemDao(): RemovedItemDao
+    abstract fun trashDao(): TrashDao
+    abstract fun photoCleanupDao(): PhotoCleanupDao
 }

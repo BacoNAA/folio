@@ -61,6 +61,11 @@ class LocalPhotoOriginals private constructor(private val context: Context) {
     /** 在 I/O 线程读取，调用方负责关闭返回的流。 */
     fun openOriginal(id: PhotoId): InputStream = original(id).inputStream()
 
+    /** 仅由引用清理在确认无引用后调用；已不存在视为清理成功。 */
+    internal fun deleteOriginal(id: PhotoId) {
+        Files.deleteIfExists(original(id).toPath())
+    }
+
     private fun original(id: PhotoId) = File(originals, id.value.toString())
 
     companion object {

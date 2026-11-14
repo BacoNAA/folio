@@ -41,6 +41,8 @@ internal abstract class PhotoStoreFixture {
 
     protected class ImportedPhoto(val id: PhotoId, val bytes: ByteArray)
 
+    protected fun originalFile(id: PhotoId) = File(context.filesDir, "photo-originals/${id.value}")
+
     protected suspend fun importPhoto(color: Int): ImportedPhoto {
         val source = File.createTempFile("photo-source-", ".png", context.cacheDir)
         try {
