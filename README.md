@@ -6,6 +6,8 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 ## 当前进度
 
+项目已进入第一轮安卓开发。工程起步、文字与照片保存、已有记录编辑及图文混排后端已合入主线，编辑与搜索页面仍待接入。具体提交依据、T1—T3 状态及待验收项统一见[当前开发进度](docs/engineering/开发流程.md#当前开发进度)。代码已合入不等于完整功能已验收。
+
 当前 APK 可打开「随手记」并切换到「记录」。本机 Room 后端支持新建、续写和放弃文字草稿，也可按正文搜索并打开正式记录。编辑已有记录时，搜索和详情继续显示原文，完成后按原 ID 读取新正文。前端可通过 `LocalTextStore.get(context)` 获取 [TextDrafts 和 PublishedTextRecords](app/src/main/java/com/baconaa/folio/records/TextRecords.kt)，编辑与搜索页面待接入。
 
 已按[整体需求审查](docs/requirements/整体需求审查.md)整理正文、子操作、共同规则和前置关系，并将已确认的功能边界写入正文。剩余范围与已确认结论索引集中见[待确认问题](docs/requirements/待确认问题.md)。
