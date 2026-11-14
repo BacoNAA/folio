@@ -12,9 +12,10 @@ class LocalTextStore internal constructor(
     private val database: FolioDatabase,
     private val originals: LocalPhotoOriginals,
     private val now: () -> Long = System::currentTimeMillis,
-) : TextDrafts, PublishedTextRecords, MixedContentDrafts {
+) : TextDrafts, PublishedTextRecords, MixedContentDrafts, RecordTrash {
     private val dao = database.textDao()
     private val itemDao = database.itemDao()
+    private val trashDao = database.trashDao()
     private val itemActions = ContentItemActions(database, now)
 
     private suspend fun createDraft(): DraftId {
@@ -197,6 +198,22 @@ class LocalTextStore internal constructor(
     }
 
     override suspend fun openRecord(id: RecordId): String? = dao.recordBody(id.value)
+
+    override suspend fun moveToTrash(id: RecordId): Boolean = trashDao.moveToTrash(id.value, now()) == 1
+
+    override suspend fun restoreRecord(id: RecordId): Boolean = trashDao.restore(id.value) == 1
+
+    override suspend fun listTrash(): List<TrashPreview> = trashDao.listTrash().map {
+        TrashPreview(RecordId(it.id), it.excerpt, it.firstPhotoId?.asPhotoId(), it.deletedAt, it.hasDraft)
+    }
+
+    override suspend fun openTrashRecord(id: RecordId): TrashedRecord? = database.withTransaction {
+        val record = trashDao.trashedRecord(id.value) ?: return@withTransaction null
+        TrashedRecord(
+            id, RecordContent(itemDao.recordItems(id.value).map { it.asItem() }),
+            checkNotNull(record.deletedAt), trashDao.hasDraft(id.value),
+        )
+    }
 
     companion object {
         private var instance: LocalTextStore? = null
