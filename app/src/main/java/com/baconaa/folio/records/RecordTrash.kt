@@ -17,6 +17,9 @@ data class TrashedRecord(
     val hasDraft: Boolean,
 )
 
+/** pendingPhotoCount 为 null 时清理暂不可用，记录删除结果仍以 deleted 为准。 */
+data class PermanentDeletionResult(val deleted: Boolean, val pendingPhotoCount: Int?)
+
 /** 回收站只读展示最后完成的内容；编辑草稿随正式记录一起隐藏和恢复。 */
 interface RecordTrash {
     /** 已删除或不存在时返回 false；保留内容、草稿、照片和内容修改时间。 */
@@ -30,4 +33,13 @@ interface RecordTrash {
 
     /** 读取正式版本和草稿存在标记；记录未在回收站时返回 null。 */
     suspend fun openTrashRecord(id: RecordId): TrashedRecord?
+
+    /**
+     * 页面确认后调用，仅允许彻底删除回收站记录及其草稿；有效记录会拒绝删除。
+     * 重复调用 deleted 为 false。文件清理失败不恢复已删记录，待清理数在结果中返回。
+     */
+    suspend fun deletePermanently(id: RecordId): PermanentDeletionResult
+
+    /** 重试此前中断或失败的原图清理，返回仍待清理的数量；不扫描未绑定的导入文件。 */
+    suspend fun retryPhotoCleanup(): Int
 }

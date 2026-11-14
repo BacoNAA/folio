@@ -1,6 +1,8 @@
 package com.baconaa.folio.records
 
 import android.content.Context
+import android.database.sqlite.SQLiteException
+import android.util.Log
 import androidx.room.Room
 import androidx.room.withTransaction
 import com.baconaa.folio.media.LocalPhotoOriginals
@@ -17,6 +19,16 @@ class LocalTextStore internal constructor(
     private val itemDao = database.itemDao()
     private val trashDao = database.trashDao()
     private val itemActions = ContentItemActions(database, now)
+    private val cleanupQueue = database.photoCleanupDao()
+    private val photoCleanup = PhotoCleanup(database, originals)
+
+    private suspend fun cleanPhotosAfterCommit(): Int? = try {
+        photoCleanup.run()
+    } catch (_: SQLiteException) {
+        // 内容已提交，清理故障不能被报成保存或删除失败。队列随库保留供单独重试。
+        Log.w("Folio", "内容操作已完成，原图清理暂不可用，可稍后重试")
+        null
+    }
 
     private suspend fun createDraft(): DraftId {
         val id = DraftId(UUID.randomUUID().toString())
@@ -89,7 +101,14 @@ class LocalTextStore internal constructor(
     override suspend fun moveItem(id: DraftId, itemId: ItemId, direction: MoveDirection) =
         itemActions.move(id, itemId, direction)
 
-    override suspend fun removeItem(id: DraftId, itemId: ItemId) = itemActions.remove(id, itemId)
+    override suspend fun removeItem(id: DraftId, itemId: ItemId) {
+        database.withTransaction {
+            requireDraft(id)
+            cleanupQueue.enqueueDraft(id.value)
+            itemActions.remove(id, itemId)
+        }
+        cleanPhotosAfterCommit()
+    }
 
     override suspend fun canUndoRemoval(id: DraftId) = itemActions.canUndo(id)
 
@@ -110,8 +129,13 @@ class LocalTextStore internal constructor(
 
     override suspend fun discardDraft(id: DraftId) {
         database.withTransaction {
-            if (dao.deleteDraft(id.value) == 1) dao.deleteEdit(id.value)
+            if (dao.draft(id.value) != null) {
+                cleanupQueue.enqueueDraft(id.value)
+                check(dao.deleteDraft(id.value) == 1) { "未能放弃草稿" }
+                dao.deleteEdit(id.value)
+            }
         }
+        cleanPhotosAfterCommit()
     }
 
     override suspend fun saveDraft(id: DraftId?, edit: TextEdit): DraftId? {
@@ -158,8 +182,8 @@ class LocalTextStore internal constructor(
     override suspend fun completeMixedDraft(id: DraftId, itemId: ItemId, finalEdit: TextEdit) =
         publish(id) { it.withText(itemId, finalEdit) }
 
-    private suspend fun publish(id: DraftId, finalState: (MixedDraft) -> MixedDraft): RecordId =
-        database.withTransaction {
+    private suspend fun publish(id: DraftId, finalState: (MixedDraft) -> MixedDraft): RecordId {
+        val result = database.withTransaction {
             dao.completedRecordId(id.value)?.let { return@withTransaction RecordId(it) }
             val draft = checkNotNull(dao.draft(id.value)) { "草稿已不存在" }
             val items = finalState(requireDraft(id)).items
@@ -167,6 +191,7 @@ class LocalTextStore internal constructor(
             val photos = items.photos()
             require(body.isNotBlank() || photos.isNotEmpty()) { "请填写正文或添加照片后再完成" }
             requireReadableOriginals(photos)
+            cleanupQueue.enqueueDraft(id.value)
             val slots = items.map { it.asSlot() }
             val edit = dao.recordEdit(id.value)
             val recordId = if (edit == null) {
@@ -178,6 +203,7 @@ class LocalTextStore internal constructor(
                 val record = checkNotNull(dao.activeRecord(edit.recordId)) { "正式记录已不存在" }
                 check(record.revision == edit.baseRevision) { "正式记录已更新，本次草稿已保留" }
                 if (slots != itemDao.recordItems(record.id)) {
+                    cleanupQueue.enqueueRecord(record.id)
                     dao.updateRecordContent(record.id, body, now())
                     itemDao.replaceRecordItems(record.id, slots)
                 }
@@ -186,6 +212,9 @@ class LocalTextStore internal constructor(
             check(dao.deleteDraft(draft.id) == 1) { "未能移除已完成的草稿" }
             RecordId(recordId)
         }
+        cleanPhotosAfterCommit()
+        return result
+    }
 
     override suspend fun search(keyword: String): List<RecordPreview> =
         dao.searchRecords(keyword).map { RecordPreview(RecordId(it.id), it.excerpt, it.firstPhotoId?.asPhotoId()) }
@@ -214,6 +243,23 @@ class LocalTextStore internal constructor(
             checkNotNull(record.deletedAt), trashDao.hasDraft(id.value),
         )
     }
+
+    override suspend fun deletePermanently(id: RecordId): PermanentDeletionResult {
+        val deleted = database.withTransaction {
+            if (trashDao.trashedRecord(id.value) == null) {
+                check(dao.activeRecord(id.value) == null) { "请先将记录移入回收站" }
+                return@withTransaction false
+            }
+            cleanupQueue.enqueueRecord(id.value)
+            trashDao.editingDraftIds(id.value).forEach { cleanupQueue.enqueueDraft(it) }
+            trashDao.deleteEditingDrafts(id.value)
+            check(trashDao.deletePermanently(id.value) == 1) { "未能彻底删除记录" }
+            true
+        }
+        return PermanentDeletionResult(deleted, cleanPhotosAfterCommit())
+    }
+
+    override suspend fun retryPhotoCleanup(): Int = photoCleanup.run()
 
     companion object {
         private var instance: LocalTextStore? = null

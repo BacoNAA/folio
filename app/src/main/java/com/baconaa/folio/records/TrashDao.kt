@@ -32,4 +32,15 @@ internal interface TrashDao {
     @Query("""SELECT EXISTS(SELECT 1 FROM text_record_edits e
               JOIN text_drafts d ON d.id = e.draftId WHERE e.recordId = :id)""")
     suspend fun hasDraft(id: String): Boolean
+
+    @Query("""SELECT d.id FROM text_drafts d JOIN text_record_edits e ON e.draftId = d.id
+              WHERE e.recordId = :id""")
+    suspend fun editingDraftIds(id: String): List<String>
+
+    // 隐藏草稿不能走普通放弃入口；必须在删父记录及其关联之前删除。
+    @Query("DELETE FROM text_drafts WHERE id IN (SELECT draftId FROM text_record_edits WHERE recordId = :id)")
+    suspend fun deleteEditingDrafts(id: String)
+
+    @Query("DELETE FROM text_records WHERE id = :id AND deletedAt IS NOT NULL")
+    suspend fun deletePermanently(id: String): Int
 }

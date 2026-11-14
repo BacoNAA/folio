@@ -24,6 +24,8 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 删除与恢复使用 [RecordTrash](app/src/main/java/com/baconaa/folio/records/RecordTrash.kt)：`moveToTrash` 将正式记录和编辑草稿一起隐藏，`listTrash` 与 `openTrashRecord` 只展示上次完成的内容并通过 `hasDraft` 提示未完成修改；`restoreRecord` 用于立即撤销或从回收站恢复，两份内容保持独立。重复删除或恢复返回 `false`。页面负责删除确认、撤销提示和浏览位置，回收站与编辑页面均待接入。
 
+用户确认后调用 `deletePermanently`，在同一事务中彻底删除回收站记录、编辑草稿和撤销项。完成、放弃、覆盖最近移除及彻底删除都会收集释放的原图候选，提交后只删除已无任何引用的 Folio 文件。`pendingPhotoCount` 表示删除后仍待清理的数量，`null` 表示清理暂不可用；文件清理失败不改变已完成的记录删除。`retryPhotoCleanup` 可在重开应用后重试持久队列。清理不扫描尚未绑定的新导入文件，也不触及系统相册来源。Room v6 新增清理队列，已有记录及草稿通过迁移保留。
+
 开发者和 AI 从[开发入口](AGENTS.md)定位本轮需求，按[开发流程](docs/engineering/开发流程.md)领卡、联调和验收。
 
 ## 构建和试用调试版
