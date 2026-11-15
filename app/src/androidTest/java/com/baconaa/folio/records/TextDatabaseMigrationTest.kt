@@ -7,6 +7,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.baconaa.folio.media.LocalPhotoOriginals
 import com.baconaa.folio.media.PhotoId
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
@@ -175,6 +177,49 @@ class TextDatabaseMigrationTest {
             assertEquals(MixedDraft(restoredItems, removed, 0), store.openMixedDraft(draft))
             assertEquals(publishedItems, store.openRecordContent(record)!!.items)
             assertFalse(store.canUndoRemoval(draft))
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun versionSixKeepsExistingTimesContentAndCleanupQueueWithUnknownEventTime() = runBlocking {
+        val pendingPhoto = PhotoId(UUID.randomUUID())
+        createDatabase(6) { sql ->
+            sql.execSQL("INSERT INTO text_records VALUES ('record', 'source', '旧桥', 100, 200, NULL, 3)")
+            sql.execSQL("INSERT INTO text_drafts VALUES ('edit', '新桥', 1, 100, 300, 'text')")
+            sql.execSQL("INSERT INTO text_drafts VALUES ('unfinished', '等雨停', 2, 400, 500, 'unfinished-text')")
+            sql.execSQL("INSERT INTO text_record_edits VALUES ('edit', 'record', 3)")
+            sql.execSQL("INSERT INTO record_items VALUES ('record', 0, 'text', '旧桥', NULL, '')")
+            sql.execSQL("INSERT INTO draft_items VALUES ('edit', 0, 'text', '新桥', NULL, '')")
+            sql.execSQL("INSERT INTO draft_items VALUES ('unfinished', 0, 'unfinished-text', '等雨停', NULL, '')")
+            sql.execSQL("INSERT INTO photo_cleanup_queue VALUES (?)", arrayOf(pendingPhoto.value.toString()))
+        }
+
+        val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), now = { 600L })
+            val record = RecordId("record")
+            val draft = DraftId("edit")
+            val unfinished = DraftId("unfinished")
+            val published = requireNotNull(store.openRecordContent(record))
+            assertEquals(listOf(ContentItem.Text(ItemId("text"), "旧桥")), published.items)
+            assertEquals(RecordTimes(100L, 200L, null), published.times)
+            assertEquals(DraftTimes(100L, null), store.openDraftTimes(draft))
+            assertEquals(DraftTimes(400L, null), store.openDraftTimes(unfinished))
+            assertEquals(TextEdit("新桥", 1), store.openDraft(draft))
+            assertEquals(TextEdit("等雨停", 2), store.openDraft(unfinished))
+            assertEquals(draft, store.editRecord(record))
+            assertEquals(3L, database.textDao().activeRecord(record.value)!!.revision)
+            assertEquals(listOf(pendingPhoto.value.toString()), database.photoCleanupDao().candidates())
+
+            val event = EventTime(LocalDate.of(2021, 7, 9), zone = ZoneId.of("Asia/Shanghai"))
+            store.saveDraftEventTime(draft, event)
+            assertEquals(DraftTimes(100L, event), store.openDraftTimes(draft))
+            assertEquals(published, store.openRecordContent(record))
+            assertEquals(record, store.completeMixedDraft(draft))
+            assertEquals("新桥", store.openRecord(record))
+            assertEquals(RecordTimes(100L, 600L, event), store.openRecordContent(record)!!.times)
         } finally {
             database.close()
         }

@@ -14,7 +14,7 @@ class LocalTextStore internal constructor(
     private val database: FolioDatabase,
     private val originals: LocalPhotoOriginals,
     private val now: () -> Long = System::currentTimeMillis,
-) : TextDrafts, PublishedTextRecords, MixedContentDrafts, RecordTrash {
+) : TextDrafts, PublishedTextRecords, MixedContentDrafts, RecordTrash, RecordTimeEditing {
     private val dao = database.textDao()
     private val itemDao = database.itemDao()
     private val trashDao = database.trashDao()
@@ -30,10 +30,10 @@ class LocalTextStore internal constructor(
         null
     }
 
-    private suspend fun createDraft(): DraftId {
+    private suspend fun createDraft(eventTime: EventTime?): DraftId {
         val id = DraftId(UUID.randomUUID().toString())
         val timestamp = now()
-        dao.insertDraft(DraftRow(id.value, "", 0, timestamp, timestamp))
+        dao.insertDraft(DraftRow(id.value, "", 0, timestamp, timestamp, eventTime = eventTime?.asFields()))
         return id
     }
 
@@ -48,10 +48,10 @@ class LocalTextStore internal constructor(
         }
     }
 
-    override suspend fun appendPhotos(id: DraftId?, photos: List<PhotoId>): DraftId {
+    override suspend fun appendPhotos(id: DraftId?, photos: List<PhotoId>, initialEventTime: EventTime?): DraftId {
         require(photos.isNotEmpty()) { "请选择照片" }
         return database.withTransaction {
-            val draftId = id ?: createDraft()
+            val draftId = id ?: createDraft(initialEventTime)
             val items = photos.map { ContentItem.Photo(newItemId(), it) }
             insertItems(draftId, null, items, 0)
             draftId
@@ -121,7 +121,7 @@ class LocalTextStore internal constructor(
         val items = itemDao.recordItems(id.value)
         val focus = items.firstOrNull()
         dao.insertDraft(DraftRow(draftId.value, record.body, focus?.text?.length ?: 0,
-            record.firstRecordedAt, now(), activeItemId = focus?.itemId))
+            record.firstRecordedAt, now(), activeItemId = focus?.itemId, eventTime = record.eventTime))
         dao.insertEdit(RecordEditRow(draftId.value, record.id, record.revision))
         itemDao.replaceDraftItems(draftId.value, items)
         draftId
@@ -138,10 +138,10 @@ class LocalTextStore internal constructor(
         cleanPhotosAfterCommit()
     }
 
-    override suspend fun saveDraft(id: DraftId?, edit: TextEdit): DraftId? {
+    override suspend fun saveDraft(id: DraftId?, edit: TextEdit, initialEventTime: EventTime?): DraftId? {
         if (id == null && edit.text.isBlank()) return null
         return database.withTransaction {
-            val draftId = id ?: createDraft()
+            val draftId = id ?: createDraft(initialEventTime)
             database.writeMixedDraft(draftId, requireDraft(draftId).withLegacyText(edit), now())
             draftId
         }
@@ -174,6 +174,16 @@ class LocalTextStore internal constructor(
     override suspend fun openDraft(id: DraftId): TextEdit? =
         dao.draft(id.value)?.let { TextEdit(it.body, it.cursor) }
 
+    override suspend fun openDraftTimes(id: DraftId): DraftTimes? =
+        dao.draft(id.value)?.let { DraftTimes(it.firstRecordedAt, it.eventTime?.asEventTime()) }
+
+    override suspend fun saveDraftEventTime(id: DraftId, eventTime: EventTime?) {
+        val fields = eventTime?.asFields()
+        check(dao.updateDraftTime(id.value, fields?.eventDate, fields?.eventClock, fields?.eventZone, now()) == 1) {
+            "草稿已不存在"
+        }
+    }
+
     override suspend fun completeDraft(id: DraftId, finalEdit: TextEdit) =
         publish(id) { it.withLegacyText(finalEdit) }
 
@@ -196,15 +206,16 @@ class LocalTextStore internal constructor(
             val edit = dao.recordEdit(id.value)
             val recordId = if (edit == null) {
                 val newId = UUID.randomUUID().toString()
-                dao.insertRecord(RecordRow(newId, draft.id, body, draft.firstRecordedAt, now()))
+                dao.insertRecord(RecordRow(newId, draft.id, body, draft.firstRecordedAt, now(), eventTime = draft.eventTime))
                 itemDao.replaceRecordItems(newId, slots)
                 newId
             } else {
                 val record = checkNotNull(dao.activeRecord(edit.recordId)) { "正式记录已不存在" }
                 check(record.revision == edit.baseRevision) { "正式记录已更新，本次草稿已保留" }
-                if (slots != itemDao.recordItems(record.id)) {
+                if (slots != itemDao.recordItems(record.id) || draft.eventTime != record.eventTime) {
                     cleanupQueue.enqueueRecord(record.id)
-                    dao.updateRecordContent(record.id, body, now())
+                    val time = draft.eventTime
+                    dao.updateRecordContent(record.id, body, now(), time?.eventDate, time?.eventClock, time?.eventZone)
                     itemDao.replaceRecordItems(record.id, slots)
                 }
                 record.id
@@ -222,8 +233,8 @@ class LocalTextStore internal constructor(
     private fun String.asPhotoId() = PhotoId(UUID.fromString(this))
 
     override suspend fun openRecordContent(id: RecordId): RecordContent? = database.withTransaction {
-        if (dao.recordBody(id.value) == null) return@withTransaction null
-        RecordContent(itemDao.recordItems(id.value).map { it.asItem() })
+        val record = dao.activeRecord(id.value) ?: return@withTransaction null
+        RecordContent(itemDao.recordItems(id.value).map { it.asItem() }, record.times())
     }
 
     override suspend fun openRecord(id: RecordId): String? = dao.recordBody(id.value)
@@ -239,7 +250,7 @@ class LocalTextStore internal constructor(
     override suspend fun openTrashRecord(id: RecordId): TrashedRecord? = database.withTransaction {
         val record = trashDao.trashedRecord(id.value) ?: return@withTransaction null
         TrashedRecord(
-            id, RecordContent(itemDao.recordItems(id.value).map { it.asItem() }),
+            id, RecordContent(itemDao.recordItems(id.value).map { it.asItem() }, record.times()),
             checkNotNull(record.deletedAt), trashDao.hasDraft(id.value),
         )
     }

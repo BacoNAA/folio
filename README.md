@@ -6,7 +6,7 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 ## 当前进度
 
-项目已进入第一轮安卓开发。工程起步、文字与照片保存、已有记录编辑及图文混排后端已合入主线，编辑与搜索页面仍待接入。具体提交依据、T1—T3 状态及待验收项统一见[当前开发进度](docs/engineering/开发流程.md#当前开发进度)。代码已合入不等于完整功能已验收。
+项目已进入第一轮安卓开发，编辑、搜索与回收站页面仍待接入。具体后端范围、提交与合入状态、T1—T3 状态及待验收项统一见[当前开发进度](docs/engineering/开发流程.md#当前开发进度)。代码已合入不等于完整功能已验收。
 
 当前 APK 可打开「随手记」并切换到「记录」。本机 Room 后端支持新建、续写和放弃文字草稿，也可按正文搜索并打开正式记录。编辑已有记录时，搜索和详情继续显示原文，完成后按原 ID 读取新正文。前端可通过 `LocalTextStore.get(context)` 获取 [TextDrafts 和 PublishedTextRecords](app/src/main/java/com/baconaa/folio/records/TextRecords.kt)，编辑与搜索页面待接入。
 
@@ -21,6 +21,8 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 后端支持同一草稿内交错排列多段文字和照片。用 `saveDraft` 或 `appendPhotos` 起草，随后通过 [MixedContentDrafts](app/src/main/java/com/baconaa/folio/records/MixedContent.kt) 的 `insertText`、`insertPhoto` 追加或紧接指定项插入。`openMixedDraft` 一次读回完整顺序、当前项和光标。`completeMixedDraft` 提交后，`openRecordContent` 的 `items` 按相同顺序返回正式内容。
 
 `moveItem` 按相邻位置移动一项，`removeItem` 和 `undoRemoval` 支持移除和恢复最近一项。草稿重开后可以通过 `canUndoRemoval` 查询是否还能撤销；移除后对其他项的修改会保留。
+
+事件时间通过 [RecordTimeEditing](app/src/main/java/com/baconaa/folio/records/RecordTime.kt) 保存。新建的 `saveDraft`、`appendPhotos` 可传 `initialEventTime`，随第一份实际内容原子落盘；参数仅在新建时生效。现场默认“现在”由前端选择并传入，补记或未确认照片时间可传 `null`，后端不推断。已有草稿用 `saveDraftEventTime` 修改或清空，`openDraftTimes` 读回；`openRecordContent.times` 返回最后完成的事件时间、首次记录时间和修改时间，回收站详情同样保留正式时间。日期与可选时刻保持事件原时区的当地表达。Room v7 增加事件时间字段，旧记录与草稿迁移后事件时间仍为空。
 
 删除与恢复使用 [RecordTrash](app/src/main/java/com/baconaa/folio/records/RecordTrash.kt)：`moveToTrash` 将正式记录和编辑草稿一起隐藏，`listTrash` 与 `openTrashRecord` 只展示上次完成的内容并通过 `hasDraft` 提示未完成修改；`restoreRecord` 用于立即撤销或从回收站恢复，两份内容保持独立。重复删除或恢复返回 `false`。页面负责删除确认、撤销提示和浏览位置，回收站与编辑页面均待接入。
 
