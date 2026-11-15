@@ -24,6 +24,10 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 事件时间通过 [RecordTimeEditing](app/src/main/java/com/baconaa/folio/records/RecordTime.kt) 保存。新建的 `saveDraft`、`appendPhotos` 可传 `initialEventTime`，随第一份实际内容原子落盘；参数仅在新建时生效。现场默认“现在”由前端选择并传入，补记或未确认照片时间可传 `null`，后端不推断。已有草稿用 `saveDraftEventTime` 修改或清空，`openDraftTimes` 读回；`openRecordContent.times` 返回最后完成的事件时间、首次记录时间和修改时间，回收站详情同样保留正式时间。日期与可选时刻保持事件原时区的当地表达。Room v7 增加事件时间字段，旧记录与草稿迁移后事件时间仍为空。
 
+双时间浏览使用 [RecordBrowsing](app/src/main/java/com/baconaa/folio/records/RecordBrowsing.kt)：`listEventTimeline` 按当地年份及日期降序返回 `years`，未填写事件时间的记录单列在 `undated`；`listRecentRecords` 按首次记录时间降序返回全部有效正式记录，卡片继续保留事件时间。日期相同的记录沿用最近记录顺序作为稳定展示约定，不据此推断同日实际先后。首次记录时间相同时按入库顺序降序。新建草稿与回收站不进入两种列表，未完成修改不改变正式预览。
+
+浏览卡片的 `preview` 按图文原顺序展示最多三个非空白内容项，每项文字及照片说明截取前 80 个 Unicode 码点；重复使用的照片仍按各自内容项计数。`remainingItemCount` 和 `remainingPhotoCount` 表示未展示的非空白项及其中照片项数量。预览只供展示，不能回存为完整内容；详情通过同一 `RecordId` 调用 `openRecordContent`，读取全文及时间信息。本批列表为全量读取，尚未引入分页，前端列表与时间填写控件待接入。
+
 删除与恢复使用 [RecordTrash](app/src/main/java/com/baconaa/folio/records/RecordTrash.kt)：`moveToTrash` 将正式记录和编辑草稿一起隐藏，`listTrash` 与 `openTrashRecord` 只展示上次完成的内容并通过 `hasDraft` 提示未完成修改；`restoreRecord` 用于立即撤销或从回收站恢复，两份内容保持独立。重复删除或恢复返回 `false`。页面负责删除确认、撤销提示和浏览位置，回收站与编辑页面均待接入。
 
 用户确认后调用 `deletePermanently`，在同一事务中彻底删除回收站记录、编辑草稿和撤销项。完成、放弃、覆盖最近移除及彻底删除都会收集释放的原图候选，提交后只删除已无任何引用的 Folio 文件。`pendingPhotoCount` 表示删除后仍待清理的数量，`null` 表示清理暂不可用；文件清理失败不改变已完成的记录删除。`retryPhotoCleanup` 可在重开应用后重试持久队列。清理不扫描尚未绑定的新导入文件，也不触及系统相册来源。Room v6 新增清理队列，已有记录及草稿通过迁移保留。
@@ -38,7 +42,7 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 .\gradlew.bat :app:testDebugUnitTest :app:assembleDebug
 ```
 
-产物位于 `app/build/outputs/apk/debug/app-debug.apk`。连接 Android 10（API 29）及以上测试设备后，运行 `.\gradlew.bat :app:installDebug` 安装，再从桌面打开 Folio。运行 `.\gradlew.bat :app:connectedDebugAndroidTest` 验证导航、Room 保存与查询、照片、图文混排、删除恢复及数据库迁移。macOS 和 Linux 使用 `bash ./gradlew` 和相同任务名。
+产物位于 `app/build/outputs/apk/debug/app-debug.apk`。连接 Android 10（API 29）及以上测试设备后，运行 `.\gradlew.bat :app:installDebug` 安装，再从桌面打开 Folio。运行 `.\gradlew.bat :app:connectedDebugAndroidTest` 验证导航、Room 保存与查询、照片、图文混排、删除恢复、事件时间与浏览及数据库迁移。macOS 和 Linux 使用 `bash ./gradlew` 和相同任务名。
 
 [Android CI](.github/workflows/android.yml) 在面向 `main` 的 PR 和 `main` 推送时运行单测、组装调试包并上传 `folio-debug`。应用或构建配置变更的 PR，以及合入 `main` 后的构建，还在 API 29 模拟器执行设备集成测试。
 

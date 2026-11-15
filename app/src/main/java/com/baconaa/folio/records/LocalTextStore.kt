@@ -14,7 +14,8 @@ class LocalTextStore internal constructor(
     private val database: FolioDatabase,
     private val originals: LocalPhotoOriginals,
     private val now: () -> Long = System::currentTimeMillis,
-) : TextDrafts, PublishedTextRecords, MixedContentDrafts, RecordTrash, RecordTimeEditing {
+) : TextDrafts, PublishedTextRecords, MixedContentDrafts, RecordTrash, RecordTimeEditing,
+    RecordBrowsing by LocalRecordBrowsing(database) {
     private val dao = database.textDao()
     private val itemDao = database.itemDao()
     private val trashDao = database.trashDao()

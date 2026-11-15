@@ -154,4 +154,5 @@ internal abstract class FolioDatabase : RoomDatabase() {
     abstract fun removedItemDao(): RemovedItemDao
     abstract fun trashDao(): TrashDao
     abstract fun photoCleanupDao(): PhotoCleanupDao
+    abstract fun recordBrowsingDao(): RecordBrowsingDao
 }
