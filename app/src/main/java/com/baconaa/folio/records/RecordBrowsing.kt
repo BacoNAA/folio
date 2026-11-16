@@ -31,17 +31,23 @@ data class ContentPreview(
     val remainingAudioCount: Int = 0,
 )
 
-data class RecordCard(val id: RecordId, val eventTime: EventTime?, val preview: ContentPreview)
+data class RecordCard(
+    val id: RecordId, val eventTime: EventTime?, val preview: ContentPreview,
+    val marks: RecordMarks = RecordMarks(),
+)
 data class EventYear(val year: Int, val records: List<RecordCard>)
 data class EventTimeline(val years: List<EventYear>, val undated: List<RecordCard>)
 
 /** 返回有效正式记录的全量列表。读取失败抛出异常；无记录时返回空集合。 */
 interface RecordBrowsing {
-    /** 按首次记录时间降序，时间相同按入库顺序降序；卡片仍保留事件时间。 */
+    /** 置顶优先，其余按首次记录时间降序，时间相同按入库顺序降序。 */
     suspend fun listRecentRecords(): List<RecordCard>
 
+    /** 只显示已加星的有效正式记录，排序及内容预览沿用最近记录。 */
+    suspend fun listStarredRecords(): List<RecordCard>
+
     /**
-     * 按事件当地年份和日期降序，留空单列。日期相同沿用最近记录顺序作为稳定展示约定，
+     * 年份降序、留空单列；每组置顶优先，再按当地日期降序。同日沿用最近记录的稳定顺序，
      * 不推断有时刻与无时刻记录的实际先后。未填时间也沿用最近记录顺序。
      */
     suspend fun listEventTimeline(): EventTimeline
@@ -55,8 +61,12 @@ private const val PREVIEW_BLANK_CHARACTERS =
 internal class LocalRecordBrowsing(private val database: FolioDatabase) : RecordBrowsing {
     private val dao = database.recordBrowsingDao()
 
-    override suspend fun listRecentRecords(): List<RecordCard> = database.withTransaction {
-        val records = dao.activeRecords()
+    override suspend fun listRecentRecords(): List<RecordCard> = readCards(starredOnly = false)
+
+    override suspend fun listStarredRecords(): List<RecordCard> = readCards(starredOnly = true)
+
+    private suspend fun readCards(starredOnly: Boolean): List<RecordCard> = database.withTransaction {
+        val records = dao.activeRecords(starredOnly)
         val items = dao.previewItems(PREVIEW_BLANK_CHARACTERS).groupBy { it.recordId }
         val counts = dao.previewCounts(PREVIEW_BLANK_CHARACTERS).associateBy { it.recordId }
         records.map { record ->
@@ -70,6 +80,7 @@ internal class LocalRecordBrowsing(private val database: FolioDatabase) : Record
                     (count?.photoCount ?: 0) - previewItems.count { it is PreviewContentItem.Photo },
                     (count?.audioCount ?: 0) - previewItems.count { it is PreviewContentItem.Audio },
                 ),
+                record.marks,
             )
         }
     }
@@ -78,7 +89,9 @@ internal class LocalRecordBrowsing(private val database: FolioDatabase) : Record
         val records = listRecentRecords()
         val dated = records.filter { it.eventTime != null }.sortedByDescending { it.eventTime!!.date }
         return EventTimeline(
-            dated.groupBy { it.eventTime!!.date.year }.map { (year, cards) -> EventYear(year, cards) },
+            dated.groupBy { it.eventTime!!.date.year }.map { (year, cards) ->
+                EventYear(year, cards.sortedByDescending { it.marks.isPinned })
+            },
             records.filter { it.eventTime == null },
         )
     }

@@ -24,9 +24,14 @@ data class DraftPreview(
     val totalAudioDurationMillis: Long? = null,
 )
 
-data class RecordPreview(val id: RecordId, val excerpt: String, val firstPhotoId: PhotoId? = null)
+data class RecordPreview(
+    val id: RecordId, val excerpt: String, val firstPhotoId: PhotoId? = null,
+    val marks: RecordMarks = RecordMarks(),
+)
 
-data class RecordContent(val items: List<ContentItem>, val times: RecordTimes) {
+data class RecordContent(
+    val items: List<ContentItem>, val times: RecordTimes, val marks: RecordMarks = RecordMarks(),
+) {
     val text: String get() = items.body()
     val photos: List<PhotoId> get() = items.photos()
 }

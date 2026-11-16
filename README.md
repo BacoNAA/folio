@@ -32,7 +32,9 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 事件时间通过 [RecordTimeEditing](app/src/main/java/com/baconaa/folio/records/RecordTime.kt) 保存。新建的 `saveDraft`、`appendPhotos` 可传 `initialEventTime`，随第一份实际内容原子落盘；参数仅在新建时生效。现场默认“现在”由前端选择并传入，补记或未确认照片时间可传 `null`，后端不推断。已有草稿用 `saveDraftEventTime` 修改或清空，`openDraftTimes` 读回；`openRecordContent.times` 返回最后完成的事件时间、首次记录时间和修改时间，回收站详情同样保留正式时间。日期与可选时刻保持事件原时区的当地表达。Room v7 增加事件时间字段，旧记录与草稿迁移后事件时间仍为空。
 
-双时间浏览使用 [RecordBrowsing](app/src/main/java/com/baconaa/folio/records/RecordBrowsing.kt)：`listEventTimeline` 按当地年份及日期降序返回 `years`，未填写事件时间的记录单列在 `undated`；`listRecentRecords` 按首次记录时间降序返回全部有效正式记录，卡片继续保留事件时间。日期相同的记录沿用最近记录顺序作为稳定展示约定，不据此推断同日实际先后。首次记录时间相同时按入库顺序降序。新建草稿与回收站不进入两种列表，未完成修改不改变正式预览。
+双时间浏览使用 [RecordBrowsing](app/src/main/java/com/baconaa/folio/records/RecordBrowsing.kt)：`listEventTimeline` 按当地年份降序返回 `years`，每年组内先置顶、再按日期降序，未填写事件时间的记录单列在 `undated`；`listRecentRecords` 返回全部有效正式记录，先置顶、再按首次记录时间降序，卡片继续保留事件时间。置顶状态与日期相同的记录沿用最近记录顺序，不据此推断同日实际先后；首次记录时间相同时按入库顺序降序。置顶不跨年份移动，时间未定组内也优先置顶。新建草稿与回收站不进入两种列表，未完成修改不改变正式预览。
+
+星标与置顶通过 [RecordMarking](app/src/main/java/com/baconaa/folio/records/RecordMarks.kt) 的 `setStarred`、`setPinned` 分别设置，正式详情、浏览卡片、搜索结果及回收站返回 `marks`。标记立即生效，保持内容修改时间和编辑版本；完成或放弃已有草稿保留当前标记。`listStarredRecords` 集中返回已加星的正式记录，沿用最近记录的预览和排序；单独加星不改变顺序。回收站只读，恢复后可继续改标记。Room v10 为旧记录补入默认未加星、未置顶状态。
 
 浏览卡片的 `preview` 按原顺序展示最多三个内容项，每项文字及媒体说明截取前 80 个 Unicode 码点；录音返回片段 ID 和时长供试听，清单只读展示前三条事项及全部事项、已完成事项数量。`PreviewContentItem` 与可保存的 `ContentItem` 分开，避免截断预览被回存为完整内容。`remainingItemCount`、`remainingPhotoCount` 和 `remainingAudioCount` 表示未展示的内容项及其中照片、录音项数量，空白文字不占预览，重复使用的媒体仍按各自内容项计数。详情通过同一 `RecordId` 调用 `openRecordContent`，读取完整内容及时间信息。当前列表为全量读取，尚未引入分页，前端列表与时间填写控件待接入。
 

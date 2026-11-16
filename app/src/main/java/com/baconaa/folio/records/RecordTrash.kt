@@ -8,6 +8,7 @@ data class TrashPreview(
     val firstPhotoId: PhotoId?,
     val deletedAt: Long,
     val hasDraft: Boolean,
+    val marks: RecordMarks = RecordMarks(),
 )
 
 data class TrashedRecord(

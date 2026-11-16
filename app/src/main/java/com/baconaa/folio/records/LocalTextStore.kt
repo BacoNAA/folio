@@ -17,7 +17,7 @@ class LocalTextStore internal constructor(
     private val originals: LocalPhotoOriginals,
     private val now: () -> Long = System::currentTimeMillis,
     private val audioOriginals: LocalAudioOriginals,
-) : TextDrafts, PublishedTextRecords, MixedContentDrafts, RecordTrash, RecordTimeEditing,
+) : TextDrafts, PublishedTextRecords, MixedContentDrafts, RecordTrash, RecordTimeEditing, RecordMarking,
     RecordBrowsing by LocalRecordBrowsing(database) {
     private val dao = database.textDao()
     private val itemDao = database.itemDao()
@@ -323,13 +323,21 @@ class LocalTextStore internal constructor(
     }
 
     override suspend fun search(keyword: String): List<RecordPreview> =
-        dao.searchRecords(keyword).map { RecordPreview(RecordId(it.id), it.excerpt, it.firstPhotoId?.asPhotoId()) }
+        dao.searchRecords(keyword).map { RecordPreview(RecordId(it.id), it.excerpt, it.firstPhotoId?.asPhotoId(), it.marks) }
+
+    override suspend fun setStarred(id: RecordId, starred: Boolean) {
+        check(dao.setStarred(id.value, starred) == 1) { "正式记录已不存在或在回收站中，请恢复后再修改标记" }
+    }
+
+    override suspend fun setPinned(id: RecordId, pinned: Boolean) {
+        check(dao.setPinned(id.value, pinned) == 1) { "正式记录已不存在或在回收站中，请恢复后再修改标记" }
+    }
 
     private fun String.asPhotoId() = PhotoId(UUID.fromString(this))
 
     override suspend fun openRecordContent(id: RecordId): RecordContent? = database.withTransaction {
         val record = dao.activeRecord(id.value) ?: return@withTransaction null
-        RecordContent(itemDao.recordItems(id.value).map { it.asItem() }, record.times())
+        RecordContent(itemDao.recordItems(id.value).map { it.asItem() }, record.times(), record.marks)
     }
 
     override suspend fun openRecord(id: RecordId): String? = dao.recordBody(id.value)
@@ -339,13 +347,13 @@ class LocalTextStore internal constructor(
     override suspend fun restoreRecord(id: RecordId): Boolean = trashDao.restore(id.value) == 1
 
     override suspend fun listTrash(): List<TrashPreview> = trashDao.listTrash().map {
-        TrashPreview(RecordId(it.id), it.excerpt, it.firstPhotoId?.asPhotoId(), it.deletedAt, it.hasDraft)
+        TrashPreview(RecordId(it.id), it.excerpt, it.firstPhotoId?.asPhotoId(), it.deletedAt, it.hasDraft, it.marks)
     }
 
     override suspend fun openTrashRecord(id: RecordId): TrashedRecord? = database.withTransaction {
         val record = trashDao.trashedRecord(id.value) ?: return@withTransaction null
         TrashedRecord(
-            id, RecordContent(itemDao.recordItems(id.value).map { it.asItem() }, record.times()),
+            id, RecordContent(itemDao.recordItems(id.value).map { it.asItem() }, record.times(), record.marks),
             checkNotNull(record.deletedAt), trashDao.hasDraft(id.value),
         )
     }

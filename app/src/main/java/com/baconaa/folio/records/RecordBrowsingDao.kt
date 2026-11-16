@@ -4,7 +4,9 @@ import androidx.room.Dao
 import androidx.room.Embedded
 import androidx.room.Query
 
-internal data class BrowseRecordRow(val id: String, @Embedded val eventTime: EventTimeFields?)
+internal data class BrowseRecordRow(
+    val id: String, @Embedded val eventTime: EventTimeFields?, @Embedded val marks: RecordMarks,
+)
 internal data class PreviewItemRow(val recordId: String, @Embedded val slot: ContentSlot)
 internal data class PreviewCountRow(val recordId: String, val itemCount: Int, val photoCount: Int, val audioCount: Int)
 
@@ -12,9 +14,10 @@ private const val VISIBLE_PREVIEW_ITEM = "(photoId IS NOT NULL OR audioId IS NOT
 
 @Dao
 internal interface RecordBrowsingDao {
-    @Query("""SELECT id, eventDate, eventClock, eventZone FROM text_records
-              WHERE deletedAt IS NULL ORDER BY firstRecordedAt DESC, rowid DESC""")
-    suspend fun activeRecords(): List<BrowseRecordRow>
+    @Query("""SELECT id, eventDate, eventClock, eventZone, isStarred, isPinned FROM text_records
+              WHERE deletedAt IS NULL AND (:starredOnly = 0 OR isStarred = 1)
+              ORDER BY isPinned DESC, firstRecordedAt DESC, rowid DESC""")
+    suspend fun activeRecords(starredOnly: Boolean): List<BrowseRecordRow>
 
     // 每条最多读三项的短预览，不加载所有正式正文，也不逐条发起数据库查询。
     @Query("""SELECT i.recordId, i.itemId, substr(i.text, 1, 80) AS text,

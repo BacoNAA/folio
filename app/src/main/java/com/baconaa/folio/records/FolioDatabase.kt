@@ -35,6 +35,7 @@ internal data class RecordRow(
     val deletedAt: Long? = null,
     @ColumnInfo(defaultValue = "1") val revision: Long = 1,
     @Embedded val eventTime: EventTimeFields? = null,
+    @Embedded val marks: RecordMarks = RecordMarks(),
 )
 
 @Entity(
@@ -60,7 +61,9 @@ internal data class EditableDraftRow(
     val recordId: String?,
 )
 
-internal data class TextPreviewRow(val id: String, val excerpt: String, val firstPhotoId: String?)
+internal data class TextPreviewRow(
+    val id: String, val excerpt: String, val firstPhotoId: String?, @Embedded val marks: RecordMarks,
+)
 internal data class DraftPreviewRow(
     val id: String, val excerpt: String, val recordId: String?, val firstPhotoId: String?,
     val totalAudioDurationMillis: Long?,
@@ -104,6 +107,12 @@ internal interface TextDao {
     @Query("SELECT * FROM text_records WHERE id = :id AND deletedAt IS NULL")
     suspend fun activeRecord(id: String): RecordRow?
 
+    @Query("UPDATE text_records SET isStarred = :starred WHERE id = :id AND deletedAt IS NULL")
+    suspend fun setStarred(id: String, starred: Boolean): Int
+
+    @Query("UPDATE text_records SET isPinned = :pinned WHERE id = :id AND deletedAt IS NULL")
+    suspend fun setPinned(id: String, pinned: Boolean): Int
+
     // An edit keeps its link after completion so older retries can find the record.
     // Discard removes both the draft and its link.
     @Query("""SELECT id FROM text_records WHERE sourceDraftId = :draftId AND deletedAt IS NULL
@@ -124,11 +133,11 @@ internal interface TextDao {
     suspend fun deleteDraft(id: String): Int
 
     @Query(
-        """SELECT r.id, substr(r.body, 1, 80) AS excerpt,
+        """SELECT r.id, substr(r.body, 1, 80) AS excerpt, r.isStarred, r.isPinned,
            (SELECT photoId FROM record_items WHERE recordId = r.id AND photoId IS NOT NULL ORDER BY position LIMIT 1) AS firstPhotoId
            FROM text_records r
            WHERE deletedAt IS NULL AND instr(lower(body), lower(:keyword)) > 0
-           ORDER BY firstRecordedAt DESC, r.rowid DESC""",
+           ORDER BY isPinned DESC, firstRecordedAt DESC, r.rowid DESC""",
     )
     suspend fun searchRecords(keyword: String): List<TextPreviewRow>
 
@@ -143,7 +152,7 @@ internal interface TextDao {
         AudioCleanupEntry::class,
     ],
     views = [EditableDraftRow::class],
-    version = 9,
+    version = 10,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -153,6 +162,7 @@ internal interface TextDao {
         AutoMigration(from = 6, to = 7),
         AutoMigration(from = 7, to = 8),
         AutoMigration(from = 8, to = 9),
+        AutoMigration(from = 9, to = 10),
     ],
 )
 internal abstract class FolioDatabase : RoomDatabase() {
