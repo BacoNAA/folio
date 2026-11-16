@@ -14,10 +14,11 @@ private const val VISIBLE_PREVIEW_ITEM = "(photoId IS NOT NULL OR audioId IS NOT
 
 @Dao
 internal interface RecordBrowsingDao {
-    @Query("""SELECT id, eventDate, eventClock, eventZone, isStarred, isPinned FROM text_records
+    @Query("""SELECT r.id, eventDate, eventClock, eventZone, isStarred, isPinned FROM text_records r
               WHERE deletedAt IS NULL AND (:starredOnly = 0 OR isStarred = 1)
-              ORDER BY isPinned DESC, firstRecordedAt DESC, rowid DESC""")
-    suspend fun activeRecords(starredOnly: Boolean): List<BrowseRecordRow>
+              AND (:allTags = 1 OR EXISTS(SELECT 1 FROM record_tags rt WHERE rt.recordId = r.id AND rt.tagId IN (:tagIds)))
+              AND """ + RECORD_TEXT_MATCH + " ORDER BY isPinned DESC, firstRecordedAt DESC, r.rowid DESC")
+    suspend fun activeRecords(keyword: String, tagIds: List<String>, allTags: Boolean, starredOnly: Boolean): List<BrowseRecordRow>
 
     // 每条最多读三项的短预览，不加载所有正式正文，也不逐条发起数据库查询。
     @Query("""SELECT i.recordId, i.itemId, substr(i.text, 1, 80) AS text,

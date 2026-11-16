@@ -34,6 +34,7 @@ data class ContentPreview(
 data class RecordCard(
     val id: RecordId, val eventTime: EventTime?, val preview: ContentPreview,
     val marks: RecordMarks = RecordMarks(),
+    val tags: List<Tag> = emptyList(),
 )
 data class EventYear(val year: Int, val records: List<RecordCard>)
 data class EventTimeline(val years: List<EventYear>, val undated: List<RecordCard>)
@@ -45,6 +46,11 @@ interface RecordBrowsing {
 
     /** 只显示已加星的有效正式记录，排序及内容预览沿用最近记录。 */
     suspend fun listStarredRecords(): List<RecordCard>
+
+    /** 标签多选满足任一，关键词与星标条件同时满足；仅查有效正式内容，不自动放宽条件。 */
+    suspend fun queryRecords(
+        keyword: String = "", tagIds: Set<TagId> = emptySet(), starredOnly: Boolean = false,
+    ): List<RecordCard>
 
     /**
      * 年份降序、留空单列；每组置顶优先，再按当地日期降序。同日沿用最近记录的稳定顺序，
@@ -61,14 +67,15 @@ private const val PREVIEW_BLANK_CHARACTERS =
 internal class LocalRecordBrowsing(private val database: FolioDatabase) : RecordBrowsing {
     private val dao = database.recordBrowsingDao()
 
-    override suspend fun listRecentRecords(): List<RecordCard> = readCards(starredOnly = false)
+    override suspend fun listRecentRecords(): List<RecordCard> = queryRecords()
 
-    override suspend fun listStarredRecords(): List<RecordCard> = readCards(starredOnly = true)
+    override suspend fun listStarredRecords(): List<RecordCard> = queryRecords(starredOnly = true)
 
-    private suspend fun readCards(starredOnly: Boolean): List<RecordCard> = database.withTransaction {
-        val records = dao.activeRecords(starredOnly)
+    override suspend fun queryRecords(keyword: String, tagIds: Set<TagId>, starredOnly: Boolean): List<RecordCard> = database.withTransaction {
+        val records = dao.activeRecords(keyword, tagIds.map { it.value }, tagIds.isEmpty(), starredOnly)
         val items = dao.previewItems(PREVIEW_BLANK_CHARACTERS).groupBy { it.recordId }
         val counts = dao.previewCounts(PREVIEW_BLANK_CHARACTERS).associateBy { it.recordId }
+        val tags = database.tagDao().activeRecordTags().groupBy { it.recordId }
         records.map { record ->
             val previewItems = items[record.id].orEmpty().map { it.slot.asPreview() }
             val count = counts[record.id]
@@ -81,6 +88,7 @@ internal class LocalRecordBrowsing(private val database: FolioDatabase) : Record
                     (count?.audioCount ?: 0) - previewItems.count { it is PreviewContentItem.Audio },
                 ),
                 record.marks,
+                tags[record.id].orEmpty().map { it.tag.asTag() },
             )
         }
     }

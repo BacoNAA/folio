@@ -85,6 +85,9 @@ internal interface TextDao {
               WHERE id = :id AND EXISTS (SELECT 1 FROM editable_text_drafts WHERE id = :id)""")
     suspend fun updateDraftTime(id: String, date: Long?, clock: Long?, zone: String?, editedAt: Long): Int
 
+    @Query("UPDATE text_drafts SET lastEditedAt = :editedAt WHERE id = :id")
+    suspend fun touchDraft(id: String, editedAt: Long)
+
     @Query("""SELECT d.id, substr(d.body, 1, 80) AS excerpt, d.recordId,
               (SELECT photoId FROM draft_items WHERE draftId = d.id AND photoId IS NOT NULL ORDER BY position LIMIT 1) AS firstPhotoId,
               (SELECT sum(audioDurationMillis) FROM draft_items WHERE draftId = d.id) AS totalAudioDurationMillis
@@ -136,8 +139,7 @@ internal interface TextDao {
         """SELECT r.id, substr(r.body, 1, 80) AS excerpt, r.isStarred, r.isPinned,
            (SELECT photoId FROM record_items WHERE recordId = r.id AND photoId IS NOT NULL ORDER BY position LIMIT 1) AS firstPhotoId
            FROM text_records r
-           WHERE deletedAt IS NULL AND instr(lower(body), lower(:keyword)) > 0
-           ORDER BY isPinned DESC, firstRecordedAt DESC, r.rowid DESC""",
+           WHERE deletedAt IS NULL AND """ + RECORD_TEXT_MATCH + " ORDER BY isPinned DESC, firstRecordedAt DESC, r.rowid DESC",
     )
     suspend fun searchRecords(keyword: String): List<TextPreviewRow>
 
@@ -149,10 +151,10 @@ internal interface TextDao {
     entities = [
         DraftRow::class, RecordRow::class, RecordEditRow::class,
         DraftItemRow::class, RecordItemRow::class, RemovedItem::class, PhotoCleanupEntry::class,
-        AudioCleanupEntry::class,
+        AudioCleanupEntry::class, TagRow::class, DraftTagRow::class, RecordTagRow::class,
     ],
     views = [EditableDraftRow::class],
-    version = 10,
+    version = 11,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -163,6 +165,7 @@ internal interface TextDao {
         AutoMigration(from = 7, to = 8),
         AutoMigration(from = 8, to = 9),
         AutoMigration(from = 9, to = 10),
+        AutoMigration(from = 10, to = 11),
     ],
 )
 internal abstract class FolioDatabase : RoomDatabase() {
@@ -173,4 +176,5 @@ internal abstract class FolioDatabase : RoomDatabase() {
     abstract fun photoCleanupDao(): PhotoCleanupDao
     abstract fun audioCleanupDao(): AudioCleanupDao
     abstract fun recordBrowsingDao(): RecordBrowsingDao
+    abstract fun tagDao(): TagDao
 }

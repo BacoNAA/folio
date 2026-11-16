@@ -407,6 +407,68 @@ class TextDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun versionTenKeepsMarkedTrashAndMixedDraftWhileAddingIndependentTagRelations() = runBlocking {
+        val audio = createAudioTestClip(context)
+        val originals = LocalAudioOriginals.get(context)
+        val pendingPhoto = UUID.randomUUID().toString()
+        val pendingAudio = UUID.randomUUID().toString()
+        createDatabase(10) { sql ->
+            sql.execSQL("""INSERT INTO text_records
+                (id,sourceDraftId,body,firstRecordedAt,modifiedAt,deletedAt,revision,isStarred,isPinned)
+                VALUES ('record','source','帐篷',100,200,400,3,1,1)""")
+            sql.execSQL("""INSERT INTO text_drafts
+                (id,body,cursor,firstRecordedAt,lastEditedAt,activeItemId)
+                VALUES ('edit','帐篷',0,100,300,'audio')""")
+            sql.execSQL("INSERT INTO text_record_edits VALUES ('edit','record',3)")
+            val checklist = """[{"id":"tent","text":"帐篷","checked":true}]"""
+            sql.execSQL("""INSERT INTO record_items
+                (recordId,position,itemId,checklistJson) VALUES ('record',0,'checklist',?)""", arrayOf(checklist))
+            sql.execSQL("""INSERT INTO draft_items
+                (draftId,position,itemId,checklistJson) VALUES ('edit',0,'checklist',?)""", arrayOf(checklist))
+            sql.execSQL("""INSERT INTO record_items
+                (recordId,position,itemId,caption,audioId,audioDurationMillis)
+                VALUES ('record',1,'audio','帐篷里的雨',?,?)""", arrayOf<Any>(audio.id.value.toString(), audio.durationMillis))
+            sql.execSQL("""INSERT INTO draft_items
+                (draftId,position,itemId,caption,audioId,audioDurationMillis)
+                VALUES ('edit',1,'audio','帐篷里的雨',?,?)""", arrayOf<Any>(audio.id.value.toString(), audio.durationMillis))
+            sql.execSQL("""INSERT INTO removed_draft_items
+                (draftId,position,previousItemId,cursor,itemId,text)
+                VALUES ('edit',2,'audio',1,'removed','雨')""")
+            sql.execSQL("INSERT INTO photo_cleanup_queue VALUES (?)", arrayOf(pendingPhoto))
+            sql.execSQL("INSERT INTO audio_cleanup_queue VALUES (?)", arrayOf(pendingAudio))
+        }
+        val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = originals, now = { 600L })
+            val record = RecordId("record")
+            val draft = DraftId("edit")
+            val content = store.openTrashRecord(record)!!.content
+            assertEquals(RecordMarks(true, true), content.marks)
+            assertEquals(RecordTimes(100L, 200L, null), content.times)
+            assertEquals(ContentItem.Audio(ItemId("audio"), audio.id, audio.durationMillis, "帐篷里的雨"), content.items.last())
+            assertTrue(content.tags.isEmpty())
+            assertTrue(store.listTags().isEmpty())
+            assertNull(store.openDraftTags(draft))
+            assertEquals(listOf(pendingPhoto), database.photoCleanupDao().candidates())
+            assertEquals(listOf(pendingAudio), database.audioCleanupDao().candidates())
+            assertTrue(store.restoreRecord(record))
+            assertEquals(content.items, store.openMixedDraft(draft)!!.items)
+            assertEquals(emptyList<Tag>(), store.openDraftTags(draft))
+            assertTrue(store.undoRemoval(draft))
+            assertEquals(ContentItem.Text(ItemId("removed"), "雨"), store.openMixedDraft(draft)!!.items.last())
+            val tag = store.createDraftTag(draft, "露营")
+            assertTrue(store.openRecordContent(record)!!.tags.isEmpty())
+            assertEquals(record, store.completeMixedDraft(draft))
+            assertEquals(listOf(Tag(tag, "露营")), store.queryRecords(tagIds = setOf(tag), starredOnly = true).single().tags)
+            assertEquals(RecordMarks(true, true), store.openRecordContent(record)!!.marks)
+            assertEquals(audio, originals.inspect(audio.id))
+        } finally {
+            database.close()
+            originals.deleteOriginal(audio.id)
+        }
+    }
+
     private fun createDatabase(version: Int, seed: (SQLiteDatabase) -> Unit) {
         val schemaFile = "${FolioDatabase::class.java.name}/$version.json"
         val schema = instrumentation.context.assets.open(schemaFile).bufferedReader().use {
