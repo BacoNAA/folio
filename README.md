@@ -6,9 +6,11 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 ## 当前进度
 
-项目已进入安卓开发，编辑、搜索与回收站页面仍待接入。具体后端范围、提交与合入状态、T1—T3 状态及待验收项统一见[当前开发进度](docs/engineering/开发流程.md#当前开发进度)。代码已合入不等于完整功能已验收。
+当前开发分支已接入首批安卓文字页面：随手记、单段文字编辑与草稿恢复、记录浏览、搜索及详情。照片、录音、清单、混合编辑与回收站页面继续分批接入。具体范围、合入状态、T1—T3 状态及待验收项统一见[当前开发进度](docs/engineering/开发流程.md#当前开发进度)。
 
-当前 APK 可打开「随手记」并切换到「记录」。本机 Room 后端支持新建、续写和放弃草稿，也可按文字及已支持的说明、标签线索搜索并打开正式记录。编辑已有记录时，搜索和详情继续显示上次完成的内容，完成后按原 ID 读取更新。前端可通过 `LocalTextStore.get(context)` 获取 [TextDrafts 和 PublishedTextRecords](app/src/main/java/com/baconaa/folio/records/TextRecords.kt)，编辑与搜索页面待接入。
+从「随手记 → 写一句」开始输入，正文和光标自动存入本机草稿；从「记录 → 继续草稿」重开，单份直接续写，多份按最近编辑顺序选择。新建点「完成」后回首页，经「已保存 · 查看」打开详情；搜索只返回正式版本。已有单段文字记录可编辑和放弃，完成后回到原记录详情，再返回原浏览或搜索位置。失败时保留输入并显示重试入口，空白记录不能完成。
+
+页面使用 `FolioViewModel` 持有状态，通过 `LocalTextStore.get(context)` 调用 [TextDrafts 和 PublishedTextRecords](app/src/main/java/com/baconaa/folio/records/TextRecords.kt) 等现有接口。草稿写入串行，完成及离开编辑等待最后输入保存成功；读写错误与空结果分别展示。当前编辑器只开放单段文字，拒绝把已有混合内容压平回存；多媒体输入、标题、时间及线索填写随后续页面接入。记录列表可切换事件时间和最近记录，未填写事件时间的记录单列。
 
 已按[整体需求审查](docs/requirements/整体需求审查.md)整理正文、子操作、共同规则和前置关系，并将已确认的功能边界写入正文。剩余范围与已确认结论索引集中见[待确认问题](docs/requirements/待确认问题.md)。
 
@@ -40,9 +42,9 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 `search(keyword)` 匹配正式正文、清单、照片和录音说明、标签当前名称；`queryRecords(keyword, tagIds, starredOnly)` 返回完整浏览卡片，支持上述关键词与标签、星标联合查找。标签多选满足任一个，不同类别同时满足；空标签集合表示不限标签，未命中返回空集合，不自动扩大范围。两种入口都排除草稿、未完成修改和回收站，不识别原照片中的文字或原录音中的话语。标签按 ID 限定，同名标签的记录不会混在一起；结果沿用置顶及最近记录顺序。时间、地点、人物物件和媒体类型的组合筛选继续按后续范围实现。
 
-浏览卡片的 `preview` 按原顺序展示最多三个内容项，每项文字及媒体说明截取前 80 个 Unicode 码点；录音返回片段 ID 和时长供试听，清单只读展示前三条事项及全部事项、已完成事项数量。`PreviewContentItem` 与可保存的 `ContentItem` 分开，避免截断预览被回存为完整内容。`remainingItemCount`、`remainingPhotoCount` 和 `remainingAudioCount` 表示未展示的内容项及其中照片、录音项数量，空白文字不占预览，重复使用的媒体仍按各自内容项计数。详情通过同一 `RecordId` 调用 `openRecordContent`，读取完整内容及时间信息。当前列表为全量读取，尚未引入分页，前端列表与时间填写控件待接入。
+浏览卡片的 `preview` 按原顺序展示最多三个内容项，每项文字及媒体说明截取前 80 个 Unicode 码点；录音返回片段 ID 和时长供试听，清单只读展示前三条事项及全部事项、已完成事项数量。`PreviewContentItem` 与可保存的 `ContentItem` 分开，避免截断预览被回存为完整内容。`remainingItemCount`、`remainingPhotoCount` 和 `remainingAudioCount` 表示未展示的内容项及其中照片、录音项数量，空白文字不占预览，重复使用的媒体仍按各自内容项计数。详情通过同一 `RecordId` 调用 `openRecordContent`，读取完整内容及时间信息。当前列表为全量读取，尚未引入分页，本分支已接入前端列表，时间填写控件待接入。
 
-删除与恢复使用 [RecordTrash](app/src/main/java/com/baconaa/folio/records/RecordTrash.kt)：`moveToTrash` 将正式记录和编辑草稿一起隐藏，`listTrash` 与 `openTrashRecord` 只展示上次完成的内容并通过 `hasDraft` 提示未完成修改；`restoreRecord` 用于立即撤销或从回收站恢复，两份内容保持独立。重复删除或恢复返回 `false`。页面负责删除确认、撤销提示和浏览位置，回收站与编辑页面均待接入。
+删除与恢复使用 [RecordTrash](app/src/main/java/com/baconaa/folio/records/RecordTrash.kt)：`moveToTrash` 将正式记录和编辑草稿一起隐藏，`listTrash` 与 `openTrashRecord` 只展示上次完成的内容并通过 `hasDraft` 提示未完成修改；`restoreRecord` 用于立即撤销或从回收站恢复，两份内容保持独立。重复删除或恢复返回 `false`。页面负责删除确认、撤销提示和浏览位置，回收站及编辑页中的删除恢复操作待接入。
 
 用户确认后调用 `deletePermanently`，在同一事务中彻底删除回收站记录、编辑草稿和撤销项。完成、放弃、覆盖最近移除及彻底删除都会收集释放的媒体候选，提交后只删除已无任何引用的 Folio 文件；共享引用、回收站、隐藏草稿及可撤销项继续保护原件。`pendingPhotoCount`、`pendingAudioCount` 分别表示仍待清理的照片、录音数量，`null` 表示该类清理暂不可用；文件清理失败不改变已完成的记录删除。`retryPhotoCleanup`、`retryAudioCleanup` 可在重开应用后重试持久队列。清理不扫描尚未绑定的新导入照片或新录音，也不触及系统相册来源。
 
