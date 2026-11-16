@@ -24,15 +24,15 @@ data class DraftPreview(
 
 data class RecordPreview(val id: RecordId, val excerpt: String, val firstPhotoId: PhotoId? = null)
 
-data class RecordContent(val items: List<ContentItem>) {
+data class RecordContent(val items: List<ContentItem>, val times: RecordTimes) {
     val text: String get() = items.body()
     val photos: List<PhotoId> get() = items.photos()
 }
 
 /** 存储操作失败时向调用方抛出异常。 */
 interface TextDrafts {
-    /** 按传入顺序追加已导入的原图。传 null 可直接建立纯照片草稿。 */
-    suspend fun appendPhotos(id: DraftId?, photos: List<PhotoId>): DraftId
+    /** 按传入顺序追加已导入的原图。id 为 null 时新建，并采用已确认的 initialEventTime。 */
+    suspend fun appendPhotos(id: DraftId?, photos: List<PhotoId>, initialEventTime: EventTime? = null): DraftId
 
     /** 返回草稿中的原图 ID，草稿不存在或不可续写时返回 null。 */
     suspend fun openDraftPhotos(id: DraftId): List<PhotoId>?
@@ -43,8 +43,11 @@ interface TextDrafts {
     /** 放弃新建或编辑草稿，保留正式记录。重复放弃不会影响后来建立的草稿。 */
     suspend fun discardDraft(id: DraftId)
 
-    /** 新建传 null，成功落盘后返回 ID。新建且内容为空时返回 null。 */
-    suspend fun saveDraft(id: DraftId?, edit: TextEdit): DraftId?
+    /**
+     * 新建传 null，成功落盘后返回 ID。新建且内容为空时返回 null。
+     * initialEventTime 仅用于新建，现场默认值由调用方传入；未填不推断为现在。
+     */
+    suspend fun saveDraft(id: DraftId?, edit: TextEdit, initialEventTime: EventTime? = null): DraftId?
 
     /** 仅列出可续写草稿，按最后编辑时间降序。 */
     suspend fun listDrafts(): List<DraftPreview>

@@ -22,6 +22,7 @@ internal data class DraftRow(
     val firstRecordedAt: Long,
     val lastEditedAt: Long,
     val activeItemId: String? = null,
+    @Embedded val eventTime: EventTimeFields? = null,
 )
 
 @Entity(tableName = "text_records", indices = [Index(value = ["sourceDraftId"], unique = true)])
@@ -33,6 +34,7 @@ internal data class RecordRow(
     val modifiedAt: Long,
     val deletedAt: Long? = null,
     @ColumnInfo(defaultValue = "1") val revision: Long = 1,
+    @Embedded val eventTime: EventTimeFields? = null,
 )
 
 @Entity(
@@ -70,8 +72,12 @@ internal interface TextDao {
               WHERE id = :id AND EXISTS (SELECT 1 FROM editable_text_drafts WHERE id = :id)""")
     suspend fun updateDraft(id: String, body: String, cursor: Int, activeItemId: String?, editedAt: Long): Int
 
-    @Query("SELECT id, body, cursor, firstRecordedAt, lastEditedAt, activeItemId FROM editable_text_drafts WHERE id = :id")
+    @Query("SELECT id, body, cursor, firstRecordedAt, lastEditedAt, activeItemId, eventDate, eventClock, eventZone FROM editable_text_drafts WHERE id = :id")
     suspend fun draft(id: String): DraftRow?
+
+    @Query("""UPDATE text_drafts SET eventDate = :date, eventClock = :clock, eventZone = :zone, lastEditedAt = :editedAt
+              WHERE id = :id AND EXISTS (SELECT 1 FROM editable_text_drafts WHERE id = :id)""")
+    suspend fun updateDraftTime(id: String, date: Long?, clock: Long?, zone: String?, editedAt: Long): Int
 
     @Query("""SELECT d.id, substr(d.body, 1, 80) AS excerpt, d.recordId,
               (SELECT photoId FROM draft_items WHERE draftId = d.id AND photoId IS NOT NULL ORDER BY position LIMIT 1) AS firstPhotoId
@@ -106,8 +112,9 @@ internal interface TextDao {
     @Insert
     suspend fun insertRecord(row: RecordRow)
 
-    @Query("UPDATE text_records SET body = :body, modifiedAt = :modifiedAt, revision = revision + 1 WHERE id = :id")
-    suspend fun updateRecordContent(id: String, body: String, modifiedAt: Long)
+    @Query("""UPDATE text_records SET body = :body, modifiedAt = :modifiedAt, revision = revision + 1,
+              eventDate = :date, eventClock = :clock, eventZone = :zone WHERE id = :id""")
+    suspend fun updateRecordContent(id: String, body: String, modifiedAt: Long, date: Long?, clock: Long?, zone: String?)
 
     @Query("DELETE FROM text_drafts WHERE id = :id AND EXISTS (SELECT 1 FROM editable_text_drafts WHERE id = :id)")
     suspend fun deleteDraft(id: String): Int
@@ -131,13 +138,14 @@ internal interface TextDao {
         DraftItemRow::class, RecordItemRow::class, RemovedItem::class, PhotoCleanupEntry::class,
     ],
     views = [EditableDraftRow::class],
-    version = 6,
+    version = 7,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
         AutoMigration(from = 3, to = 4, spec = MixedContentMigration::class),
         AutoMigration(from = 4, to = 5),
         AutoMigration(from = 5, to = 6),
+        AutoMigration(from = 6, to = 7),
     ],
 )
 internal abstract class FolioDatabase : RoomDatabase() {
@@ -146,4 +154,5 @@ internal abstract class FolioDatabase : RoomDatabase() {
     abstract fun removedItemDao(): RemovedItemDao
     abstract fun trashDao(): TrashDao
     abstract fun photoCleanupDao(): PhotoCleanupDao
+    abstract fun recordBrowsingDao(): RecordBrowsingDao
 }
