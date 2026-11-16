@@ -6,6 +6,8 @@ import android.util.Log
 import androidx.room.Room
 import androidx.room.withTransaction
 import com.baconaa.folio.media.LocalPhotoOriginals
+import com.baconaa.folio.media.LocalAudioOriginals
+import com.baconaa.folio.media.AudioId
 import com.baconaa.folio.media.PhotoId
 import java.io.IOException
 import java.util.UUID
@@ -14,6 +16,7 @@ class LocalTextStore internal constructor(
     private val database: FolioDatabase,
     private val originals: LocalPhotoOriginals,
     private val now: () -> Long = System::currentTimeMillis,
+    private val audioOriginals: LocalAudioOriginals,
 ) : TextDrafts, PublishedTextRecords, MixedContentDrafts, RecordTrash, RecordTimeEditing,
     RecordBrowsing by LocalRecordBrowsing(database) {
     private val dao = database.textDao()
@@ -22,6 +25,25 @@ class LocalTextStore internal constructor(
     private val itemActions = ContentItemActions(database, now)
     private val cleanupQueue = database.photoCleanupDao()
     private val photoCleanup = PhotoCleanup(database, originals)
+    private val audioCleanupQueue = database.audioCleanupDao()
+    private val audioCleanup = AudioCleanup(database, audioOriginals)
+
+    private suspend fun queueDraftMedia(id: String) {
+        cleanupQueue.enqueueDraft(id)
+        audioCleanupQueue.enqueueDraft(id)
+    }
+
+    private suspend fun queueRecordMedia(id: String) {
+        cleanupQueue.enqueueRecord(id)
+        audioCleanupQueue.enqueueRecord(id)
+    }
+
+    private suspend fun cleanAudioAfterCommit(): Int? = try {
+        audioCleanup.run()
+    } catch (_: SQLiteException) {
+        Log.w("Folio", "内容操作已完成，录音清理暂不可用，可稍后重试")
+        null
+    }
 
     private suspend fun cleanPhotosAfterCommit(): Int? = try {
         photoCleanup.run()
@@ -72,6 +94,35 @@ class LocalTextStore internal constructor(
             insertItems(id, after, listOf(item), 0)
             item.id
         }
+
+    private fun audioItem(audio: AudioId, caption: String): ContentItem.Audio {
+        val clip = audioOriginals.inspect(audio)
+        return ContentItem.Audio(newItemId(), clip.id, clip.durationMillis, caption)
+    }
+
+    override suspend fun appendAudio(
+        id: DraftId?, audio: AudioId, caption: String, initialEventTime: EventTime?,
+    ): DraftId = database.withTransaction {
+        val item = audioItem(audio, caption)
+        val draftId = id ?: createDraft(initialEventTime)
+        insertItems(draftId, null, listOf(item), 0)
+        draftId
+    }
+
+    override suspend fun insertAudio(id: DraftId, after: ItemId?, audio: AudioId, caption: String): ItemId =
+        database.withTransaction {
+            val item = audioItem(audio, caption)
+            insertItems(id, after, listOf(item), 0)
+            item.id
+        }
+
+    override suspend fun editAudioCaption(id: DraftId, itemId: ItemId, caption: String) = database.withTransaction {
+        val items = requireDraft(id).items.toMutableList()
+        val index = items.indexOfItem(itemId)
+        val audio = items[index] as? ContentItem.Audio ?: error("该项不是录音")
+        items[index] = audio.copy(caption = caption)
+        database.writeMixedDraft(id, MixedDraft(items, itemId, 0), now())
+    }
 
     override suspend fun appendChecklist(
         id: DraftId?, entries: List<ChecklistEntry>, initialEventTime: EventTime?,
@@ -131,10 +182,11 @@ class LocalTextStore internal constructor(
     override suspend fun removeItem(id: DraftId, itemId: ItemId) {
         database.withTransaction {
             requireDraft(id)
-            cleanupQueue.enqueueDraft(id.value)
+            queueDraftMedia(id.value)
             itemActions.remove(id, itemId)
         }
         cleanPhotosAfterCommit()
+        cleanAudioAfterCommit()
     }
 
     override suspend fun canUndoRemoval(id: DraftId) = itemActions.canUndo(id)
@@ -157,12 +209,13 @@ class LocalTextStore internal constructor(
     override suspend fun discardDraft(id: DraftId) {
         database.withTransaction {
             if (dao.draft(id.value) != null) {
-                cleanupQueue.enqueueDraft(id.value)
+                queueDraftMedia(id.value)
                 check(dao.deleteDraft(id.value) == 1) { "未能放弃草稿" }
                 dao.deleteEdit(id.value)
             }
         }
         cleanPhotosAfterCommit()
+        cleanAudioAfterCommit()
     }
 
     override suspend fun saveDraft(id: DraftId?, edit: TextEdit, initialEventTime: EventTime?): DraftId? {
@@ -200,7 +253,10 @@ class LocalTextStore internal constructor(
 
     override suspend fun listDrafts(): List<DraftPreview> =
         dao.listDrafts().map { row ->
-            DraftPreview(DraftId(row.id), row.excerpt, row.recordId?.let(::RecordId), row.firstPhotoId?.asPhotoId())
+            DraftPreview(
+                DraftId(row.id), row.excerpt, row.recordId?.let(::RecordId), row.firstPhotoId?.asPhotoId(),
+                row.totalAudioDurationMillis,
+            )
         }
 
     override suspend fun openDraft(id: DraftId): TextEdit? =
@@ -231,9 +287,15 @@ class LocalTextStore internal constructor(
             val items = finalState(requireDraft(id)).items
             val body = items.body()
             val photos = items.photos()
-            require(body.isNotBlank() || photos.isNotEmpty()) { "请填写文字、清单事项或添加媒体后再完成" }
+            val audios = items.filterIsInstance<ContentItem.Audio>()
+            require(body.isNotBlank() || photos.isNotEmpty() || audios.isNotEmpty()) { "请填写文字、清单事项或添加媒体后再完成" }
             requireReadableOriginals(photos)
-            cleanupQueue.enqueueDraft(id.value)
+            for (audio in audios) {
+                if (audioOriginals.inspect(audio.audioId).durationMillis != audio.durationMillis) {
+                    throw IOException("录音原件已改变，请重新录制")
+                }
+            }
+            queueDraftMedia(id.value)
             val slots = items.map { it.asSlot() }
             val edit = dao.recordEdit(id.value)
             val recordId = if (edit == null) {
@@ -245,7 +307,7 @@ class LocalTextStore internal constructor(
                 val record = checkNotNull(dao.activeRecord(edit.recordId)) { "正式记录已不存在" }
                 check(record.revision == edit.baseRevision) { "正式记录已更新，本次草稿已保留" }
                 if (slots != itemDao.recordItems(record.id) || draft.eventTime != record.eventTime) {
-                    cleanupQueue.enqueueRecord(record.id)
+                    queueRecordMedia(record.id)
                     val time = draft.eventTime
                     dao.updateRecordContent(record.id, body, now(), time?.eventDate, time?.eventClock, time?.eventZone)
                     itemDao.replaceRecordItems(record.id, slots)
@@ -256,6 +318,7 @@ class LocalTextStore internal constructor(
             RecordId(recordId)
         }
         cleanPhotosAfterCommit()
+        cleanAudioAfterCommit()
         return result
     }
 
@@ -293,16 +356,18 @@ class LocalTextStore internal constructor(
                 check(dao.activeRecord(id.value) == null) { "请先将记录移入回收站" }
                 return@withTransaction false
             }
-            cleanupQueue.enqueueRecord(id.value)
-            trashDao.editingDraftIds(id.value).forEach { cleanupQueue.enqueueDraft(it) }
+            queueRecordMedia(id.value)
+            trashDao.editingDraftIds(id.value).forEach { queueDraftMedia(it) }
             trashDao.deleteEditingDrafts(id.value)
             check(trashDao.deletePermanently(id.value) == 1) { "未能彻底删除记录" }
             true
         }
-        return PermanentDeletionResult(deleted, cleanPhotosAfterCommit())
+        return PermanentDeletionResult(deleted, cleanPhotosAfterCommit(), cleanAudioAfterCommit())
     }
 
     override suspend fun retryPhotoCleanup(): Int = photoCleanup.run()
+
+    override suspend fun retryAudioCleanup(): Int = audioCleanup.run()
 
     companion object {
         private var instance: LocalTextStore? = null
@@ -311,6 +376,7 @@ class LocalTextStore internal constructor(
         fun get(context: Context): LocalTextStore = instance ?: LocalTextStore(
             Room.databaseBuilder(context.applicationContext, FolioDatabase::class.java, "folio.db").build(),
             LocalPhotoOriginals.get(context),
+            audioOriginals = LocalAudioOriginals.get(context),
         ).also { instance = it }
     }
 }

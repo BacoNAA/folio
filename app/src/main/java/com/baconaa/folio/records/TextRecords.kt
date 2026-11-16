@@ -20,6 +20,8 @@ data class DraftPreview(
     val excerpt: String,
     val recordId: RecordId? = null,
     val firstPhotoId: PhotoId? = null,
+    /** 已保存录音项的总时长；无录音时为 null，可用于辨认纯录音草稿。 */
+    val totalAudioDurationMillis: Long? = null,
 )
 
 data class RecordPreview(val id: RecordId, val excerpt: String, val firstPhotoId: PhotoId? = null)

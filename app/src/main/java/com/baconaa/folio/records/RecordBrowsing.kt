@@ -2,6 +2,7 @@ package com.baconaa.folio.records
 
 import androidx.room.withTransaction
 import com.baconaa.folio.media.PhotoId
+import com.baconaa.folio.media.AudioId
 
 /** 仅供展示，与可回存的 ContentItem 分开；文字各截取前 80 个 Unicode 码点。 */
 sealed interface PreviewContentItem {
@@ -9,6 +10,9 @@ sealed interface PreviewContentItem {
 
     data class Text(override val id: ItemId, val text: String) : PreviewContentItem
     data class Photo(override val id: ItemId, val photoId: PhotoId, val caption: String) : PreviewContentItem
+    data class Audio(
+        override val id: ItemId, val audioId: AudioId, val durationMillis: Long, val caption: String,
+    ) : PreviewContentItem
     data class Checklist(
         override val id: ItemId,
         val entries: List<ChecklistEntryPreview>,
@@ -24,6 +28,7 @@ data class ContentPreview(
     val items: List<PreviewContentItem>,
     val remainingItemCount: Int,
     val remainingPhotoCount: Int,
+    val remainingAudioCount: Int = 0,
 )
 
 data class RecordCard(val id: RecordId, val eventTime: EventTime?, val preview: ContentPreview)
@@ -63,6 +68,7 @@ internal class LocalRecordBrowsing(private val database: FolioDatabase) : Record
                     previewItems,
                     (count?.itemCount ?: 0) - previewItems.size,
                     (count?.photoCount ?: 0) - previewItems.count { it is PreviewContentItem.Photo },
+                    (count?.audioCount ?: 0) - previewItems.count { it is PreviewContentItem.Audio },
                 ),
             )
         }
@@ -81,6 +87,7 @@ internal class LocalRecordBrowsing(private val database: FolioDatabase) : Record
 private fun ContentSlot.asPreview(): PreviewContentItem = when (val item = asItem()) {
     is ContentItem.Text -> PreviewContentItem.Text(item.id, item.text)
     is ContentItem.Photo -> PreviewContentItem.Photo(item.id, item.photoId, item.caption)
+    is ContentItem.Audio -> PreviewContentItem.Audio(item.id, item.audioId, item.durationMillis, item.caption)
     is ContentItem.Checklist -> PreviewContentItem.Checklist(
         item.id,
         item.entries.take(3).map { ChecklistEntryPreview(it.text.previewText(), it.checked) },

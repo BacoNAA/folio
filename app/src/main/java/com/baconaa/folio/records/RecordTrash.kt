@@ -17,8 +17,10 @@ data class TrashedRecord(
     val hasDraft: Boolean,
 )
 
-/** pendingPhotoCount 为 null 时清理暂不可用，记录删除结果仍以 deleted 为准。 */
-data class PermanentDeletionResult(val deleted: Boolean, val pendingPhotoCount: Int?)
+/** 任一待清理数为 null 时该类媒体清理暂不可用，记录删除结果仍以 deleted 为准。 */
+data class PermanentDeletionResult(
+    val deleted: Boolean, val pendingPhotoCount: Int?, val pendingAudioCount: Int? = 0,
+)
 
 /** 回收站只读展示最后完成的内容；编辑草稿随正式记录一起隐藏和恢复。 */
 interface RecordTrash {
@@ -42,4 +44,6 @@ interface RecordTrash {
 
     /** 重试此前中断或失败的原图清理，返回仍待清理的数量；不扫描未绑定的导入文件。 */
     suspend fun retryPhotoCleanup(): Int
+    /** 重试已释放引用的录音清理；不扫描未绑定的新录音。 */
+    suspend fun retryAudioCleanup(): Int
 }

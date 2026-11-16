@@ -1,6 +1,7 @@
 package com.baconaa.folio.records
 
 import com.baconaa.folio.media.PhotoId
+import com.baconaa.folio.media.AudioId
 import java.util.UUID
 
 @JvmInline
@@ -11,6 +12,11 @@ sealed interface ContentItem {
 
     data class Text(override val id: ItemId, val text: String) : ContentItem
     data class Photo(override val id: ItemId, val photoId: PhotoId, val caption: String = "") : ContentItem
+    data class Audio(
+        override val id: ItemId, val audioId: AudioId, val durationMillis: Long, val caption: String = "",
+    ) : ContentItem {
+        init { require(durationMillis > 0) { "录音时长必须大于零" } }
+    }
     data class Checklist(override val id: ItemId, val entries: List<ChecklistEntry>) : ContentItem {
         init { entries.requireUniqueEntryIds() }
     }
@@ -25,6 +31,12 @@ interface MixedContentDrafts {
     /** after 为 null 时追加到末尾，有值时紧接指定项插入。 */
     suspend fun insertText(id: DraftId, after: ItemId?, edit: TextEdit): ItemId
     suspend fun insertPhoto(id: DraftId, after: ItemId?, photo: PhotoId, caption: String = ""): ItemId
+    /** 只接受已成功保存的录音；时长从原件核验，id 为 null 时开始纯录音草稿。 */
+    suspend fun appendAudio(
+        id: DraftId?, audio: AudioId, caption: String = "", initialEventTime: EventTime? = null,
+    ): DraftId
+    suspend fun insertAudio(id: DraftId, after: ItemId?, audio: AudioId, caption: String = ""): ItemId
+    suspend fun editAudioCaption(id: DraftId, itemId: ItemId, caption: String)
     /** 新建必须至少有一条非空白事项；已有草稿可插入空清单继续编辑。 */
     suspend fun appendChecklist(id: DraftId?, entries: List<ChecklistEntry>, initialEventTime: EventTime? = null): DraftId
     suspend fun insertChecklist(id: DraftId, after: ItemId?, entries: List<ChecklistEntry>): ItemId
@@ -45,14 +57,18 @@ internal fun newItemId() = ItemId(UUID.randomUUID().toString())
 internal fun ContentItem.searchText(): String? = when (this) {
     is ContentItem.Text -> text
     is ContentItem.Checklist -> entries.joinToString("\n") { it.text }
-    is ContentItem.Photo -> null
+    is ContentItem.Photo, is ContentItem.Audio -> null
 }
 internal fun List<ContentItem>.body() = mapNotNull { it.searchText() }.joinToString("\n")
 internal fun List<ContentItem>.photos() = filterIsInstance<ContentItem.Photo>().map { it.photoId }
 
 internal fun ContentSlot.asItem(): ContentItem {
-    check(listOf(text, photoId, checklistJson).count { it != null } == 1) { "内容项类型无效" }
+    check(listOf(text, photoId, checklistJson, audioId).count { it != null } == 1) { "内容项类型无效" }
+    check((audioId == null) == (audioDurationMillis == null)) { "录音时长缺失或类型无效" }
     return when {
+        audioId != null -> ContentItem.Audio(
+            ItemId(itemId), AudioId(UUID.fromString(audioId)), checkNotNull(audioDurationMillis), caption,
+        )
         checklistJson != null -> ContentItem.Checklist(ItemId(itemId), decodeChecklist(checklistJson))
         photoId != null -> ContentItem.Photo(ItemId(itemId), PhotoId(UUID.fromString(photoId)), caption)
         else -> ContentItem.Text(ItemId(itemId), checkNotNull(text))
@@ -63,6 +79,9 @@ internal fun ContentItem.asSlot(): ContentSlot = when (this) {
     is ContentItem.Text -> ContentSlot(id.value, text, null)
     is ContentItem.Photo -> ContentSlot(id.value, null, photoId.value.toString(), caption)
     is ContentItem.Checklist -> ContentSlot(id.value, null, null, checklistJson = encodeChecklist(entries))
+    is ContentItem.Audio -> ContentSlot(
+        id.value, null, null, caption, audioId = audioId.value.toString(), audioDurationMillis = durationMillis,
+    )
 }
 
 internal fun List<ContentItem>.indexOfItem(id: ItemId): Int =

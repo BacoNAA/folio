@@ -61,7 +61,10 @@ internal data class EditableDraftRow(
 )
 
 internal data class TextPreviewRow(val id: String, val excerpt: String, val firstPhotoId: String?)
-internal data class DraftPreviewRow(val id: String, val excerpt: String, val recordId: String?, val firstPhotoId: String?)
+internal data class DraftPreviewRow(
+    val id: String, val excerpt: String, val recordId: String?, val firstPhotoId: String?,
+    val totalAudioDurationMillis: Long?,
+)
 
 @Dao
 internal interface TextDao {
@@ -80,7 +83,8 @@ internal interface TextDao {
     suspend fun updateDraftTime(id: String, date: Long?, clock: Long?, zone: String?, editedAt: Long): Int
 
     @Query("""SELECT d.id, substr(d.body, 1, 80) AS excerpt, d.recordId,
-              (SELECT photoId FROM draft_items WHERE draftId = d.id AND photoId IS NOT NULL ORDER BY position LIMIT 1) AS firstPhotoId
+              (SELECT photoId FROM draft_items WHERE draftId = d.id AND photoId IS NOT NULL ORDER BY position LIMIT 1) AS firstPhotoId,
+              (SELECT sum(audioDurationMillis) FROM draft_items WHERE draftId = d.id) AS totalAudioDurationMillis
               FROM editable_text_drafts d
               ORDER BY lastEditedAt DESC, insertionOrder DESC""")
     suspend fun listDrafts(): List<DraftPreviewRow>
@@ -136,9 +140,10 @@ internal interface TextDao {
     entities = [
         DraftRow::class, RecordRow::class, RecordEditRow::class,
         DraftItemRow::class, RecordItemRow::class, RemovedItem::class, PhotoCleanupEntry::class,
+        AudioCleanupEntry::class,
     ],
     views = [EditableDraftRow::class],
-    version = 8,
+    version = 9,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -147,6 +152,7 @@ internal interface TextDao {
         AutoMigration(from = 5, to = 6),
         AutoMigration(from = 6, to = 7),
         AutoMigration(from = 7, to = 8),
+        AutoMigration(from = 8, to = 9),
     ],
 )
 internal abstract class FolioDatabase : RoomDatabase() {
@@ -155,5 +161,6 @@ internal abstract class FolioDatabase : RoomDatabase() {
     abstract fun removedItemDao(): RemovedItemDao
     abstract fun trashDao(): TrashDao
     abstract fun photoCleanupDao(): PhotoCleanupDao
+    abstract fun audioCleanupDao(): AudioCleanupDao
     abstract fun recordBrowsingDao(): RecordBrowsingDao
 }

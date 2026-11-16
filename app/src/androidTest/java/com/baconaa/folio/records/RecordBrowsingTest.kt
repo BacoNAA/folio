@@ -3,6 +3,7 @@ package com.baconaa.folio.records
 import android.graphics.Color
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.baconaa.folio.media.LocalAudioOriginals
 import com.baconaa.folio.media.LocalPhotoOriginals
 import java.time.LocalDate
 import java.time.LocalTime
@@ -24,6 +25,7 @@ internal class RecordBrowsingTest : PhotoStoreFixture() {
     fun useTestClock() {
         store = LocalTextStore(
             database, LocalPhotoOriginals.get(InstrumentationRegistry.getInstrumentation().targetContext),
+            audioOriginals = LocalAudioOriginals.get(InstrumentationRegistry.getInstrumentation().targetContext),
             now = { now },
         )
     }

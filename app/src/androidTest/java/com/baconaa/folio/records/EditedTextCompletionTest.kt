@@ -3,6 +3,7 @@ package com.baconaa.folio.records
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.baconaa.folio.media.LocalAudioOriginals
 import com.baconaa.folio.media.LocalPhotoOriginals
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
@@ -26,7 +27,7 @@ class EditedTextCompletionTest {
     @Before
     fun openDatabase() {
         database = Room.databaseBuilder(context, FolioDatabase::class.java, databaseName).build()
-        store = LocalTextStore(database, LocalPhotoOriginals.get(context), now = { now })
+        store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context), now = { now })
     }
 
     @After
