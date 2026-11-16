@@ -73,6 +73,32 @@ class LocalTextStore internal constructor(
             item.id
         }
 
+    override suspend fun appendChecklist(
+        id: DraftId?, entries: List<ChecklistEntry>, initialEventTime: EventTime?,
+    ): DraftId = database.withTransaction {
+        require(id != null || entries.any { it.text.isNotBlank() }) { "请填写清单事项后再保存" }
+        val item = ContentItem.Checklist(newItemId(), entries.toList())
+        val draftId = id ?: createDraft(initialEventTime)
+        insertItems(draftId, null, listOf(item), 0)
+        draftId
+    }
+
+    override suspend fun insertChecklist(id: DraftId, after: ItemId?, entries: List<ChecklistEntry>): ItemId =
+        database.withTransaction {
+            val item = ContentItem.Checklist(newItemId(), entries.toList())
+            insertItems(id, after, listOf(item), 0)
+            item.id
+        }
+
+    override suspend fun editChecklist(id: DraftId, itemId: ItemId, entries: List<ChecklistEntry>) =
+        database.withTransaction {
+            val items = requireDraft(id).items.toMutableList()
+            val index = items.indexOfItem(itemId)
+            require(items[index] is ContentItem.Checklist) { "该项不是清单" }
+            items[index] = ContentItem.Checklist(itemId, entries.toList())
+            database.writeMixedDraft(id, MixedDraft(items, itemId, 0), now())
+        }
+
     private suspend fun insertItems(id: DraftId, after: ItemId?, added: List<ContentItem>, cursor: Int) {
         val draft = requireDraft(id)
         val position = after?.let { draft.items.indexOfItem(it) + 1 } ?: draft.items.size
@@ -149,6 +175,11 @@ class LocalTextStore internal constructor(
     }
 
     private fun MixedDraft.withLegacyText(edit: TextEdit): MixedDraft {
+        // 拼接正文含清单索引文字，不能把旧接口的整段回存解释为某一段文字编辑。
+        if (items.any { it is ContentItem.Checklist }) {
+            require(edit.text == items.body()) { "包含清单的草稿请按内容项编辑" }
+            return this
+        }
         val paragraphs = items.filterIsInstance<ContentItem.Text>()
         val first = paragraphs.firstOrNull()
         if (first == null) {
@@ -200,7 +231,7 @@ class LocalTextStore internal constructor(
             val items = finalState(requireDraft(id)).items
             val body = items.body()
             val photos = items.photos()
-            require(body.isNotBlank() || photos.isNotEmpty()) { "请填写正文或添加照片后再完成" }
+            require(body.isNotBlank() || photos.isNotEmpty()) { "请填写文字、清单事项或添加媒体后再完成" }
             requireReadableOriginals(photos)
             cleanupQueue.enqueueDraft(id.value)
             val slots = items.map { it.asSlot() }

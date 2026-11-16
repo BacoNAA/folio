@@ -8,7 +8,7 @@ internal data class BrowseRecordRow(val id: String, @Embedded val eventTime: Eve
 internal data class PreviewItemRow(val recordId: String, @Embedded val slot: ContentSlot)
 internal data class PreviewCountRow(val recordId: String, val itemCount: Int, val photoCount: Int)
 
-private const val VISIBLE_PREVIEW_ITEM = "(photoId IS NOT NULL OR length(trim(text, :blankChars)) > 0)"
+private const val VISIBLE_PREVIEW_ITEM = "(photoId IS NOT NULL OR checklistJson IS NOT NULL OR length(trim(text, :blankChars)) > 0)"
 
 @Dao
 internal interface RecordBrowsingDao {
@@ -18,7 +18,7 @@ internal interface RecordBrowsingDao {
 
     // 每条最多读三项的短预览，不加载所有正式正文，也不逐条发起数据库查询。
     @Query("""SELECT i.recordId, i.itemId, substr(i.text, 1, 80) AS text,
-              i.photoId, substr(i.caption, 1, 80) AS caption
+              i.photoId, substr(i.caption, 1, 80) AS caption, i.checklistJson
               FROM record_items i JOIN text_records r ON r.id = i.recordId
               WHERE r.deletedAt IS NULL AND i.position IN
                 (SELECT position FROM record_items WHERE recordId = i.recordId AND """ + VISIBLE_PREVIEW_ITEM + """

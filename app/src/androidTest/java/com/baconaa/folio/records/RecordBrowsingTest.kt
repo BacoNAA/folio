@@ -116,7 +116,7 @@ internal class RecordBrowsingTest : PhotoStoreFixture() {
         assertEquals(listOf(newer, record), afterRecent.map { it.id })
         val published = afterRecent.last()
         val textId = beforeRecent.last().preview.items.single().id
-        assertEquals(ContentPreview(listOf(ContentItem.Text(textId, "修改已完成")), 0, 0), published.preview)
+        assertEquals(ContentPreview(listOf(PreviewContentItem.Text(textId, "修改已完成")), 0, 0), published.preview)
         assertEquals(changedTime, published.eventTime)
         assertEquals(listOf(EventYear(2028, listOf(published))), afterTimeline.years)
         assertEquals(beforeTimeline.undated, afterTimeline.undated)
@@ -158,9 +158,9 @@ internal class RecordBrowsingTest : PhotoStoreFixture() {
         assertEquals(
             ContentPreview(
                 listOf(
-                    ContentItem.Photo(firstPhoto, photo.id, captionPrefix),
-                    ContentItem.Text(text, textPrefix),
-                    ContentItem.Photo(secondPhoto, photo.id, "同一照片的另一处说明"),
+                    PreviewContentItem.Photo(firstPhoto, photo.id, captionPrefix),
+                    PreviewContentItem.Text(text, textPrefix),
+                    PreviewContentItem.Photo(secondPhoto, photo.id, "同一照片的另一处说明"),
                 ),
                 remainingItemCount = 3,
                 remainingPhotoCount = 2,

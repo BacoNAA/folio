@@ -225,6 +225,58 @@ class TextDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun versionSevenKeepsOrderedContentTimeAndUndoWhileAddingChecklistStorage() = runBlocking {
+        val photo = PhotoId(UUID.randomUUID())
+        val event = EventTime(LocalDate.of(2021, 7, 9), zone = ZoneId.of("Asia/Shanghai"))
+        val date = event.date.toEpochDay()
+        createDatabase(7) { sql ->
+            sql.execSQL("""INSERT INTO text_records
+                (id,sourceDraftId,body,firstRecordedAt,modifiedAt,revision,eventDate,eventZone)
+                VALUES ('record','source','旧桥',100,200,3,?,'Asia/Shanghai')""", arrayOf(date))
+            sql.execSQL("""INSERT INTO text_drafts
+                (id,body,cursor,firstRecordedAt,lastEditedAt,activeItemId,eventDate,eventZone)
+                VALUES ('edit','新🌉桥',3,100,300,'text',?,'Asia/Shanghai')""", arrayOf(date))
+            sql.execSQL("INSERT INTO text_record_edits VALUES ('edit','record',3)")
+            sql.execSQL("INSERT INTO record_items VALUES ('record',0,'text','旧桥',NULL,'')")
+            sql.execSQL("INSERT INTO draft_items VALUES ('edit',0,'text','新🌉桥',NULL,'')")
+            sql.execSQL("INSERT INTO record_items VALUES ('record',1,'photo',NULL,?,'原图说明')",
+                arrayOf(photo.value.toString()))
+            sql.execSQL("INSERT INTO draft_items VALUES ('edit',1,'photo',NULL,?,'草稿说明')",
+                arrayOf(photo.value.toString()))
+            sql.execSQL("""INSERT INTO removed_draft_items
+                (draftId,position,previousItemId,nextItemId,cursor,itemId,text,photoId,caption)
+                VALUES ('edit',1,'text','photo',1,'removed','雨',NULL,'')""")
+        }
+        val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), now = { 600L })
+            val record = RecordId("record")
+            val draft = DraftId("edit")
+            assertEquals(RecordTimes(100L, 200L, event), store.openRecordContent(record)!!.times)
+            assertEquals(DraftTimes(100L, event), store.openDraftTimes(draft))
+            assertEquals(3, store.openMixedDraft(draft)!!.cursor)
+            assertTrue(database.itemDao().recordItems(record.value).all { it.checklistJson == null })
+            assertTrue(database.itemDao().draftItems(draft.value).all { it.checklistJson == null })
+            assertNull(database.removedItemDao().get(draft.value)!!.slot.checklistJson)
+            assertEquals(listOf(PreviewContentItem.Text(ItemId("text"), "旧桥"),
+                PreviewContentItem.Photo(ItemId("photo"), photo, "原图说明")),
+                store.listRecentRecords().single().preview.items)
+            assertEquals(record, store.search("旧桥").single().id)
+            assertTrue(store.undoRemoval(draft))
+            assertEquals(listOf(ContentItem.Text(ItemId("text"), "新🌉桥"),
+                ContentItem.Text(ItemId("removed"), "雨"), ContentItem.Photo(ItemId("photo"), photo, "草稿说明")),
+                store.openMixedDraft(draft)!!.items)
+            val entries = listOf(ChecklistEntry(ChecklistEntryId("new-entry"), "新清单", true))
+            val checklist = store.insertChecklist(draft, ItemId("text"), entries)
+            assertEquals(ContentItem.Checklist(checklist, entries), store.openMixedDraft(draft)!!.items[1])
+            assertTrue(store.search("新清单").isEmpty())
+            assertEquals(record, store.completeMixedDraft(DraftId("source")))
+        } finally {
+            database.close()
+        }
+    }
+
     private fun createDatabase(version: Int, seed: (SQLiteDatabase) -> Unit) {
         val schemaFile = "${FolioDatabase::class.java.name}/$version.json"
         val schema = instrumentation.context.assets.open(schemaFile).bufferedReader().use {

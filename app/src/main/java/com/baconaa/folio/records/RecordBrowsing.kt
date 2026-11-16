@@ -1,10 +1,27 @@
 package com.baconaa.folio.records
 
 import androidx.room.withTransaction
+import com.baconaa.folio.media.PhotoId
 
-/** 仅供展示：最多三项，文字与照片说明各截取前 80 个 Unicode 码点，不能作为完整内容回存。 */
+/** 仅供展示，与可回存的 ContentItem 分开；文字各截取前 80 个 Unicode 码点。 */
+sealed interface PreviewContentItem {
+    val id: ItemId
+
+    data class Text(override val id: ItemId, val text: String) : PreviewContentItem
+    data class Photo(override val id: ItemId, val photoId: PhotoId, val caption: String) : PreviewContentItem
+    data class Checklist(
+        override val id: ItemId,
+        val entries: List<ChecklistEntryPreview>,
+        val totalEntryCount: Int,
+        val checkedEntryCount: Int,
+    ) : PreviewContentItem
+}
+
+data class ChecklistEntryPreview(val text: String, val checked: Boolean)
+
+/** 最多三项；清单只读展示前三条，同时给出全部事项及已完成事项数。 */
 data class ContentPreview(
-    val items: List<ContentItem>,
+    val items: List<PreviewContentItem>,
     val remainingItemCount: Int,
     val remainingPhotoCount: Int,
 )
@@ -38,14 +55,14 @@ internal class LocalRecordBrowsing(private val database: FolioDatabase) : Record
         val items = dao.previewItems(PREVIEW_BLANK_CHARACTERS).groupBy { it.recordId }
         val counts = dao.previewCounts(PREVIEW_BLANK_CHARACTERS).associateBy { it.recordId }
         records.map { record ->
-            val previewItems = items[record.id].orEmpty().map { it.slot.asItem() }
+            val previewItems = items[record.id].orEmpty().map { it.slot.asPreview() }
             val count = counts[record.id]
             RecordCard(
                 RecordId(record.id), record.eventTime?.asEventTime(),
                 ContentPreview(
                     previewItems,
                     (count?.itemCount ?: 0) - previewItems.size,
-                    (count?.photoCount ?: 0) - previewItems.count { it is ContentItem.Photo },
+                    (count?.photoCount ?: 0) - previewItems.count { it is PreviewContentItem.Photo },
                 ),
             )
         }
@@ -60,3 +77,16 @@ internal class LocalRecordBrowsing(private val database: FolioDatabase) : Record
         )
     }
 }
+
+private fun ContentSlot.asPreview(): PreviewContentItem = when (val item = asItem()) {
+    is ContentItem.Text -> PreviewContentItem.Text(item.id, item.text)
+    is ContentItem.Photo -> PreviewContentItem.Photo(item.id, item.photoId, item.caption)
+    is ContentItem.Checklist -> PreviewContentItem.Checklist(
+        item.id,
+        item.entries.take(3).map { ChecklistEntryPreview(it.text.previewText(), it.checked) },
+        item.entries.size,
+        item.entries.count { it.checked },
+    )
+}
+
+private fun String.previewText(): String = substring(0, offsetByCodePoints(0, codePointCount(0, length).coerceAtMost(80)))
