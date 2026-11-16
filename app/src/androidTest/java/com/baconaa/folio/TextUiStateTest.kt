@@ -29,14 +29,16 @@ class TextUiStateTest {
                 if (failSave) throw IOException("test failure")
                 return store.saveDraft(id, edit, initialEventTime)
             }
-            override suspend fun completeDraft(id: DraftId, finalEdit: TextEdit): RecordId {
+        }
+        val failingMixed = object : MixedContentDrafts by store {
+            override suspend fun completeMixedDraft(id: DraftId): RecordId {
                 if (failComplete) throw IOException("test failure")
-                return store.completeDraft(id, finalEdit)
+                return store.completeMixedDraft(id)
             }
         }
         lateinit var model: FolioViewModel
         val text = "失败重试${System.nanoTime()}"
-        main { model = FolioViewModel(failing, store, store, store); model.newText(); model.change(TextFieldValue(text)) }
+        main { model = FolioViewModel(failing, store, failingMixed, store); model.newText(); model.change(TextFieldValue(text)) }
         await { model.state.saveError != null }
         main { assertEquals(text, model.state.editor!!.value.text); failSave = false; model.save() }
         await { model.state.editor?.draftId != null && model.state.saveError == null }

@@ -6,6 +6,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,6 +24,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
@@ -52,7 +58,7 @@ private val Ink = Color(0xFF423A32)
 private val Accent = Color(0xFF956B50)
 
 @Composable
-fun FolioApp(model: FolioViewModel) {
+fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _, _ -> }) {
     val state = model.state
     val recordsScroll = rememberLazyListState()
     val searchScroll = rememberLazyListState()
@@ -81,7 +87,7 @@ fun FolioApp(model: FolioViewModel) {
                             else -> "记录"
                         }, Modifier.weight(1f), fontSize = 22.sp, fontFamily = FontFamily.Serif)
                         if (state.page == Page.Editor) {
-                            Button(onClick = model::complete, enabled = !state.busy && !state.editor?.value?.text.isNullOrBlank()) {
+                            Button(onClick = model::complete, enabled = !state.busy && state.editor?.hasContent == true && !state.recording && state.pendingAttachment == null && !state.importFailed && state.editor.needsReload == false) {
                                 Text("完成")
                             }
                         }
@@ -93,7 +99,8 @@ fun FolioApp(model: FolioViewModel) {
                 if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 state.error?.let { error ->
                     ErrorMessage(error, if (state.page == Page.Detail) model::retryDetail
-                        else if (state.page == Page.Records || state.page == Page.Search) model::refresh else null)
+                        else if (state.page == Page.Records || state.page == Page.Search) model::refresh
+                        else if (state.editor?.needsReload == true) model::reload else null)
                 }
 
                 Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -102,36 +109,21 @@ fun FolioApp(model: FolioViewModel) {
                             ArtCrop(42, 184, 696, 656, Modifier.fillMaxWidth()
                                 .clickable(role = Role.Button, onClick = model::newText)
                                 .semantics { contentDescription = "写一句" }.testTag("write"))
-                            Spacer(Modifier.height(28.dp))
-                            Text("把这一刻，留在这里。", color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.align(Alignment.CenterHorizontally), fontSize = 14.sp)
+                            Spacer(Modifier.height(26.dp))
+                            Row(Modifier.fillMaxWidth()) {
+                                listOf("camera" to "拍照", "photo" to "选图", "audio" to "录音", "checklist" to "清单").forEachIndexed { index, (kind, label) ->
+                                    ArtCrop(42 + index * 174, 892, 174, 232, Modifier.weight(1f)
+                                        .clickable(role = Role.Button) { if (kind == "checklist") model.newChecklist() else launchMedia(kind, null) }
+                                        .semantics { contentDescription = label }.testTag("quick-$kind"))
+                                }
+                            }
                             state.savedId?.let { id ->
                                 TextButton(onClick = { model.openRecord(id) }, modifier = Modifier.fillMaxWidth().padding(top = 24.dp)) {
                                     Text("已保存 · 查看")
                                 }
                             }
                         }
-                        Page.Editor -> state.editor?.let { editor ->
-                            val focus = remember { FocusRequester() }
-                            LaunchedEffect(Unit) { focus.requestFocus() }
-                            Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
-                                OutlinedTextField(value = editor.value, onValueChange = model::change,
-                                    modifier = Modifier.fillMaxWidth().weight(1f).focusRequester(focus).testTag("editor"),
-                                    enabled = !state.busy, placeholder = { Text("写下一句话，也可以慢慢写……") },
-                                    textStyle = MaterialTheme.typography.bodyLarge.copy(lineHeight = 30.sp),
-                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default))
-                                state.saveError?.let { ErrorMessage(it, model::save) }
-                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(when {
-                                        state.saveError != null -> "尚未保存"
-                                        editor.revision != editor.savedRevision -> "正在保存…"
-                                        editor.draftId != null -> "草稿已保存"
-                                        else -> "有内容就能保存"
-                                    }, Modifier.weight(1f), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    TextButton(onClick = { discardDialog = true }, enabled = !state.busy) { Text("放弃修改") }
-                                }
-                            }
-                        }
+                        Page.Editor -> MixedEditorScreen(model, launchMedia) { discardDialog = true }
                         Page.Records -> Column {
                             TextButton(onClick = { model.home(Page.Search) }, modifier = Modifier.padding(horizontal = 12.dp)) {
                                 Text("搜索全部记录")
@@ -151,15 +143,15 @@ fun FolioApp(model: FolioViewModel) {
                             if (!state.loading && state.error == null && state.records.isEmpty()) EmptyMessage("还没有记录\n从「写一句」开始，完成后会出现在这里。")
                             LazyColumn(state = recordsScroll, contentPadding = PaddingValues(20.dp),
                                 verticalArrangement = Arrangement.spacedBy(20.dp), modifier = Modifier.testTag("records-list")) {
-                                if (state.recent) items(state.records, key = { it.id.value }) { RecordPreview(it, model::openRecord) }
+                                if (state.recent) items(state.records, key = { it.id.value }) { RecordPreview(it, model) }
                                 else {
                                     state.timeline.years.forEach { year ->
                                         item("year-${year.year}") { Text("${year.year} 年", style = MaterialTheme.typography.titleLarge) }
-                                        items(year.records, key = { it.id.value }) { RecordPreview(it, model::openRecord) }
+                                        items(year.records, key = { it.id.value }) { RecordPreview(it, model) }
                                     }
                                     if (state.timeline.undated.isNotEmpty()) {
                                         item("undated") { Text("时间未定", style = MaterialTheme.typography.titleMedium) }
-                                        items(state.timeline.undated, key = { it.id.value }) { RecordPreview(it, model::openRecord) }
+                                        items(state.timeline.undated, key = { it.id.value }) { RecordPreview(it, model) }
                                     }
                                 }
                             }
@@ -176,7 +168,7 @@ fun FolioApp(model: FolioViewModel) {
                             }
                             LazyColumn(state = searchScroll, contentPadding = PaddingValues(vertical = 12.dp),
                                 verticalArrangement = Arrangement.spacedBy(20.dp), modifier = Modifier.testTag("search-results")) {
-                                if (state.error == null) items(state.results, key = { it.id.value }) { RecordPreview(it, model::openRecord) }
+                                if (state.error == null) items(state.results, key = { it.id.value }) { RecordPreview(it, model) }
                             }
                         }
                         Page.Detail -> state.detail?.let { content ->
@@ -191,7 +183,7 @@ fun FolioApp(model: FolioViewModel) {
                                 content.items.forEach { item -> when (item) {
                                     is ContentItem.Text -> Text(item.text, fontSize = 18.sp, lineHeight = 32.sp)
                                     is ContentItem.Photo -> { Photo(item.photoId); if (item.caption.isNotEmpty()) Text(item.caption) }
-                                    is ContentItem.Audio -> Text("录音 · ${item.durationMillis / 1000} 秒\n${item.caption}")
+                                    is ContentItem.Audio -> { AudioControl(item.audioId, item.durationMillis, model); if (item.caption.isNotEmpty()) Text(item.caption) }
                                     is ContentItem.Checklist -> item.entries.forEach { Text("${if (it.checked) "☑" else "☐"} ${it.text}") }
                                 } }
                                 if (content.tags.isNotEmpty()) Text(content.tags.joinToString(" · ") { it.name }, color = Accent)
@@ -245,7 +237,7 @@ private fun ArtCrop(x: Int, y: Int, width: Int, height: Int, modifier: Modifier)
 }
 
 @Composable
-private fun ErrorMessage(message: String, retry: (() -> Unit)?) {
+internal fun ErrorMessage(message: String, retry: (() -> Unit)?) {
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         Text(message, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
         if (retry != null) TextButton(onClick = retry) { Text("重试") }
@@ -259,15 +251,15 @@ private fun EmptyMessage(text: String) {
 }
 
 @Composable
-private fun RecordPreview(record: RecordCard, open: (RecordId) -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable { open(record.id) }.padding(vertical = 6.dp),
+private fun RecordPreview(record: RecordCard, model: FolioViewModel) {
+    Column(Modifier.fillMaxWidth().clickable { model.openRecord(record.id) }.padding(vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(listOfNotNull(record.eventTime?.date?.toString(), if (record.marks.isPinned) "置顶" else null,
             if (record.marks.isStarred) "★" else null).joinToString(" · "), fontSize = 12.sp, color = Accent)
         record.preview.items.forEach { item -> when (item) {
             is PreviewContentItem.Text -> Text(item.text, maxLines = 4, lineHeight = 26.sp)
             is PreviewContentItem.Photo -> { Photo(item.photoId); if (item.caption.isNotEmpty()) Text(item.caption) }
-            is PreviewContentItem.Audio -> Text("录音 · ${item.durationMillis / 1000} 秒 ${item.caption}")
+            is PreviewContentItem.Audio -> { AudioControl(item.audioId, item.durationMillis, model); if (item.caption.isNotEmpty()) Text(item.caption) }
             is PreviewContentItem.Checklist -> item.entries.forEach { Text("${if (it.checked) "☑" else "☐"} ${it.text}") }
         } }
         if (record.preview.remainingItemCount > 0) Text("还有 ${record.preview.remainingItemCount} 项内容", fontSize = 12.sp)
@@ -276,9 +268,10 @@ private fun RecordPreview(record: RecordCard, open: (RecordId) -> Unit) {
 }
 
 @Composable
-private fun Photo(id: PhotoId) {
+internal fun Photo(id: PhotoId) {
     val context = LocalContext.current
     var failed by remember(id) { mutableStateOf(false) }
+    var expanded by remember(id) { mutableStateOf(false) }
     val bitmap by produceState<ImageBitmap?>(null, id) {
         try {
             value = withContext(Dispatchers.IO) {
@@ -291,8 +284,24 @@ private fun Photo(id: PhotoId) {
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { failed = true }
     }
-    bitmap?.let { Image(it, "记录中的照片", Modifier.fillMaxWidth().heightIn(max = 320.dp)) }
+    bitmap?.let { Image(it, "记录中的照片，点击放大", Modifier.fillMaxWidth().heightIn(max = 320.dp).clickable { expanded = true }) }
         ?: Text(if (failed) "照片读取失败，请重新打开记录。" else "正在读取照片…")
+    if (expanded) Dialog(onDismissRequest = { expanded = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        var scale by remember { mutableFloatStateOf(1f) }
+        var offset by remember { mutableStateOf(Offset.Zero) }
+        val transform = rememberTransformableState { zoom, pan, _ ->
+            scale = (scale * zoom).coerceIn(1f, 5f)
+            offset = if (scale == 1f) Offset.Zero else offset + pan
+        }
+        Surface(Modifier.fillMaxSize(), color = Color.Black) {
+            Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                bitmap?.let { Image(it, "照片", Modifier.fillMaxSize().transformable(transform).graphicsLayer {
+                    scaleX = scale; scaleY = scale; translationX = offset.x; translationY = offset.y
+                }) }
+                TextButton(onClick = { expanded = false }, modifier = Modifier.align(Alignment.TopEnd)) { Text("关闭照片", color = Color.White) }
+            }
+        }
+    }
 }
 
 private fun formatDate(millis: Long): String = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
