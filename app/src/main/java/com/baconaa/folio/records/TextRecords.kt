@@ -20,11 +20,19 @@ data class DraftPreview(
     val excerpt: String,
     val recordId: RecordId? = null,
     val firstPhotoId: PhotoId? = null,
+    /** 已保存录音项的总时长；无录音时为 null，可用于辨认纯录音草稿。 */
+    val totalAudioDurationMillis: Long? = null,
 )
 
-data class RecordPreview(val id: RecordId, val excerpt: String, val firstPhotoId: PhotoId? = null)
+data class RecordPreview(
+    val id: RecordId, val excerpt: String, val firstPhotoId: PhotoId? = null,
+    val marks: RecordMarks = RecordMarks(),
+)
 
-data class RecordContent(val items: List<ContentItem>, val times: RecordTimes) {
+data class RecordContent(
+    val items: List<ContentItem>, val times: RecordTimes, val marks: RecordMarks = RecordMarks(),
+    val tags: List<Tag> = emptyList(),
+) {
     val text: String get() = items.body()
     val photos: List<PhotoId> get() = items.photos()
 }
@@ -57,8 +65,8 @@ interface TextDrafts {
 
     /**
      * 最终输入写入正式记录、本次草稿移除须一起成功。
-     * 正文和已追加的照片一起提交，至少要有一项内容。
-     * 编辑草稿更新原记录并返回同一 ID。内容未变时保留修改时间。
+     * 混合内容、事件时间和标签选择一起提交，至少要有一项实际内容。
+     * 编辑草稿更新原记录并返回同一 ID。内容及归属未变时保留修改时间。
      * 失败保留草稿与原正式版本，重复完成返回已提交的 ID。
      */
     suspend fun completeDraft(id: DraftId, finalEdit: TextEdit): RecordId
@@ -66,10 +74,10 @@ interface TextDrafts {
 
 /** 使用同一正式记录 ID 查找和打开最后完成的版本。读取失败须向调用方抛出异常。 */
 interface PublishedTextRecords {
-    /** 从同一正式版本读取正文和有序原图；不可查看的记录返回 null。 */
+    /** 读取完整正式内容、时间、标记及标签当前名称；不可查看的记录返回 null。 */
     suspend fun openRecordContent(id: RecordId): RecordContent?
 
-    /** 按正文匹配，排除草稿与回收站。没有匹配时返回空列表。 */
+    /** 匹配正文、清单、媒体说明和标签当前名称，排除草稿与回收站。没有匹配时返回空列表。 */
     suspend fun search(keyword: String): List<RecordPreview>
 
     /** 返回完整的正式正文，记录不在有效正式记录中时返回 null。 */

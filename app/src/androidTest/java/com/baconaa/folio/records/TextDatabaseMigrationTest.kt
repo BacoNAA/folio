@@ -5,8 +5,10 @@ import android.database.sqlite.SQLiteDatabase
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.baconaa.folio.media.LocalAudioOriginals
 import com.baconaa.folio.media.LocalPhotoOriginals
 import com.baconaa.folio.media.PhotoId
+import com.baconaa.folio.media.createAudioTestClip
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.UUID
@@ -40,7 +42,7 @@ class TextDatabaseMigrationTest {
 
         val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
         try {
-            val store = LocalTextStore(database, LocalPhotoOriginals.get(context))
+            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context))
             val record = RecordId("published")
             val oldDraft = DraftId("unfinished")
             assertEquals(TextEdit("等雨停", 1), store.openDraft(oldDraft))
@@ -71,7 +73,7 @@ class TextDatabaseMigrationTest {
 
         val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
         try {
-            val store = LocalTextStore(database, LocalPhotoOriginals.get(context))
+            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context))
             val record = RecordId("record")
             val draft = DraftId("edit")
             assertEquals(draft, store.editRecord(record))
@@ -103,7 +105,7 @@ class TextDatabaseMigrationTest {
 
         val db = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
         try {
-            val store = LocalTextStore(db, LocalPhotoOriginals.get(context))
+            val store = LocalTextStore(db, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context))
             val record = RecordId("record")
             val content = requireNotNull(store.openRecordContent(record))
             val textId = content.items.first().id
@@ -148,7 +150,7 @@ class TextDatabaseMigrationTest {
 
         val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
         try {
-            val store = LocalTextStore(database, LocalPhotoOriginals.get(context))
+            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context))
             val record = RecordId("record")
             val draft = DraftId("edit")
             val publishedItems = listOf(ContentItem.Text(text, "旧桥"), ContentItem.Photo(first, oldPhoto, "原图说明"))
@@ -198,7 +200,7 @@ class TextDatabaseMigrationTest {
 
         val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
         try {
-            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), now = { 600L })
+            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context), now = { 600L })
             val record = RecordId("record")
             val draft = DraftId("edit")
             val unfinished = DraftId("unfinished")
@@ -222,6 +224,248 @@ class TextDatabaseMigrationTest {
             assertEquals(RecordTimes(100L, 600L, event), store.openRecordContent(record)!!.times)
         } finally {
             database.close()
+        }
+    }
+
+    @Test
+    fun versionSevenKeepsOrderedContentTimeAndUndoWhileAddingChecklistStorage() = runBlocking {
+        val photo = PhotoId(UUID.randomUUID())
+        val event = EventTime(LocalDate.of(2021, 7, 9), zone = ZoneId.of("Asia/Shanghai"))
+        val date = event.date.toEpochDay()
+        createDatabase(7) { sql ->
+            sql.execSQL("""INSERT INTO text_records
+                (id,sourceDraftId,body,firstRecordedAt,modifiedAt,revision,eventDate,eventZone)
+                VALUES ('record','source','旧桥',100,200,3,?,'Asia/Shanghai')""", arrayOf(date))
+            sql.execSQL("""INSERT INTO text_drafts
+                (id,body,cursor,firstRecordedAt,lastEditedAt,activeItemId,eventDate,eventZone)
+                VALUES ('edit','新🌉桥',3,100,300,'text',?,'Asia/Shanghai')""", arrayOf(date))
+            sql.execSQL("INSERT INTO text_record_edits VALUES ('edit','record',3)")
+            sql.execSQL("INSERT INTO record_items VALUES ('record',0,'text','旧桥',NULL,'')")
+            sql.execSQL("INSERT INTO draft_items VALUES ('edit',0,'text','新🌉桥',NULL,'')")
+            sql.execSQL("INSERT INTO record_items VALUES ('record',1,'photo',NULL,?,'原图说明')",
+                arrayOf(photo.value.toString()))
+            sql.execSQL("INSERT INTO draft_items VALUES ('edit',1,'photo',NULL,?,'草稿说明')",
+                arrayOf(photo.value.toString()))
+            sql.execSQL("""INSERT INTO removed_draft_items
+                (draftId,position,previousItemId,nextItemId,cursor,itemId,text,photoId,caption)
+                VALUES ('edit',1,'text','photo',1,'removed','雨',NULL,'')""")
+        }
+        val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context), now = { 600L })
+            val record = RecordId("record")
+            val draft = DraftId("edit")
+            assertEquals(RecordTimes(100L, 200L, event), store.openRecordContent(record)!!.times)
+            assertEquals(DraftTimes(100L, event), store.openDraftTimes(draft))
+            assertEquals(3, store.openMixedDraft(draft)!!.cursor)
+            assertTrue(database.itemDao().recordItems(record.value).all { it.checklistJson == null })
+            assertTrue(database.itemDao().draftItems(draft.value).all { it.checklistJson == null })
+            assertNull(database.removedItemDao().get(draft.value)!!.slot.checklistJson)
+            assertEquals(listOf(PreviewContentItem.Text(ItemId("text"), "旧桥"),
+                PreviewContentItem.Photo(ItemId("photo"), photo, "原图说明")),
+                store.listRecentRecords().single().preview.items)
+            assertEquals(record, store.search("旧桥").single().id)
+            assertTrue(store.undoRemoval(draft))
+            assertEquals(listOf(ContentItem.Text(ItemId("text"), "新🌉桥"),
+                ContentItem.Text(ItemId("removed"), "雨"), ContentItem.Photo(ItemId("photo"), photo, "草稿说明")),
+                store.openMixedDraft(draft)!!.items)
+            val entries = listOf(ChecklistEntry(ChecklistEntryId("new-entry"), "新清单", true))
+            val checklist = store.insertChecklist(draft, ItemId("text"), entries)
+            assertEquals(ContentItem.Checklist(checklist, entries), store.openMixedDraft(draft)!!.items[1])
+            assertTrue(store.search("新清单").isEmpty())
+            assertEquals(record, store.completeMixedDraft(DraftId("source")))
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun versionEightKeepsChecklistDraftTrashUndoAndPhotoCleanupWhenAudioIsIntroduced() = runBlocking {
+        val pendingPhoto = PhotoId(UUID.randomUUID())
+        val oldEntries = listOf(ChecklistEntry(ChecklistEntryId("tent"), "帐篷", false))
+        val changedEntries = listOf(ChecklistEntry(ChecklistEntryId("tent"), "帐篷", true))
+        val removedEntries = listOf(ChecklistEntry(ChecklistEntryId("water"), "带水", true))
+        createDatabase(8) { sql ->
+            sql.execSQL("""INSERT INTO text_records
+                (id,sourceDraftId,body,firstRecordedAt,modifiedAt,deletedAt,revision)
+                VALUES ('record','source','帐篷',100,200,400,3)""")
+            sql.execSQL("""INSERT INTO text_drafts
+                (id,body,cursor,firstRecordedAt,lastEditedAt,activeItemId)
+                VALUES ('edit','帐篷',0,100,300,'checklist')""")
+            sql.execSQL("INSERT INTO text_record_edits VALUES ('edit','record',3)")
+            sql.execSQL("""INSERT INTO record_items
+                (recordId,position,itemId,checklistJson) VALUES ('record',0,'checklist',?)""",
+                arrayOf("""[{"id":"tent","text":"帐篷","checked":false}]"""))
+            sql.execSQL("""INSERT INTO draft_items
+                (draftId,position,itemId,checklistJson) VALUES ('edit',0,'checklist',?)""",
+                arrayOf("""[{"id":"tent","text":"帐篷","checked":true}]"""))
+            sql.execSQL("""INSERT INTO removed_draft_items
+                (draftId,position,previousItemId,nextItemId,cursor,itemId,checklistJson)
+                VALUES ('edit',1,'checklist',NULL,0,'removed',?)""",
+                arrayOf("""[{"id":"water","text":"带水","checked":true}]"""))
+            sql.execSQL("INSERT INTO photo_cleanup_queue VALUES (?)", arrayOf(pendingPhoto.value.toString()))
+        }
+        val audio = createAudioTestClip(context)
+        val originals = LocalAudioOriginals.get(context)
+        val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = originals)
+            val record = RecordId("record")
+            val draft = DraftId("edit")
+            val published = listOf(ContentItem.Checklist(ItemId("checklist"), oldEntries))
+            assertEquals(published, store.openTrashRecord(record)!!.content.items)
+            assertEquals(RecordTimes(100L, 200L, null), store.openTrashRecord(record)!!.content.times)
+            assertTrue(store.openTrashRecord(record)!!.hasDraft)
+            assertNull(store.openMixedDraft(draft))
+            assertTrue(database.itemDao().recordItems(record.value).all { it.audioId == null && it.audioDurationMillis == null })
+            assertNull(database.removedItemDao().get(draft.value)!!.slot.audioId)
+            assertTrue(database.audioCleanupDao().candidates().isEmpty())
+            assertEquals(listOf(pendingPhoto.value.toString()), database.photoCleanupDao().candidates())
+            assertTrue(store.restoreRecord(record))
+            assertEquals(draft, store.editRecord(record))
+            assertEquals(listOf(ContentItem.Checklist(ItemId("checklist"), changedEntries)), store.openMixedDraft(draft)!!.items)
+            assertNull(store.listDrafts().single().totalAudioDurationMillis)
+            assertTrue(store.undoRemoval(draft))
+            assertEquals(ContentItem.Checklist(ItemId("removed"), removedEntries), store.openMixedDraft(draft)!!.items.last())
+            store.appendAudio(draft, audio.id)
+            val saved = store.openMixedDraft(draft)!!.items
+            assertEquals(published, store.openRecordContent(record)!!.items)
+            assertEquals(record, store.completeMixedDraft(draft))
+            assertEquals(saved, store.openRecordContent(record)!!.items)
+        } finally {
+            database.close()
+            originals.deleteOriginal(audio.id)
+        }
+    }
+
+    @Test
+    fun versionNineKeepsAudioChecklistAndUndoWhileDefaultingRecordMarksToFalse() = runBlocking {
+        val audio = createAudioTestClip(context)
+        val originals = LocalAudioOriginals.get(context)
+        val pendingAudio = UUID.randomUUID().toString()
+        val event = EventTime(LocalDate.of(2021, 7, 9), zone = ZoneId.of("Asia/Shanghai"))
+        createDatabase(9) { sql ->
+            sql.execSQL("""INSERT INTO text_records
+                (id,sourceDraftId,body,firstRecordedAt,modifiedAt,revision,eventDate,eventZone)
+                VALUES ('record','source','帐篷',100,200,3,?,'Asia/Shanghai')""",
+                arrayOf(event.date.toEpochDay()))
+            sql.execSQL("""INSERT INTO text_records
+                (id,sourceDraftId,body,firstRecordedAt,modifiedAt,deletedAt)
+                VALUES ('trash','trash-source','旧记录',100,200,400)""")
+            sql.execSQL("""INSERT INTO text_drafts
+                (id,body,cursor,firstRecordedAt,lastEditedAt,activeItemId,eventDate,eventZone)
+                VALUES ('edit','帐篷',0,100,300,'audio',?,'Asia/Shanghai')""",
+                arrayOf(event.date.toEpochDay()))
+            sql.execSQL("INSERT INTO text_record_edits VALUES ('edit','record',3)")
+            val checklist = """[{"id":"tent","text":"帐篷","checked":true}]"""
+            sql.execSQL("""INSERT INTO record_items
+                (recordId,position,itemId,checklistJson) VALUES ('record',0,'checklist',?)""", arrayOf(checklist))
+            sql.execSQL("""INSERT INTO draft_items
+                (draftId,position,itemId,checklistJson) VALUES ('edit',0,'checklist',?)""", arrayOf(checklist))
+            sql.execSQL("""INSERT INTO record_items
+                (recordId,position,itemId,caption,audioId,audioDurationMillis)
+                VALUES ('record',1,'audio','帐篷里的雨',?,?)""", arrayOf<Any>(audio.id.value.toString(), audio.durationMillis))
+            sql.execSQL("""INSERT INTO draft_items
+                (draftId,position,itemId,caption,audioId,audioDurationMillis)
+                VALUES ('edit',1,'audio','帐篷里的雨',?,?)""", arrayOf<Any>(audio.id.value.toString(), audio.durationMillis))
+            sql.execSQL("""INSERT INTO removed_draft_items
+                (draftId,position,previousItemId,cursor,itemId,caption,audioId,audioDurationMillis)
+                VALUES ('edit',2,'audio',0,'removed','另一处声音',?,?)""", arrayOf<Any>(audio.id.value.toString(), audio.durationMillis))
+            sql.execSQL("INSERT INTO audio_cleanup_queue VALUES (?)", arrayOf(pendingAudio))
+        }
+        val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = originals, now = { 600L })
+            val record = RecordId("record")
+            val draft = DraftId("edit")
+            val content = store.openRecordContent(record)!!
+            assertEquals(RecordMarks(), content.marks)
+            assertEquals(RecordTimes(100L, 200L, event), content.times)
+            assertEquals(ContentItem.Checklist(ItemId("checklist"),
+                listOf(ChecklistEntry(ChecklistEntryId("tent"), "帐篷", true))), content.items[0])
+            assertEquals(ContentItem.Audio(ItemId("audio"), audio.id, audio.durationMillis, "帐篷里的雨"), content.items[1])
+            assertEquals(content.items, store.openMixedDraft(draft)!!.items)
+            assertEquals(RecordMarks(), store.openTrashRecord(RecordId("trash"))!!.content.marks)
+            assertTrue(store.listStarredRecords().isEmpty())
+            assertEquals(listOf(pendingAudio), database.audioCleanupDao().candidates())
+            assertEquals(audio, originals.inspect(audio.id))
+            store.setStarred(record, true)
+            store.setPinned(record, true)
+            assertEquals(3L, database.textDao().activeRecord(record.value)!!.revision)
+            assertEquals(content.times, store.openRecordContent(record)!!.times)
+            assertEquals(RecordMarks(true, true), store.listStarredRecords().single().marks)
+            assertTrue(store.undoRemoval(draft))
+            assertEquals(ContentItem.Audio(ItemId("removed"), audio.id, audio.durationMillis, "另一处声音"),
+                store.openMixedDraft(draft)!!.items.last())
+            assertEquals(record, store.completeMixedDraft(draft))
+            assertEquals(RecordMarks(true, true), store.openRecordContent(record)!!.marks)
+            assertEquals(3, store.openRecordContent(record)!!.items.size)
+            assertEquals(audio, originals.inspect(audio.id))
+        } finally {
+            database.close()
+            originals.deleteOriginal(audio.id)
+        }
+    }
+
+    @Test
+    fun versionTenKeepsMarkedTrashAndMixedDraftWhileAddingIndependentTagRelations() = runBlocking {
+        val audio = createAudioTestClip(context)
+        val originals = LocalAudioOriginals.get(context)
+        val pendingPhoto = UUID.randomUUID().toString()
+        val pendingAudio = UUID.randomUUID().toString()
+        createDatabase(10) { sql ->
+            sql.execSQL("""INSERT INTO text_records
+                (id,sourceDraftId,body,firstRecordedAt,modifiedAt,deletedAt,revision,isStarred,isPinned)
+                VALUES ('record','source','帐篷',100,200,400,3,1,1)""")
+            sql.execSQL("""INSERT INTO text_drafts
+                (id,body,cursor,firstRecordedAt,lastEditedAt,activeItemId)
+                VALUES ('edit','帐篷',0,100,300,'audio')""")
+            sql.execSQL("INSERT INTO text_record_edits VALUES ('edit','record',3)")
+            val checklist = """[{"id":"tent","text":"帐篷","checked":true}]"""
+            sql.execSQL("""INSERT INTO record_items
+                (recordId,position,itemId,checklistJson) VALUES ('record',0,'checklist',?)""", arrayOf(checklist))
+            sql.execSQL("""INSERT INTO draft_items
+                (draftId,position,itemId,checklistJson) VALUES ('edit',0,'checklist',?)""", arrayOf(checklist))
+            sql.execSQL("""INSERT INTO record_items
+                (recordId,position,itemId,caption,audioId,audioDurationMillis)
+                VALUES ('record',1,'audio','帐篷里的雨',?,?)""", arrayOf<Any>(audio.id.value.toString(), audio.durationMillis))
+            sql.execSQL("""INSERT INTO draft_items
+                (draftId,position,itemId,caption,audioId,audioDurationMillis)
+                VALUES ('edit',1,'audio','帐篷里的雨',?,?)""", arrayOf<Any>(audio.id.value.toString(), audio.durationMillis))
+            sql.execSQL("""INSERT INTO removed_draft_items
+                (draftId,position,previousItemId,cursor,itemId,text)
+                VALUES ('edit',2,'audio',1,'removed','雨')""")
+            sql.execSQL("INSERT INTO photo_cleanup_queue VALUES (?)", arrayOf(pendingPhoto))
+            sql.execSQL("INSERT INTO audio_cleanup_queue VALUES (?)", arrayOf(pendingAudio))
+        }
+        val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = originals, now = { 600L })
+            val record = RecordId("record")
+            val draft = DraftId("edit")
+            val content = store.openTrashRecord(record)!!.content
+            assertEquals(RecordMarks(true, true), content.marks)
+            assertEquals(RecordTimes(100L, 200L, null), content.times)
+            assertEquals(ContentItem.Audio(ItemId("audio"), audio.id, audio.durationMillis, "帐篷里的雨"), content.items.last())
+            assertTrue(content.tags.isEmpty())
+            assertTrue(store.listTags().isEmpty())
+            assertNull(store.openDraftTags(draft))
+            assertEquals(listOf(pendingPhoto), database.photoCleanupDao().candidates())
+            assertEquals(listOf(pendingAudio), database.audioCleanupDao().candidates())
+            assertTrue(store.restoreRecord(record))
+            assertEquals(content.items, store.openMixedDraft(draft)!!.items)
+            assertEquals(emptyList<Tag>(), store.openDraftTags(draft))
+            assertTrue(store.undoRemoval(draft))
+            assertEquals(ContentItem.Text(ItemId("removed"), "雨"), store.openMixedDraft(draft)!!.items.last())
+            val tag = store.createDraftTag(draft, "露营")
+            assertTrue(store.openRecordContent(record)!!.tags.isEmpty())
+            assertEquals(record, store.completeMixedDraft(draft))
+            assertEquals(listOf(Tag(tag, "露营")), store.queryRecords(tagIds = setOf(tag), starredOnly = true).single().tags)
+            assertEquals(RecordMarks(true, true), store.openRecordContent(record)!!.marks)
+            assertEquals(audio, originals.inspect(audio.id))
+        } finally {
+            database.close()
+            originals.deleteOriginal(audio.id)
         }
     }
 

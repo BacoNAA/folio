@@ -4,21 +4,25 @@ import androidx.room.Dao
 import androidx.room.Embedded
 import androidx.room.Query
 
-internal data class BrowseRecordRow(val id: String, @Embedded val eventTime: EventTimeFields?)
+internal data class BrowseRecordRow(
+    val id: String, @Embedded val eventTime: EventTimeFields?, @Embedded val marks: RecordMarks,
+)
 internal data class PreviewItemRow(val recordId: String, @Embedded val slot: ContentSlot)
-internal data class PreviewCountRow(val recordId: String, val itemCount: Int, val photoCount: Int)
+internal data class PreviewCountRow(val recordId: String, val itemCount: Int, val photoCount: Int, val audioCount: Int)
 
-private const val VISIBLE_PREVIEW_ITEM = "(photoId IS NOT NULL OR length(trim(text, :blankChars)) > 0)"
+private const val VISIBLE_PREVIEW_ITEM = "(photoId IS NOT NULL OR audioId IS NOT NULL OR checklistJson IS NOT NULL OR length(trim(text, :blankChars)) > 0)"
 
 @Dao
 internal interface RecordBrowsingDao {
-    @Query("""SELECT id, eventDate, eventClock, eventZone FROM text_records
-              WHERE deletedAt IS NULL ORDER BY firstRecordedAt DESC, rowid DESC""")
-    suspend fun activeRecords(): List<BrowseRecordRow>
+    @Query("""SELECT r.id, eventDate, eventClock, eventZone, isStarred, isPinned FROM text_records r
+              WHERE deletedAt IS NULL AND (:starredOnly = 0 OR isStarred = 1)
+              AND (:allTags = 1 OR EXISTS(SELECT 1 FROM record_tags rt WHERE rt.recordId = r.id AND rt.tagId IN (:tagIds)))
+              AND """ + RECORD_TEXT_MATCH + " ORDER BY isPinned DESC, firstRecordedAt DESC, r.rowid DESC")
+    suspend fun activeRecords(keyword: String, tagIds: List<String>, allTags: Boolean, starredOnly: Boolean): List<BrowseRecordRow>
 
     // 每条最多读三项的短预览，不加载所有正式正文，也不逐条发起数据库查询。
     @Query("""SELECT i.recordId, i.itemId, substr(i.text, 1, 80) AS text,
-              i.photoId, substr(i.caption, 1, 80) AS caption
+              i.photoId, substr(i.caption, 1, 80) AS caption, i.checklistJson, i.audioId, i.audioDurationMillis
               FROM record_items i JOIN text_records r ON r.id = i.recordId
               WHERE r.deletedAt IS NULL AND i.position IN
                 (SELECT position FROM record_items WHERE recordId = i.recordId AND """ + VISIBLE_PREVIEW_ITEM + """
@@ -26,7 +30,7 @@ internal interface RecordBrowsingDao {
               ORDER BY i.recordId, i.position""")
     suspend fun previewItems(blankChars: String): List<PreviewItemRow>
 
-    @Query("""SELECT recordId, count(*) AS itemCount, count(photoId) AS photoCount
+    @Query("""SELECT recordId, count(*) AS itemCount, count(photoId) AS photoCount, count(audioId) AS audioCount
               FROM record_items JOIN text_records r ON r.id = recordId
               WHERE r.deletedAt IS NULL AND """ + VISIBLE_PREVIEW_ITEM + " GROUP BY recordId")
     suspend fun previewCounts(blankChars: String): List<PreviewCountRow>

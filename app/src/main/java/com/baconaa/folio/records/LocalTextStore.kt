@@ -6,6 +6,8 @@ import android.util.Log
 import androidx.room.Room
 import androidx.room.withTransaction
 import com.baconaa.folio.media.LocalPhotoOriginals
+import com.baconaa.folio.media.LocalAudioOriginals
+import com.baconaa.folio.media.AudioId
 import com.baconaa.folio.media.PhotoId
 import java.io.IOException
 import java.util.UUID
@@ -14,14 +16,35 @@ class LocalTextStore internal constructor(
     private val database: FolioDatabase,
     private val originals: LocalPhotoOriginals,
     private val now: () -> Long = System::currentTimeMillis,
-) : TextDrafts, PublishedTextRecords, MixedContentDrafts, RecordTrash, RecordTimeEditing,
-    RecordBrowsing by LocalRecordBrowsing(database) {
+    private val audioOriginals: LocalAudioOriginals,
+) : TextDrafts, PublishedTextRecords, MixedContentDrafts, RecordTrash, RecordTimeEditing, RecordMarking,
+    RecordBrowsing by LocalRecordBrowsing(database), RecordTags by LocalRecordTags(database, now) {
     private val dao = database.textDao()
     private val itemDao = database.itemDao()
     private val trashDao = database.trashDao()
+    private val tagDao = database.tagDao()
     private val itemActions = ContentItemActions(database, now)
     private val cleanupQueue = database.photoCleanupDao()
     private val photoCleanup = PhotoCleanup(database, originals)
+    private val audioCleanupQueue = database.audioCleanupDao()
+    private val audioCleanup = AudioCleanup(database, audioOriginals)
+
+    private suspend fun queueDraftMedia(id: String) {
+        cleanupQueue.enqueueDraft(id)
+        audioCleanupQueue.enqueueDraft(id)
+    }
+
+    private suspend fun queueRecordMedia(id: String) {
+        cleanupQueue.enqueueRecord(id)
+        audioCleanupQueue.enqueueRecord(id)
+    }
+
+    private suspend fun cleanAudioAfterCommit(): Int? = try {
+        audioCleanup.run()
+    } catch (_: SQLiteException) {
+        Log.w("Folio", "内容操作已完成，录音清理暂不可用，可稍后重试")
+        null
+    }
 
     private suspend fun cleanPhotosAfterCommit(): Int? = try {
         photoCleanup.run()
@@ -73,6 +96,61 @@ class LocalTextStore internal constructor(
             item.id
         }
 
+    private fun audioItem(audio: AudioId, caption: String): ContentItem.Audio {
+        val clip = audioOriginals.inspect(audio)
+        return ContentItem.Audio(newItemId(), clip.id, clip.durationMillis, caption)
+    }
+
+    override suspend fun appendAudio(
+        id: DraftId?, audio: AudioId, caption: String, initialEventTime: EventTime?,
+    ): DraftId = database.withTransaction {
+        val item = audioItem(audio, caption)
+        val draftId = id ?: createDraft(initialEventTime)
+        insertItems(draftId, null, listOf(item), 0)
+        draftId
+    }
+
+    override suspend fun insertAudio(id: DraftId, after: ItemId?, audio: AudioId, caption: String): ItemId =
+        database.withTransaction {
+            val item = audioItem(audio, caption)
+            insertItems(id, after, listOf(item), 0)
+            item.id
+        }
+
+    override suspend fun editAudioCaption(id: DraftId, itemId: ItemId, caption: String) = database.withTransaction {
+        val items = requireDraft(id).items.toMutableList()
+        val index = items.indexOfItem(itemId)
+        val audio = items[index] as? ContentItem.Audio ?: error("该项不是录音")
+        items[index] = audio.copy(caption = caption)
+        database.writeMixedDraft(id, MixedDraft(items, itemId, 0), now())
+    }
+
+    override suspend fun appendChecklist(
+        id: DraftId?, entries: List<ChecklistEntry>, initialEventTime: EventTime?,
+    ): DraftId = database.withTransaction {
+        require(id != null || entries.any { it.text.isNotBlank() }) { "请填写清单事项后再保存" }
+        val item = ContentItem.Checklist(newItemId(), entries.toList())
+        val draftId = id ?: createDraft(initialEventTime)
+        insertItems(draftId, null, listOf(item), 0)
+        draftId
+    }
+
+    override suspend fun insertChecklist(id: DraftId, after: ItemId?, entries: List<ChecklistEntry>): ItemId =
+        database.withTransaction {
+            val item = ContentItem.Checklist(newItemId(), entries.toList())
+            insertItems(id, after, listOf(item), 0)
+            item.id
+        }
+
+    override suspend fun editChecklist(id: DraftId, itemId: ItemId, entries: List<ChecklistEntry>) =
+        database.withTransaction {
+            val items = requireDraft(id).items.toMutableList()
+            val index = items.indexOfItem(itemId)
+            require(items[index] is ContentItem.Checklist) { "该项不是清单" }
+            items[index] = ContentItem.Checklist(itemId, entries.toList())
+            database.writeMixedDraft(id, MixedDraft(items, itemId, 0), now())
+        }
+
     private suspend fun insertItems(id: DraftId, after: ItemId?, added: List<ContentItem>, cursor: Int) {
         val draft = requireDraft(id)
         val position = after?.let { draft.items.indexOfItem(it) + 1 } ?: draft.items.size
@@ -105,10 +183,11 @@ class LocalTextStore internal constructor(
     override suspend fun removeItem(id: DraftId, itemId: ItemId) {
         database.withTransaction {
             requireDraft(id)
-            cleanupQueue.enqueueDraft(id.value)
+            queueDraftMedia(id.value)
             itemActions.remove(id, itemId)
         }
         cleanPhotosAfterCommit()
+        cleanAudioAfterCommit()
     }
 
     override suspend fun canUndoRemoval(id: DraftId) = itemActions.canUndo(id)
@@ -125,18 +204,20 @@ class LocalTextStore internal constructor(
             record.firstRecordedAt, now(), activeItemId = focus?.itemId, eventTime = record.eventTime))
         dao.insertEdit(RecordEditRow(draftId.value, record.id, record.revision))
         itemDao.replaceDraftItems(draftId.value, items)
+        tagDao.replaceDraftTags(draftId.value, tagDao.recordTags(record.id).map { it.id })
         draftId
     }
 
     override suspend fun discardDraft(id: DraftId) {
         database.withTransaction {
             if (dao.draft(id.value) != null) {
-                cleanupQueue.enqueueDraft(id.value)
+                queueDraftMedia(id.value)
                 check(dao.deleteDraft(id.value) == 1) { "未能放弃草稿" }
                 dao.deleteEdit(id.value)
             }
         }
         cleanPhotosAfterCommit()
+        cleanAudioAfterCommit()
     }
 
     override suspend fun saveDraft(id: DraftId?, edit: TextEdit, initialEventTime: EventTime?): DraftId? {
@@ -149,6 +230,11 @@ class LocalTextStore internal constructor(
     }
 
     private fun MixedDraft.withLegacyText(edit: TextEdit): MixedDraft {
+        // 拼接正文含清单索引文字，不能把旧接口的整段回存解释为某一段文字编辑。
+        if (items.any { it is ContentItem.Checklist }) {
+            require(edit.text == items.body()) { "包含清单的草稿请按内容项编辑" }
+            return this
+        }
         val paragraphs = items.filterIsInstance<ContentItem.Text>()
         val first = paragraphs.firstOrNull()
         if (first == null) {
@@ -169,7 +255,10 @@ class LocalTextStore internal constructor(
 
     override suspend fun listDrafts(): List<DraftPreview> =
         dao.listDrafts().map { row ->
-            DraftPreview(DraftId(row.id), row.excerpt, row.recordId?.let(::RecordId), row.firstPhotoId?.asPhotoId())
+            DraftPreview(
+                DraftId(row.id), row.excerpt, row.recordId?.let(::RecordId), row.firstPhotoId?.asPhotoId(),
+                row.totalAudioDurationMillis,
+            )
         }
 
     override suspend fun openDraft(id: DraftId): TextEdit? =
@@ -200,10 +289,17 @@ class LocalTextStore internal constructor(
             val items = finalState(requireDraft(id)).items
             val body = items.body()
             val photos = items.photos()
-            require(body.isNotBlank() || photos.isNotEmpty()) { "请填写正文或添加照片后再完成" }
+            val audios = items.filterIsInstance<ContentItem.Audio>()
+            require(body.isNotBlank() || photos.isNotEmpty() || audios.isNotEmpty()) { "请填写文字、清单事项或添加媒体后再完成" }
             requireReadableOriginals(photos)
-            cleanupQueue.enqueueDraft(id.value)
+            for (audio in audios) {
+                if (audioOriginals.inspect(audio.audioId).durationMillis != audio.durationMillis) {
+                    throw IOException("录音原件已改变，请重新录制")
+                }
+            }
+            queueDraftMedia(id.value)
             val slots = items.map { it.asSlot() }
+            val tags = tagDao.draftTags(id.value).map { it.id }
             val edit = dao.recordEdit(id.value)
             val recordId = if (edit == null) {
                 val newId = UUID.randomUUID().toString()
@@ -213,29 +309,44 @@ class LocalTextStore internal constructor(
             } else {
                 val record = checkNotNull(dao.activeRecord(edit.recordId)) { "正式记录已不存在" }
                 check(record.revision == edit.baseRevision) { "正式记录已更新，本次草稿已保留" }
-                if (slots != itemDao.recordItems(record.id) || draft.eventTime != record.eventTime) {
-                    cleanupQueue.enqueueRecord(record.id)
+                if (slots != itemDao.recordItems(record.id) || draft.eventTime != record.eventTime ||
+                    tags != tagDao.recordTags(record.id).map { it.id }
+                ) {
+                    queueRecordMedia(record.id)
                     val time = draft.eventTime
                     dao.updateRecordContent(record.id, body, now(), time?.eventDate, time?.eventClock, time?.eventZone)
                     itemDao.replaceRecordItems(record.id, slots)
                 }
                 record.id
             }
+            // 先转为共享再删除草稿，未选择的私有标签随草稿级联丢弃；与正式内容同事务。
+            tagDao.promoteSelected(draft.id)
+            tagDao.replaceRecordTags(recordId, tags)
             check(dao.deleteDraft(draft.id) == 1) { "未能移除已完成的草稿" }
             RecordId(recordId)
         }
         cleanPhotosAfterCommit()
+        cleanAudioAfterCommit()
         return result
     }
 
     override suspend fun search(keyword: String): List<RecordPreview> =
-        dao.searchRecords(keyword).map { RecordPreview(RecordId(it.id), it.excerpt, it.firstPhotoId?.asPhotoId()) }
+        dao.searchRecords(keyword).map { RecordPreview(RecordId(it.id), it.excerpt, it.firstPhotoId?.asPhotoId(), it.marks) }
+
+    override suspend fun setStarred(id: RecordId, starred: Boolean) {
+        check(dao.setStarred(id.value, starred) == 1) { "正式记录已不存在或在回收站中，请恢复后再修改标记" }
+    }
+
+    override suspend fun setPinned(id: RecordId, pinned: Boolean) {
+        check(dao.setPinned(id.value, pinned) == 1) { "正式记录已不存在或在回收站中，请恢复后再修改标记" }
+    }
 
     private fun String.asPhotoId() = PhotoId(UUID.fromString(this))
 
     override suspend fun openRecordContent(id: RecordId): RecordContent? = database.withTransaction {
         val record = dao.activeRecord(id.value) ?: return@withTransaction null
-        RecordContent(itemDao.recordItems(id.value).map { it.asItem() }, record.times())
+        RecordContent(itemDao.recordItems(id.value).map { it.asItem() }, record.times(), record.marks,
+            tagDao.recordTags(id.value).map { it.asTag() })
     }
 
     override suspend fun openRecord(id: RecordId): String? = dao.recordBody(id.value)
@@ -245,13 +356,14 @@ class LocalTextStore internal constructor(
     override suspend fun restoreRecord(id: RecordId): Boolean = trashDao.restore(id.value) == 1
 
     override suspend fun listTrash(): List<TrashPreview> = trashDao.listTrash().map {
-        TrashPreview(RecordId(it.id), it.excerpt, it.firstPhotoId?.asPhotoId(), it.deletedAt, it.hasDraft)
+        TrashPreview(RecordId(it.id), it.excerpt, it.firstPhotoId?.asPhotoId(), it.deletedAt, it.hasDraft, it.marks)
     }
 
     override suspend fun openTrashRecord(id: RecordId): TrashedRecord? = database.withTransaction {
         val record = trashDao.trashedRecord(id.value) ?: return@withTransaction null
         TrashedRecord(
-            id, RecordContent(itemDao.recordItems(id.value).map { it.asItem() }, record.times()),
+            id, RecordContent(itemDao.recordItems(id.value).map { it.asItem() }, record.times(), record.marks,
+                tagDao.recordTags(id.value).map { it.asTag() }),
             checkNotNull(record.deletedAt), trashDao.hasDraft(id.value),
         )
     }
@@ -262,16 +374,18 @@ class LocalTextStore internal constructor(
                 check(dao.activeRecord(id.value) == null) { "请先将记录移入回收站" }
                 return@withTransaction false
             }
-            cleanupQueue.enqueueRecord(id.value)
-            trashDao.editingDraftIds(id.value).forEach { cleanupQueue.enqueueDraft(it) }
+            queueRecordMedia(id.value)
+            trashDao.editingDraftIds(id.value).forEach { queueDraftMedia(it) }
             trashDao.deleteEditingDrafts(id.value)
             check(trashDao.deletePermanently(id.value) == 1) { "未能彻底删除记录" }
             true
         }
-        return PermanentDeletionResult(deleted, cleanPhotosAfterCommit())
+        return PermanentDeletionResult(deleted, cleanPhotosAfterCommit(), cleanAudioAfterCommit())
     }
 
     override suspend fun retryPhotoCleanup(): Int = photoCleanup.run()
+
+    override suspend fun retryAudioCleanup(): Int = audioCleanup.run()
 
     companion object {
         private var instance: LocalTextStore? = null
@@ -280,6 +394,7 @@ class LocalTextStore internal constructor(
         fun get(context: Context): LocalTextStore = instance ?: LocalTextStore(
             Room.databaseBuilder(context.applicationContext, FolioDatabase::class.java, "folio.db").build(),
             LocalPhotoOriginals.get(context),
+            audioOriginals = LocalAudioOriginals.get(context),
         ).also { instance = it }
     }
 }

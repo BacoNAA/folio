@@ -35,6 +35,7 @@ internal data class RecordRow(
     val deletedAt: Long? = null,
     @ColumnInfo(defaultValue = "1") val revision: Long = 1,
     @Embedded val eventTime: EventTimeFields? = null,
+    @Embedded val marks: RecordMarks = RecordMarks(),
 )
 
 @Entity(
@@ -60,8 +61,13 @@ internal data class EditableDraftRow(
     val recordId: String?,
 )
 
-internal data class TextPreviewRow(val id: String, val excerpt: String, val firstPhotoId: String?)
-internal data class DraftPreviewRow(val id: String, val excerpt: String, val recordId: String?, val firstPhotoId: String?)
+internal data class TextPreviewRow(
+    val id: String, val excerpt: String, val firstPhotoId: String?, @Embedded val marks: RecordMarks,
+)
+internal data class DraftPreviewRow(
+    val id: String, val excerpt: String, val recordId: String?, val firstPhotoId: String?,
+    val totalAudioDurationMillis: Long?,
+)
 
 @Dao
 internal interface TextDao {
@@ -79,8 +85,12 @@ internal interface TextDao {
               WHERE id = :id AND EXISTS (SELECT 1 FROM editable_text_drafts WHERE id = :id)""")
     suspend fun updateDraftTime(id: String, date: Long?, clock: Long?, zone: String?, editedAt: Long): Int
 
+    @Query("UPDATE text_drafts SET lastEditedAt = :editedAt WHERE id = :id")
+    suspend fun touchDraft(id: String, editedAt: Long)
+
     @Query("""SELECT d.id, substr(d.body, 1, 80) AS excerpt, d.recordId,
-              (SELECT photoId FROM draft_items WHERE draftId = d.id AND photoId IS NOT NULL ORDER BY position LIMIT 1) AS firstPhotoId
+              (SELECT photoId FROM draft_items WHERE draftId = d.id AND photoId IS NOT NULL ORDER BY position LIMIT 1) AS firstPhotoId,
+              (SELECT sum(audioDurationMillis) FROM draft_items WHERE draftId = d.id) AS totalAudioDurationMillis
               FROM editable_text_drafts d
               ORDER BY lastEditedAt DESC, insertionOrder DESC""")
     suspend fun listDrafts(): List<DraftPreviewRow>
@@ -99,6 +109,12 @@ internal interface TextDao {
 
     @Query("SELECT * FROM text_records WHERE id = :id AND deletedAt IS NULL")
     suspend fun activeRecord(id: String): RecordRow?
+
+    @Query("UPDATE text_records SET isStarred = :starred WHERE id = :id AND deletedAt IS NULL")
+    suspend fun setStarred(id: String, starred: Boolean): Int
+
+    @Query("UPDATE text_records SET isPinned = :pinned WHERE id = :id AND deletedAt IS NULL")
+    suspend fun setPinned(id: String, pinned: Boolean): Int
 
     // An edit keeps its link after completion so older retries can find the record.
     // Discard removes both the draft and its link.
@@ -120,11 +136,10 @@ internal interface TextDao {
     suspend fun deleteDraft(id: String): Int
 
     @Query(
-        """SELECT r.id, substr(r.body, 1, 80) AS excerpt,
+        """SELECT r.id, substr(r.body, 1, 80) AS excerpt, r.isStarred, r.isPinned,
            (SELECT photoId FROM record_items WHERE recordId = r.id AND photoId IS NOT NULL ORDER BY position LIMIT 1) AS firstPhotoId
            FROM text_records r
-           WHERE deletedAt IS NULL AND instr(lower(body), lower(:keyword)) > 0
-           ORDER BY firstRecordedAt DESC, r.rowid DESC""",
+           WHERE deletedAt IS NULL AND """ + RECORD_TEXT_MATCH + " ORDER BY isPinned DESC, firstRecordedAt DESC, r.rowid DESC",
     )
     suspend fun searchRecords(keyword: String): List<TextPreviewRow>
 
@@ -136,9 +151,10 @@ internal interface TextDao {
     entities = [
         DraftRow::class, RecordRow::class, RecordEditRow::class,
         DraftItemRow::class, RecordItemRow::class, RemovedItem::class, PhotoCleanupEntry::class,
+        AudioCleanupEntry::class, TagRow::class, DraftTagRow::class, RecordTagRow::class,
     ],
     views = [EditableDraftRow::class],
-    version = 7,
+    version = 11,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -146,6 +162,10 @@ internal interface TextDao {
         AutoMigration(from = 4, to = 5),
         AutoMigration(from = 5, to = 6),
         AutoMigration(from = 6, to = 7),
+        AutoMigration(from = 7, to = 8),
+        AutoMigration(from = 8, to = 9),
+        AutoMigration(from = 9, to = 10),
+        AutoMigration(from = 10, to = 11),
     ],
 )
 internal abstract class FolioDatabase : RoomDatabase() {
@@ -154,5 +174,7 @@ internal abstract class FolioDatabase : RoomDatabase() {
     abstract fun removedItemDao(): RemovedItemDao
     abstract fun trashDao(): TrashDao
     abstract fun photoCleanupDao(): PhotoCleanupDao
+    abstract fun audioCleanupDao(): AudioCleanupDao
     abstract fun recordBrowsingDao(): RecordBrowsingDao
+    abstract fun tagDao(): TagDao
 }

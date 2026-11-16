@@ -20,6 +20,9 @@ internal data class ContentSlot(
     val text: String?,
     val photoId: String?,
     @ColumnInfo(defaultValue = "''") val caption: String = "",
+    val checklistJson: String? = null,
+    val audioId: String? = null,
+    val audioDurationMillis: Long? = null,
 )
 
 @Entity(
@@ -46,10 +49,10 @@ internal data class RecordItemRow(val recordId: String, val position: Int, @Embe
 
 @Dao
 internal abstract class ContentItemDao {
-    @Query("SELECT itemId, text, photoId, caption FROM draft_items WHERE draftId = :id ORDER BY position")
+    @Query("SELECT itemId, text, photoId, caption, checklistJson, audioId, audioDurationMillis FROM draft_items WHERE draftId = :id ORDER BY position")
     abstract suspend fun draftItems(id: String): List<ContentSlot>
 
-    @Query("SELECT itemId, text, photoId, caption FROM record_items WHERE recordId = :id ORDER BY position")
+    @Query("SELECT itemId, text, photoId, caption, checklistJson, audioId, audioDurationMillis FROM record_items WHERE recordId = :id ORDER BY position")
     abstract suspend fun recordItems(id: String): List<ContentSlot>
 
     @Transaction

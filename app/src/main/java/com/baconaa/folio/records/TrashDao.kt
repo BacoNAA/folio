@@ -1,6 +1,7 @@
 package com.baconaa.folio.records
 
 import androidx.room.Dao
+import androidx.room.Embedded
 import androidx.room.Query
 
 internal data class TrashPreviewRow(
@@ -9,6 +10,7 @@ internal data class TrashPreviewRow(
     val firstPhotoId: String?,
     val deletedAt: Long,
     val hasDraft: Boolean,
+    @Embedded val marks: RecordMarks,
 )
 
 @Dao
@@ -19,7 +21,7 @@ internal interface TrashDao {
     @Query("UPDATE text_records SET deletedAt = NULL WHERE id = :id AND deletedAt IS NOT NULL")
     suspend fun restore(id: String): Int
 
-    @Query("""SELECT r.id, substr(r.body, 1, 80) AS excerpt, r.deletedAt,
+    @Query("""SELECT r.id, substr(r.body, 1, 80) AS excerpt, r.deletedAt, r.isStarred, r.isPinned,
               (SELECT photoId FROM record_items WHERE recordId = r.id AND photoId IS NOT NULL ORDER BY position LIMIT 1) AS firstPhotoId,
               EXISTS(SELECT 1 FROM text_record_edits e JOIN text_drafts d ON d.id = e.draftId WHERE e.recordId = r.id) AS hasDraft
               FROM text_records r WHERE r.deletedAt IS NOT NULL
