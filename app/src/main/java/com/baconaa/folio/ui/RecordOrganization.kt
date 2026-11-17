@@ -31,10 +31,11 @@ internal fun EditorClues(model: FolioViewModel) {
     var timeDialog by rememberSaveable { mutableStateOf(false) }
     var tagDialog by rememberSaveable { mutableStateOf(false) }
     var placeDialog by rememberSaveable { mutableStateOf(false) }
+    var objectKind by rememberSaveable { mutableStateOf<ObjectKind?>(null) }
     val enabled = !model.state.busy && !editor.needsReload && !model.state.recording && model.state.pendingAttachment == null
     Column {
         TextButton(onClick = { expanded = !expanded }, modifier = Modifier.testTag("editor-clues")) {
-            Text(if (expanded) "收起时间、地点与标签" else "时间、地点与标签 · 选填")
+            Text(if (expanded) "收起时间、地点与线索" else "时间、地点与线索 · 选填")
         }
         if (expanded) {
             TextButton(onClick = { timeDialog = true }, enabled = enabled, modifier = Modifier.testTag("edit-time")) {
@@ -47,6 +48,13 @@ internal fun EditorClues(model: FolioViewModel) {
             if (!editor.hasContent) Text("先留下一点内容，再添加标签。", fontSize = 12.sp)
             TextButton(onClick = { model.loadPlaces(); placeDialog = true }, enabled = enabled && editor.hasContent,
                 modifier = Modifier.testTag("edit-place")) { Text("地点：${editor.place?.info?.name ?: "暂不填写"}") }
+            ObjectKind.entries.forEach { kind ->
+                TextButton(onClick = { model.loadObjects(); objectKind = kind }, enabled = enabled && editor.hasContent,
+                    modifier = Modifier.testTag("edit-${kind.name}")) {
+                    val names = editor.objects.filter { it.kind == kind }.joinToString("、") { it.info.name }
+                    Text("${kind.label}：${names.ifEmpty { "暂不填写" }}")
+                }
+            }
         }
     }
     if (timeDialog) EventTimeDialog(editor.eventTime, onDismiss = { timeDialog = false }) {
@@ -54,6 +62,7 @@ internal fun EditorClues(model: FolioViewModel) {
     }
     if (tagDialog) TagDialog(model, editing = true) { tagDialog = false }
     if (placeDialog) PlacePicker(model) { placeDialog = false }
+    objectKind?.let { ObjectPicker(model, it, editing = true) { objectKind = null } }
 }
 
 @Composable
@@ -149,20 +158,35 @@ internal fun TagDialog(model: FolioViewModel, editing: Boolean, close: () -> Uni
 internal fun SearchFilters(model: FolioViewModel) {
     val state = model.state
     var showTags by rememberSaveable { mutableStateOf(false) }
+    var objectKind by rememberSaveable { mutableStateOf<ObjectKind?>(null) }
     Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
             FilterChip(state.starredOnly, { model.filterStarred(!state.starredOnly) }, label = { Text("只看星标") })
             TextButton(onClick = { showTags = true; model.loadTags() }) { Text("筛选标签${if (state.filterTags.isEmpty()) "" else " · ${state.filterTags.size}"}") }
-            if (state.starredOnly || state.filterTags.isNotEmpty() || state.filterPlace != null) TextButton(onClick = model::clearFilters) { Text("清除筛选") }
+            if (state.starredOnly || state.filterTags.isNotEmpty() || state.filterPlace != null || state.filterPeople.isNotEmpty() || state.filterThings.isNotEmpty())
+                TextButton(onClick = model::clearFilters) { Text("清除筛选") }
+            ObjectKind.entries.forEach { kind ->
+                TextButton(onClick = { model.loadObjects(); objectKind = kind }) { Text("筛选${kind.label}") }
+            }
         }
-        if (state.filterTags.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+        if (state.filterTags.isNotEmpty() || state.filterPeople.isNotEmpty() || state.filterThings.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
             state.filterTags.forEach { id ->
                 InputChip(selected = true, onClick = { model.filterByTags(state.filterTags - id) },
                     label = { Text("${state.sharedTags.firstOrNull { it.id == id }?.name ?: "已选标签"} ×") })
             }
+            ObjectKind.entries.forEach { kind ->
+                val ids = if (kind == ObjectKind.PERSON) state.filterPeople else state.filterThings
+                ids.forEach { id ->
+                    val value = state.sharedObjects.firstOrNull { it.id == id }
+                    InputChip(selected = true, onClick = { model.filterObjects(kind, ids - id) },
+                        modifier = Modifier.testTag("remove-object-${id.value}"),
+                        label = { Text("${kind.label}：${value?.info?.name ?: "已选对象"}${value?.info?.note?.takeIf { it.isNotBlank() }?.let { "（$it）" }.orEmpty()} ×") })
+                }
+            }
         }
     }
     if (showTags) TagDialog(model, editing = false) { showTags = false }
+    objectKind?.let { ObjectPicker(model, it, editing = false) { objectKind = null } }
 }
 
 @Composable
@@ -190,6 +214,7 @@ internal fun TrashScreen(model: FolioViewModel) {
 internal fun RecordContents(content: RecordContent, model: FolioViewModel) {
     Text("事件时间：${content.times.eventTime.label()}", fontSize = 12.sp)
     content.place?.let { Text("地点", fontSize = 12.sp); PlaceDescription(it) }
+    content.objects.forEach { Text(it.kind.label, fontSize = 12.sp); ObjectDescription(it) }
     content.items.forEach { item -> when (item) {
         is ContentItem.Text -> Text(item.text, fontSize = 18.sp, lineHeight = 32.sp)
         is ContentItem.Photo -> { Photo(item.photoId); if (item.caption.isNotEmpty()) Text(item.caption) }

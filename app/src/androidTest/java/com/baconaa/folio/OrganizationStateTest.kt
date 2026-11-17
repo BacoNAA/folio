@@ -232,6 +232,53 @@ class OrganizationStateTest {
         clean(record)
     }
 
+    @Test fun objectReadFailureDoesNotDuplicateCreationAndUndoRestoresBothObjectFilters() {
+        var failRead = false
+        var failList = true
+        var creations = 0
+        val objects = object : RecordObjects by store {
+            override suspend fun listObjects(): List<RecordObject> {
+                if (failList) throw IOException("objects unavailable")
+                return store.listObjects()
+            }
+            override suspend fun openDraftObjects(id: DraftId): List<RecordObject>? {
+                if (failRead) throw IOException("objects read failed")
+                return store.openDraftObjects(id)
+            }
+            override suspend fun createDraftObject(id: DraftId, kind: ObjectKind, info: ObjectInfo): ObjectId {
+                creations++
+                return store.createDraftObject(id, kind, info)
+            }
+        }
+        lateinit var model: FolioViewModel
+        val text = "对象故障${System.nanoTime()}"
+        main { model = FolioViewModel(store, store, store, store, objects = objects); model.newText(); model.change(TextFieldValue(text)); model.loadObjects() }
+        saved(model); await { !model.state.objectsLoading }
+        assertNotNull(model.state.objectsError)
+        main { failList = false; failRead = true; model.createObject(ObjectKind.PERSON, ObjectInfo("外婆")) }; idle(model)
+        assertTrue(model.state.editor!!.needsReload)
+        main { model.createObject(ObjectKind.PERSON, ObjectInfo("外婆")) }; idle(model)
+        assertEquals(1, creations)
+        main { failRead = false; model.reload() }; idle(model)
+        val person = model.state.editor!!.objects.single()
+        main { model.createObject(ObjectKind.THING, ObjectInfo("杯子")) }; idle(model)
+        val thing = model.state.editor!!.objects.single { it.kind == ObjectKind.THING }
+        main { model.complete() }; idle(model)
+        val record = model.state.savedId!!
+        main { model.home(Page.Search); model.query(text); model.filterObjects(ObjectKind.PERSON, setOf(person.id)); model.filterObjects(ObjectKind.THING, setOf(thing.id)) }
+        await { !model.state.loading }
+        assertEquals(listOf(record), model.state.results.map { it.id })
+        main { model.openRecord(record) }; idle(model)
+        main { model.deleteRecord() }; idle(model)
+        main { model.clearFilters() }; await { !model.state.loading }
+        main { model.undoDelete() }; idle(model); await { !model.state.loading }
+        assertEquals(setOf(person.id), model.state.filterPeople)
+        assertEquals(setOf(thing.id), model.state.filterThings)
+        assertEquals(text, model.state.query)
+        assertEquals(listOf(record), model.state.results.map { it.id })
+        clean(record)
+    }
+
     private fun clean(id: RecordId) = runBlocking { store.moveToTrash(id); store.deletePermanently(id) }
     private fun main(action: () -> Unit) = instrumentation.runOnMainSync(action)
     private fun idle(model: FolioViewModel) = await { !model.state.busy }

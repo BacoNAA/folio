@@ -45,7 +45,10 @@ internal const val RECORD_TEXT_MATCH = """(instr(lower(r.body), lower(:keyword))
     OR EXISTS(SELECT 1 FROM record_tags rt JOIN tags t ON t.id = rt.tagId
               WHERE rt.recordId = r.id AND t.ownerDraftId IS NULL AND instr(lower(t.name), lower(:keyword)) > 0)
     OR EXISTS(SELECT 1 FROM record_places rp JOIN places p ON p.id = rp.placeId
-              WHERE rp.recordId = r.id AND p.ownerDraftId IS NULL AND instr(lower(p.name), lower(:keyword)) > 0))"""
+              WHERE rp.recordId = r.id AND p.ownerDraftId IS NULL AND instr(lower(p.name), lower(:keyword)) > 0)
+    OR EXISTS(SELECT 1 FROM published_objects po JOIN record_objects o ON o.id = po.objectId
+              WHERE po.recordId = r.id AND o.ownerDraftId IS NULL AND (instr(lower(o.name), lower(:keyword)) > 0
+              OR EXISTS(SELECT 1 FROM object_aliases a WHERE a.objectId = o.id AND instr(lower(a.name), lower(:keyword)) > 0))))"""
 
 @Dao
 internal abstract class TagDao {
