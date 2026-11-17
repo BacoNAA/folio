@@ -6,9 +6,17 @@ import java.util.UUID
 @JvmInline
 value class PlaceId(val value: String)
 
-data class PlaceInfo(val name: String, val city: String = "", val address: String = "", val note: String = "")
+data class PlaceCoordinates(val latitude: Double, val longitude: Double) {
+    init {
+        require(latitude.isFinite() && latitude in -90.0..90.0 && longitude.isFinite() && longitude in -180.0..180.0) {
+            "地点坐标无效"
+        }
+    }
+}
+data class PlaceInfo(val name: String, val city: String = "", val address: String = "", val note: String = "",
+    @androidx.room.Embedded val coordinates: PlaceCoordinates? = null)
 data class Place(val id: PlaceId, val info: PlaceInfo, val isDraft: Boolean = false)
-data class PlaceSummary(val place: Place, val recordCount: Int)
+data class PlaceSummary(val place: Place, val recordCount: Int, val recentExperience: RecentExperience = RecentExperience.Empty)
 
 /** 地点身份与名称分开；记录只保存选择，共享资料从地点小册独立保存。 */
 interface RecordPlaces {
@@ -25,7 +33,12 @@ internal class LocalRecordPlaces(private val database: FolioDatabase, private va
     private val dao = database.placeDao()
     private val drafts = database.textDao()
 
-    override suspend fun listPlaces(keyword: String) = dao.sharedPlaces(keyword.trim()).map { PlaceSummary(it.place.asPlace(), it.recordCount) }
+    override suspend fun listPlaces(keyword: String) = database.withTransaction {
+        val times = dao.activePlaceTimes().groupBy { it.placeId }
+        dao.sharedPlaces(keyword.trim()).map {
+            PlaceSummary(it.place.asPlace(), it.recordCount, recentExperience(times[it.place.id].orEmpty().map { row -> row.eventTime?.asEventTime() }))
+        }
+    }
     override suspend fun openPlace(id: PlaceId) = dao.place(id.value)?.takeIf { it.ownerDraftId == null }?.asPlace()
     override suspend fun openDraftPlace(id: DraftId): Place? = database.withTransaction {
         requireDraft(id)

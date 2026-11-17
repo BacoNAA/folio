@@ -19,10 +19,14 @@ class OrganizationNavigationTest {
     fun continuousKeyboardInputSurvivesFirstDraftCreation() {
         val text = "org-restart-1117-abcdefghijklmnopqrstuvwxyz"
         compose.onNodeWithTag("write").performClick()
-        compose.onNodeWithTag("editor").assertIsFocused()
-        // Compose 焦点就绪后，仍需等待系统键盘的窗口切换结束；有硬键盘时不要求弹出软键盘。
+        compose.onNodeWithTag("editor").performClick().assertIsFocused()
+        // Compose 焦点就绪不代表系统输入窗口已接管；等待连接及窗口焦点后注入连续按键。
         val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
-        instrumentation.uiAutomation.waitForIdle(500, 5_000)
+        compose.waitUntil(5_000) {
+            compose.activity.hasWindowFocus() &&
+                compose.activity.getSystemService(android.view.inputmethod.InputMethodManager::class.java).isAcceptingText
+        }
+        instrumentation.uiAutomation.waitForIdle(1_000, 5_000)
         instrumentation.sendStringSync(text)
         waitText("草稿已保存")
         compose.onNodeWithTag("editor").assertTextContains(text)
@@ -37,8 +41,8 @@ class OrganizationNavigationTest {
         compose.onNodeWithTag("write").performClick()
         compose.onNodeWithTag("editor").performTextInput(text)
         waitText("草稿已保存")
-        compose.onNodeWithTag("editor-clues").performScrollTo().performClick()
-        compose.onNodeWithTag("edit-time").performScrollTo().performClick()
+        editorClick("editor-clues")
+        editorClick("edit-time")
         compose.onNodeWithTag("event-date").performTextReplacement("2021-02-30")
         compose.onNodeWithText("应用时间").performClick()
         waitText("请检查日期、时刻和时区是否有效。")
@@ -47,12 +51,13 @@ class OrganizationNavigationTest {
         compose.onNodeWithTag("event-zone").performTextReplacement("Asia/Tokyo")
         compose.onNodeWithText("应用时间").performClick()
         waitText("草稿已保存")
-        compose.onNodeWithTag("edit-tags").performScrollTo().performClick()
+        editorClick("edit-tags")
         compose.onNodeWithTag("new-tag").performTextInput(tagName)
         compose.waitUntil(10_000) { compose.onAllNodes(hasText("新建并选中") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("新建并选中").performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithText("改名").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("关闭标签").performClick()
+        compose.onNodeWithTag("mixed-editor").performScrollToNode(hasText("标签：$tagName"))
         waitText("标签：$tagName")
         compose.activityRule.scenario.recreate()
         compose.onNodeWithText("完成").performClick()
@@ -137,6 +142,11 @@ class OrganizationNavigationTest {
         waitText("已彻底删除")
         assertNull(runBlocking { store.openTrashRecord(id) })
         assertNull(runBlocking { store.openDraft(draft) })
+    }
+
+    private fun editorClick(tag: String) {
+        compose.onNodeWithTag("mixed-editor").performScrollToNode(hasTestTag(tag))
+        compose.onNodeWithTag(tag).assertIsDisplayed().assertIsEnabled().performClick()
     }
 
     private fun waitText(text: String) {

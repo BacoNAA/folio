@@ -491,6 +491,30 @@ class TextDatabaseMigrationTest {
         } finally { database.close() }
     }
 
+    @Test fun versionTwelvePlacesKeepIdentityAndStartWithoutCoordinates() = runBlocking {
+        createDatabase(12) { sql ->
+            sql.execSQL("INSERT INTO text_drafts (id,body,cursor,firstRecordedAt,lastEditedAt) VALUES ('draft','坐标升级',0,100,200)")
+            sql.execSQL("INSERT INTO draft_items (draftId,position,itemId,text) VALUES ('draft',0,'item','坐标升级')")
+            sql.execSQL("INSERT INTO places (id,name,city,address,note,ownerDraftId) VALUES ('private','私有','成都','西街','靠河','draft')")
+            sql.execSQL("INSERT INTO places (id,name,city,address,note,ownerDraftId) VALUES ('shared','共享','','','',NULL)")
+            sql.execSQL("INSERT INTO draft_places VALUES ('draft','private')")
+        }
+        val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context))
+            val draft = DraftId("draft")
+            val place = store.openDraftPlace(draft)!!
+            assertEquals(PlaceId("private"), place.id)
+            assertEquals(PlaceInfo("私有", "成都", "西街", "靠河"), place.info)
+            assertNull(store.openPlace(PlaceId("shared"))!!.info.coordinates)
+            assertEquals(RecentExperience.Empty, store.listPlaces().single().recentExperience)
+            val point = PlaceCoordinates(30.0, 104.0)
+            store.updateDraftPlace(draft, place.id, place.info.copy(coordinates = point))
+            val record = store.completeMixedDraft(draft)
+            assertEquals(point, store.openRecordContent(record)!!.place!!.info.coordinates)
+        } finally { database.close() }
+    }
+
     private fun createDatabase(version: Int, seed: (SQLiteDatabase) -> Unit) {
         val schemaFile = "${FolioDatabase::class.java.name}/$version.json"
         val schema = instrumentation.context.assets.open(schemaFile).bufferedReader().use {
