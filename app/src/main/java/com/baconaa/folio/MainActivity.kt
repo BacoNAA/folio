@@ -13,6 +13,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.baconaa.folio.records.ItemId
 import com.baconaa.folio.records.LocalTextStore
+import com.baconaa.folio.records.EventTime
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
 import com.baconaa.folio.ui.*
 import java.io.File
 
@@ -49,7 +53,9 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         savedInstanceState?.getBundle("media-target")?.let {
             pendingTarget = ExternalTarget(it.getString("draft"), it.getString("record"), it.getString("after"),
-                Page.valueOf(it.getString("return") ?: "Capture"), Page.valueOf(it.getString("origin") ?: "Records"))
+                Page.valueOf(it.getString("return") ?: "Capture"), Page.valueOf(it.getString("origin") ?: "Records"),
+                it.getString("event-date")?.let { date -> EventTime(LocalDate.parse(date),
+                    it.getString("event-time")?.let(LocalTime::parse), ZoneId.of(it.getString("event-zone"))) })
             cameraPath = it.getString("camera")
         }
         model = ViewModelProvider(this, object : ViewModelProvider.Factory {
@@ -63,7 +69,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun launchMedia(kind: String, after: ItemId?) {
-        model.prepareExternal(after) { target ->
+        model.prepareExternal(after, currentTime = kind != "photo") { target ->
             pendingTarget = target
             try {
                 when (kind) {
@@ -89,6 +95,9 @@ class MainActivity : ComponentActivity() {
         pendingTarget?.let { target -> outState.putBundle("media-target", Bundle().apply {
             putString("draft", target.draftId); putString("record", target.recordId); putString("after", target.afterId)
             putString("return", target.returnPage.name); putString("origin", target.detailOrigin.name); putString("camera", cameraPath)
+            putString("event-date", target.eventTime?.date?.toString())
+            putString("event-time", target.eventTime?.time?.toString())
+            putString("event-zone", target.eventTime?.zone?.id)
         }) }
         super.onSaveInstanceState(outState)
     }

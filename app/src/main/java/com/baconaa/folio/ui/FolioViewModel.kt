@@ -3,6 +3,7 @@ package com.baconaa.folio.ui
 import android.net.Uri
 import com.baconaa.folio.media.*
 import java.util.UUID
+import java.time.ZonedDateTime
 import kotlinx.coroutines.flow.MutableStateFlow
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -19,7 +20,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-enum class Page { Capture, Records, Search, Detail, Editor }
+enum class Page { Capture, Records, Search, Detail, Editor, Trash, TrashDetail }
 
 data class RecordEditor(
     val draftId: DraftId? = null,
@@ -33,6 +34,11 @@ data class RecordEditor(
     val returnPage: Page = Page.Capture,
     val canUndo: Boolean = false,
     val needsReload: Boolean = false,
+    val eventTime: EventTime? = null,
+    val persistedEventTime: EventTime? = null,
+    val tags: List<Tag> = emptyList(),
+    // 首次落盘分配后端 ID，但当前输入项及其键盘回调保留原身份；写入时再映射。
+    val backendItemIds: Map<ItemId, ItemId> = emptyMap(),
 ) {
     val value: TextFieldValue get() = textValues.values.firstOrNull() ?: TextFieldValue()
     val hasContent: Boolean get() = items.any { it.hasContent() }
@@ -64,7 +70,23 @@ data class FolioState(
     val recording: Boolean = false,
     val pendingAttachment: PendingAttachment? = null,
     val importFailed: Boolean = false,
+    val sharedTags: List<Tag> = emptyList(),
+    val tagsLoading: Boolean = false,
+    val tagsError: String? = null,
+    val filterTags: Set<TagId> = emptySet(),
+    val starredOnly: Boolean = false,
+    val trash: List<TrashPreview> = emptyList(),
+    val trashId: RecordId? = null,
+    val trashDetail: TrashedRecord? = null,
+    val deleted: DeletedRecord? = null,
+    val restoredId: RecordId? = null,
+    val notice: String? = null,
+    val cleanupPending: Boolean = false,
+    val scrollRestoreVersion: Int = 0,
 )
+
+data class DeletedRecord(val id: RecordId, val origin: Page, val query: String,
+    val filterTags: Set<TagId>, val starredOnly: Boolean, val recent: Boolean)
 
 /** UI 状态由主线程持有；草稿写入串行，完成和离开等待最后一次输入落盘。 */
 class FolioViewModel(
@@ -73,6 +95,10 @@ class FolioViewModel(
     private val mixed: MixedContentDrafts,
     private val browsing: RecordBrowsing,
     private val media: EditorMedia? = null,
+    private val times: RecordTimeEditing? = mixed as? RecordTimeEditing ?: published as? RecordTimeEditing,
+    private val tags: RecordTags? = mixed as? RecordTags ?: published as? RecordTags,
+    private val marking: RecordMarking? = published as? RecordMarking ?: mixed as? RecordMarking,
+    private val trash: RecordTrash? = published as? RecordTrash ?: mixed as? RecordTrash,
 ) : ViewModel() {
     var state by mutableStateOf(FolioState())
         private set
@@ -85,7 +111,8 @@ class FolioViewModel(
         media?.stopPlayback()
         loadVersion++
         state = state.copy(page = page, error = null, loading = false)
-        if (page == Page.Records || page == Page.Search) refresh()
+        if (page == Page.Records || page == Page.Search || page == Page.Trash) refresh()
+        if (page == Page.Search) loadTags()
     }
 
     private var recordingAfter: ItemId? = null
@@ -105,11 +132,12 @@ class FolioViewModel(
     fun newChecklist() = begin(ContentItem.Checklist(ItemId(UUID.randomUUID().toString()),
         listOf(ChecklistEntry(ChecklistEntryId.create(), ""))))
 
-    private fun begin(item: ContentItem? = null) {
+    private fun begin(item: ContentItem? = null, currentTime: Boolean = true) {
         if (state.busy || state.editor != null) return
         loadVersion++
         state = state.copy(page = Page.Editor, editor = RecordEditor(
             items = listOfNotNull(item), activeItemId = item?.id,
+            eventTime = if (currentTime) ZonedDateTime.now().let { EventTime(it.toLocalDate(), it.toLocalTime().withSecond(0).withNano(0), it.zone) } else null,
             textValues = if (item is ContentItem.Text) mapOf(item.id to TextFieldValue()) else emptyMap()),
             savedId = null, error = null, saveError = null, loading = false)
     }
@@ -165,19 +193,20 @@ class FolioViewModel(
                     val id = pendingInitialId ?: withContext(Dispatchers.IO) {
                         when (first) {
                             is ContentItem.Text -> requireNotNull(drafts.saveDraft(null,
-                                (snapshot.textValues[first.id] ?: TextFieldValue(first.text)).asEdit()))
-                            is ContentItem.Checklist -> mixed.appendChecklist(null, first.entries)
+                                (snapshot.textValues[first.id] ?: TextFieldValue(first.text)).asEdit(), snapshot.eventTime))
+                            is ContentItem.Checklist -> mixed.appendChecklist(null, first.entries, snapshot.eventTime)
                             else -> error("媒体必须先保存原件")
                         }
                     }
                     pendingInitialId = id
                     val content = withContext(Dispatchers.IO) { requireNotNull(mixed.openMixedDraft(id)) }
+                    val savedTime = withContext(Dispatchers.IO) { times?.openDraftTimes(id)?.eventTime }
                     val current = state.editor ?: return true
                     val actualId = content.items.single().id
-                    val mapped = current.items.map { it.withId(actualId) }
-                    state = state.copy(editor = current.copy(draftId = id, items = mapped,
-                        textValues = current.textValues[first.id]?.let { mapOf(actualId to it) } ?: emptyMap(),
-                        activeItemId = actualId, persistedItems = content.items, savedRevision = -1), saveError = null)
+                    state = state.copy(editor = current.copy(draftId = id,
+                        backendItemIds = mapOf(first.id to actualId),
+                        persistedItems = content.items.map { it.withId(first.id) }, persistedEventTime = savedTime,
+                        savedRevision = -1), saveError = null)
                     pendingInitialId = null
                 } else {
                     withContext(Dispatchers.IO) {
@@ -185,19 +214,23 @@ class FolioViewModel(
                         // 当前文字项最后保存，后端保留该项及项内光标。
                         val ordered = snapshot.items.sortedBy { it.id == snapshot.activeItemId }
                         for (item in ordered) {
+                            val backendId = snapshot.backendItemIds[item.id] ?: item.id
                             if (item == previous[item.id] && !(item is ContentItem.Text && item.id == snapshot.activeItemId)) continue
                             when (item) {
-                                is ContentItem.Text -> mixed.editTextItem(snapshot.draftId, item.id,
+                                is ContentItem.Text -> mixed.editTextItem(snapshot.draftId, backendId,
                                     (snapshot.textValues[item.id] ?: TextFieldValue(item.text)).asEdit())
-                                is ContentItem.Photo -> mixed.editPhotoCaption(snapshot.draftId, item.id, item.caption)
-                                is ContentItem.Audio -> mixed.editAudioCaption(snapshot.draftId, item.id, item.caption)
-                                is ContentItem.Checklist -> mixed.editChecklist(snapshot.draftId, item.id, item.entries)
+                                is ContentItem.Photo -> mixed.editPhotoCaption(snapshot.draftId, backendId, item.caption)
+                                is ContentItem.Audio -> mixed.editAudioCaption(snapshot.draftId, backendId, item.caption)
+                                is ContentItem.Checklist -> mixed.editChecklist(snapshot.draftId, backendId, item.entries)
                             }
+                        }
+                        if (snapshot.eventTime != snapshot.persistedEventTime) {
+                            requireNotNull(times).saveDraftEventTime(snapshot.draftId, snapshot.eventTime)
                         }
                     }
                     val current = state.editor ?: return true
                     state = state.copy(editor = current.copy(persistedItems = snapshot.items,
-                        savedRevision = snapshot.revision), saveError = null)
+                        persistedEventTime = snapshot.eventTime, savedRevision = snapshot.revision), saveError = null)
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) {
@@ -220,20 +253,21 @@ class FolioViewModel(
                 state = state.copy(editor = editor.copy(items = listOf(item), activeItemId = item.id,
                     textValues = if (item is ContentItem.Text) mapOf(item.id to TextFieldValue()) else emptyMap(), revision = 0, savedRevision = 0))
             } else withContext(Dispatchers.IO) {
-                if (checklist) mixed.insertChecklist(id, after, listOf(ChecklistEntry(ChecklistEntryId.create(), "")))
-                else mixed.insertText(id, after, TextEdit("", 0))
+                val position = after?.let { editor.backendItemIds[it] ?: it }
+                if (checklist) mixed.insertChecklist(id, position, listOf(ChecklistEntry(ChecklistEntryId.create(), "")))
+                else mixed.insertText(id, position, TextEdit("", 0))
             }
         }
     }
 
     fun move(id: ItemId, direction: MoveDirection) = structure("移动失败，请重试。") {
-        it.draftId?.let { draft -> withContext(Dispatchers.IO) { mixed.moveItem(draft, id, direction) } }
+        it.draftId?.let { draft -> withContext(Dispatchers.IO) { mixed.moveItem(draft, it.backendItemIds[id] ?: id, direction) } }
     }
 
     fun remove(id: ItemId) = structure("移除失败，请重试。") {
         media?.stopPlayback()
         if (it.draftId == null) state = state.copy(editor = it.copy(items = emptyList(), textValues = emptyMap(), activeItemId = null))
-        else withContext(Dispatchers.IO) { mixed.removeItem(it.draftId, id) }
+        else withContext(Dispatchers.IO) { mixed.removeItem(it.draftId, it.backendItemIds[id] ?: id) }
     }
 
     fun undo() = structure("撤销失败，请重试。") {
@@ -264,15 +298,15 @@ class FolioViewModel(
         catch (_: Exception) { state = state.copy(error = "操作已保存，草稿读取失败，请重试读取。") }
     }
 
-    fun prepareExternal(after: ItemId?, launch: (ExternalTarget) -> Unit) {
+    fun prepareExternal(after: ItemId?, currentTime: Boolean = true, launch: (ExternalTarget) -> Unit) {
         if (state.recording || state.pendingAttachment != null || state.editor?.needsReload == true) return
-        if (state.editor == null) begin()
+        if (state.editor == null) begin(currentTime = currentTime)
         runAction("暂时无法打开媒体入口，请重试。") {
             writes.withLock {
                 if (!saveLatest()) return@withLock
                 val editor = state.editor ?: return@withLock
-                launch(ExternalTarget(editor.draftId?.value, editor.recordId?.value, after?.value,
-                    editor.returnPage, state.detailOrigin))
+                launch(ExternalTarget(editor.draftId?.value, editor.recordId?.value, after?.let { (editor.backendItemIds[it] ?: it).value },
+                    editor.returnPage, state.detailOrigin, editor.eventTime))
             }
         }
     }
@@ -280,7 +314,7 @@ class FolioViewModel(
     private suspend fun restoreTarget(target: ExternalTarget) {
         if (state.editor == null) {
             if (target.draftId != null) readEditor(DraftId(target.draftId), target.recordId?.let(::RecordId), target.returnPage)
-            else state = state.copy(page = Page.Editor, editor = RecordEditor(returnPage = target.returnPage))
+            else state = state.copy(page = Page.Editor, editor = RecordEditor(returnPage = target.returnPage, eventTime = target.eventTime))
             state = state.copy(detailOrigin = target.detailOrigin)
         }
         check(state.editor != null && state.editor?.draftId?.value == target.draftId) { "原草稿已不可编辑" }
@@ -323,9 +357,9 @@ class FolioViewModel(
         val editor = state.editor ?: return
         val id = withContext(Dispatchers.IO) {
             when (pending) {
-                is PendingAttachment.Photo -> if (editor.draftId == null) drafts.appendPhotos(null, listOf(pending.id))
+                is PendingAttachment.Photo -> if (editor.draftId == null) drafts.appendPhotos(null, listOf(pending.id), editor.eventTime)
                     else { mixed.insertPhoto(editor.draftId, pending.after, pending.id); editor.draftId }
-                is PendingAttachment.Audio -> if (editor.draftId == null) mixed.appendAudio(null, pending.clip.id)
+                is PendingAttachment.Audio -> if (editor.draftId == null) mixed.appendAudio(null, pending.clip.id, initialEventTime = editor.eventTime)
                     else { mixed.insertAudio(editor.draftId, pending.after, pending.clip.id); editor.draftId }
             }
         }
@@ -335,7 +369,7 @@ class FolioViewModel(
 
     fun startRecording(target: ExternalTarget) = runAction("无法开始录音，请检查麦克风权限或是否被占用。") {
         restoreTarget(target)
-        recordingAfter = target.afterId?.let(::ItemId)
+        recordingAfter = target.afterId?.let(::ItemId)?.let { state.editor?.backendItemIds?.get(it) ?: it }
         requireNotNull(media).start()
     }
 
@@ -385,13 +419,16 @@ class FolioViewModel(
             return
         }
         val canUndo = withContext(Dispatchers.IO) { mixed.canUndoRemoval(id) }
+        val eventTime = withContext(Dispatchers.IO) { times?.openDraftTimes(id)?.eventTime }
+        val selectedTags = withContext(Dispatchers.IO) { tags?.openDraftTags(id).orEmpty() }
         loadVersion++
         state = state.copy(page = Page.Editor, loading = false, error = null, saveError = null,
             detailOrigin = if (recordId != null && origin != Page.Detail) origin else state.detailOrigin,
             editor = RecordEditor(id, recordId, content.items,
                 content.items.filterIsInstance<ContentItem.Text>().associate { item -> item.id to TextFieldValue(item.text,
                     TextRange(if (item.id == content.activeItemId) content.cursor else item.text.length)) },
-                content.activeItemId, content.items, returnPage = origin, canUndo = canUndo))
+                content.activeItemId, content.items, returnPage = origin, canUndo = canUndo,
+                eventTime = eventTime, persistedEventTime = eventTime, tags = selectedTags))
     }
 
     fun complete() {
@@ -441,7 +478,12 @@ class FolioViewModel(
     }
 
     fun openRecord(id: RecordId) {
-        runAction("记录读取失败，请重试。") { showDetail(id, state.page) }
+        val origin = when (state.page) {
+            Page.Detail -> state.detailOrigin
+            Page.TrashDetail -> Page.Trash
+            else -> state.page
+        }
+        runAction("记录读取失败，请重试。") { showDetail(id, origin) }
     }
 
     private suspend fun showDetail(id: RecordId, origin: Page) {
@@ -470,6 +512,8 @@ class FolioViewModel(
             Page.Detail -> home(state.detailOrigin)
             Page.Search -> home(Page.Records)
             Page.Records -> home(Page.Capture)
+            Page.Trash -> home(Page.Records)
+            Page.TrashDetail -> home(Page.Trash)
             Page.Capture -> Unit
         }
     }
@@ -485,12 +529,23 @@ class FolioViewModel(
         val version = ++loadVersion
         val page = state.page
         val query = state.query
+        val filterTags = state.filterTags
+        val starredOnly = state.starredOnly
         state = state.copy(loading = true, error = null)
         viewModelScope.launch {
             try {
                 if (page == Page.Search) {
-                    val result = withContext(Dispatchers.IO) { browsing.queryRecords(query) }
+                    val result = withContext(Dispatchers.IO) { browsing.queryRecords(query, filterTags, starredOnly) }
                     if (version == loadVersion) state = state.copy(results = result, loading = false)
+                } else if (page == Page.Trash) {
+                    val (result, pending) = withContext(Dispatchers.IO) {
+                        val result = requireNotNull(trash).listTrash()
+                        val pending = try { trash.retryPhotoCleanup() + trash.retryAudioCleanup() > 0 }
+                            catch (cancelled: CancellationException) { throw cancelled }
+                            catch (_: Exception) { true }
+                        result to pending
+                    }
+                    if (version == loadVersion) state = state.copy(trash = result, cleanupPending = pending, loading = false)
                 } else {
                     val result = withContext(Dispatchers.IO) {
                         Triple(drafts.listDrafts(), browsing.listRecentRecords(), browsing.listEventTimeline())
@@ -505,6 +560,124 @@ class FolioViewModel(
             }
         }
     }
+
+    fun changeEventTime(value: EventTime?) {
+        val editor = state.editor ?: return
+        if (state.busy || editor.needsReload) return
+        state = state.copy(editor = editor.copy(eventTime = value, revision = editor.revision + 1), saveError = null)
+        save()
+    }
+
+    private var tagsVersion = 0
+    fun loadTags() {
+        val version = ++tagsVersion
+        state = state.copy(tagsLoading = true, tagsError = null)
+        viewModelScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) { requireNotNull(tags).listTags() }
+                if (version == tagsVersion) state = state.copy(sharedTags = result, tagsLoading = false)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                if (version == tagsVersion) state = state.copy(tagsLoading = false, tagsError = "标签读取失败，请重试。")
+            }
+        }
+    }
+
+    fun createTag(name: String) = editTags("新标签保存失败，请重试。") { id ->
+        requireNotNull(tags).createDraftTag(id, name)
+    }
+
+    fun selectTag(tag: Tag, selected: Boolean) = editTags("标签选择保存失败，请重试。") { id ->
+        val current = requireNotNull(requireNotNull(tags).openDraftTags(id)).map { it.id }
+        tags.saveDraftTags(id, if (selected) (current + tag.id).distinct() else current - tag.id)
+    }
+
+    fun renameTag(tag: Tag, name: String, shared: Boolean) = editTags("标签改名失败，请重试。") { id ->
+        if (shared) requireNotNull(tags).renameTag(tag.id, name)
+        else requireNotNull(tags).renameDraftTag(id, tag.id, name)
+    }
+
+    private fun editTags(failure: String, action: suspend (DraftId) -> Unit) = structure(failure) { editor ->
+        val id = editor.draftId ?: error("请先写下内容，再添加标签")
+        withContext(Dispatchers.IO) { action(id) }
+        loadTags()
+    }
+
+    fun filterByTags(ids: Set<TagId>) { state = state.copy(filterTags = ids); refresh() }
+    fun filterStarred(value: Boolean) { state = state.copy(starredOnly = value); refresh() }
+    fun clearFilters() { state = state.copy(filterTags = emptySet(), starredOnly = false); refresh() }
+    fun openStarred() { state = state.copy(filterTags = emptySet(), starredOnly = true, query = ""); home(Page.Search) }
+    fun openTag(tag: Tag) { state = state.copy(filterTags = setOf(tag.id), starredOnly = false, query = ""); home(Page.Search) }
+
+    fun setStarred(value: Boolean) = mark { id -> requireNotNull(marking).setStarred(id, value) }
+    fun setPinned(value: Boolean) = mark { id -> requireNotNull(marking).setPinned(id, value) }
+    private fun mark(action: suspend (RecordId) -> Unit) {
+        if (state.page != Page.Detail) return
+        val id = state.detailId ?: return
+        runAction("标记保存失败，请重试。") {
+            withContext(Dispatchers.IO) { action(id) }
+            showDetail(id, state.detailOrigin)
+        }
+    }
+
+    fun deleteRecord() {
+        if (state.page != Page.Detail) return
+        val id = state.detailId ?: return
+        val origin = state.detailOrigin
+        val context = DeletedRecord(id, origin, state.query, state.filterTags, state.starredOnly, state.recent)
+        val hasDraft = state.drafts.any { it.recordId == id }
+        media?.stopPlayback()
+        runAction("移入回收站失败，请重试。") {
+            withContext(Dispatchers.IO) { requireNotNull(trash).moveToTrash(id) }
+            state = state.copy(page = origin, detail = null, detailId = null, savedId = null,
+                deleted = context, restoredId = null,
+                notice = if (hasDraft) "已移入回收站，未完成修改也已保留" else "已移入回收站")
+            refresh()
+        }
+    }
+
+    fun undoDelete() {
+        if (state.editor != null) return
+        val deleted = state.deleted ?: return
+        runAction("恢复失败，请重试。") {
+            withContext(Dispatchers.IO) { requireNotNull(trash).restoreRecord(deleted.id) }
+            state = state.copy(page = deleted.origin, deleted = null, notice = "已撤销删除",
+                query = deleted.query, filterTags = deleted.filterTags, starredOnly = deleted.starredOnly, recent = deleted.recent,
+                scrollRestoreVersion = state.scrollRestoreVersion + 1)
+            refresh()
+        }
+    }
+
+    fun openTrashRecord(id: RecordId) = runAction("回收站记录读取失败，请重试。") {
+        media?.stopPlayback()
+        loadVersion++
+        state = state.copy(page = Page.TrashDetail, trashId = id, trashDetail = null, loading = false)
+        val content = withContext(Dispatchers.IO) { requireNotNull(trash).openTrashRecord(id) }
+        state = state.copy(trashDetail = content, error = if (content == null) "这条记录已不在回收站，请返回刷新。" else null)
+    }
+
+    fun retryTrashDetail() { state.trashId?.let(::openTrashRecord) }
+    fun restoreRecord(id: RecordId) = runAction("恢复失败，请重试。") {
+        media?.stopPlayback()
+        withContext(Dispatchers.IO) { requireNotNull(trash).restoreRecord(id) }
+        state = state.copy(page = Page.Trash, trashDetail = null, restoredId = id, deleted = null, notice = "已恢复")
+        refresh()
+    }
+
+    fun deletePermanently(id: RecordId) = runAction("彻底删除失败，请重试。") {
+        media?.stopPlayback()
+        val result = withContext(Dispatchers.IO) { requireNotNull(trash).deletePermanently(id) }
+        state = state.copy(page = Page.Trash, trashDetail = null, restoredId = null, deleted = null,
+            notice = "已彻底删除", cleanupPending = result.pendingPhotoCount != 0 || result.pendingAudioCount != 0)
+        refresh()
+    }
+
+    fun retryCleanup() = runAction("部分文件尚未清理，请稍后重试。") {
+        val remaining = withContext(Dispatchers.IO) { requireNotNull(trash).retryPhotoCleanup() + trash.retryAudioCleanup() }
+        state = state.copy(cleanupPending = remaining > 0)
+    }
+
+    fun dismissNotice() { state = state.copy(notice = null, deleted = null, restoredId = null) }
 
     private fun runAction(failure: String, afterSuccess: (() -> Unit)? = null, action: suspend () -> Unit) {
         if (state.busy) return
