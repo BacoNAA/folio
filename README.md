@@ -6,9 +6,13 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 ## 当前进度
 
-项目已进入安卓开发，编辑、搜索与回收站页面仍待接入。具体后端范围、提交与合入状态、T1—T3 状态及待验收项统一见[当前开发进度](docs/engineering/开发流程.md#当前开发进度)。代码已合入不等于完整功能已验收。
+当前开发分支已接入安卓文字、拍照与选图、录音、清单和混合编辑页面，以及草稿恢复、记录浏览、搜索和详情。具体范围、合入状态、T1—T3 状态及待验收项统一见[当前开发进度](docs/engineering/开发流程.md#当前开发进度)。
 
-当前 APK 可打开「随手记」并切换到「记录」。本机 Room 后端支持新建、续写和放弃草稿，也可按文字及已支持的说明、标签线索搜索并打开正式记录。编辑已有记录时，搜索和详情继续显示上次完成的内容，完成后按原 ID 读取更新。前端可通过 `LocalTextStore.get(context)` 获取 [TextDrafts 和 PublishedTextRecords](app/src/main/java/com/baconaa/folio/records/TextRecords.kt)，编辑与搜索页面待接入。
+从「随手记」的写一句、拍照、选图、录音或清单开始记录，内容自动存入本机草稿；从「记录 → 继续草稿」重开，单份直接续写，多份按最近编辑顺序选择。新建点「完成」后回首页，经「已保存 · 查看」打开详情；搜索只返回正式版本。已有记录可编辑和放弃，完成后回到原记录详情，再返回原浏览或搜索位置。失败时保留输入并显示重试入口，空白记录不能完成。
+
+编辑页按顺序展示文字、照片、录音和清单。「＋ 添加内容」追加到末尾；每项「⋯」支持在此后添加、相邻移动、移除与撤销，重开草稿仍可撤销最近移除。照片复制原件后加入草稿，可重复添加多张，点图可放大；清单支持增删事项与勾选。录音按需申请麦克风权限，拒绝后仍可编辑其他内容；可取消或停止并保存、试听和填写说明。离开编辑或进入后台会停止录制并保存有效片段，后台不继续长录音。媒体绑定失败保留原件 ID 重试，只有加入草稿成功才显示保存完成；导入失败可重试或放弃这张照片继续编辑。
+
+页面使用 `FolioViewModel` 持有状态，通过 `LocalTextStore.get(context)` 调用 [TextDrafts 和 PublishedTextRecords](app/src/main/java/com/baconaa/folio/records/TextRecords.kt)、[MixedContentDrafts](app/src/main/java/com/baconaa/folio/records/MixedContent.kt) 等现有接口。草稿写入串行，完成及离开编辑等待最后输入保存成功；读写错误与空结果分别展示。结构操作提交后重读失败时，只重读而不重复插入。记录列表可切换事件时间和最近记录，未填写事件时间的记录单列。标题、时间与线索填写、星标置顶操作及回收站页面待后续接入。
 
 已按[整体需求审查](docs/requirements/整体需求审查.md)整理正文、子操作、共同规则和前置关系，并将已确认的功能边界写入正文。剩余范围与已确认结论索引集中见[待确认问题](docs/requirements/待确认问题.md)。
 
@@ -24,7 +28,7 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 清单通过 `appendChecklist` 单独起草或追加，`insertChecklist` 在指定项后插入，`editChecklist` 保存条目文字及勾选状态。每条 `ChecklistEntry` 带稳定 ID，修改时保留该 ID。清单支持草稿重开、移动、移除撤销、完成、放弃和删除恢复；完成前列表和详情仍展示原正式版本。空清单不能独立起草或发布，清空已有项可以暂存草稿。Room v8 将清单内容保存在有序项中，旧文字、照片、事件时间及撤销项通过迁移保留。
 
-应用内录音通过 [LocalAudioRecorder](app/src/main/java/com/baconaa/folio/media/LocalAudioRecorder.kt) 的 `start`、`stop` 和 `cancel` 控制。前端先申请麦克风权限，再在主线程调用控制器；`stop` 成功返回 `AudioClip`，原件已写入应用持久目录，并验证 AAC 音轨和实际时长。随后用 `appendAudio` 独立起草或追加，用 `insertAudio` 在指定项后插入，`editAudioCaption` 修改说明。只有草稿绑定成功后才能提示已保存到草稿；绑定失败时保留返回的片段 ID 重试。页面离开时应停止并保存或取消录制，尚在录制的片段不承诺中断恢复。前端权限、录音入口和生命周期接入仍待实现。
+应用内录音通过 [LocalAudioRecorder](app/src/main/java/com/baconaa/folio/media/LocalAudioRecorder.kt) 的 `start`、`stop` 和 `cancel` 控制。前端先申请麦克风权限，再在主线程调用控制器；`stop` 成功返回 `AudioClip`，原件已写入应用持久目录，并验证 AAC 音轨和实际时长。随后用 `appendAudio` 独立起草或追加，用 `insertAudio` 在指定项后插入，`editAudioCaption` 修改说明。只有草稿绑定成功后才能提示已保存到草稿；绑定失败时保留返回的片段 ID 重试。前端权限、录音入口和生命周期已接入，尚在录制且未保存的片段不承诺进程被强制终止后的恢复。
 
 录音作为有序内容项保存，可与文字、照片和清单混排、移动、移除撤销，并随草稿一起完成或放弃。每处引用保留独立内容项 ID 和说明；时长由后端核验原件，不接受调用方估算值。`DraftPreview.totalAudioDurationMillis` 返回已保存录音项的总时长，无录音时为 `null`，可辨认纯录音草稿。Room v9 保留旧图文、清单、事件时间及撤销项，增加录音引用、时长和持久清理队列。录音不做语音转写，手动填写的说明可用于查找。
 
@@ -40,9 +44,9 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 `search(keyword)` 匹配正式正文、清单、照片和录音说明、标签当前名称；`queryRecords(keyword, tagIds, starredOnly)` 返回完整浏览卡片，支持上述关键词与标签、星标联合查找。标签多选满足任一个，不同类别同时满足；空标签集合表示不限标签，未命中返回空集合，不自动扩大范围。两种入口都排除草稿、未完成修改和回收站，不识别原照片中的文字或原录音中的话语。标签按 ID 限定，同名标签的记录不会混在一起；结果沿用置顶及最近记录顺序。时间、地点、人物物件和媒体类型的组合筛选继续按后续范围实现。
 
-浏览卡片的 `preview` 按原顺序展示最多三个内容项，每项文字及媒体说明截取前 80 个 Unicode 码点；录音返回片段 ID 和时长供试听，清单只读展示前三条事项及全部事项、已完成事项数量。`PreviewContentItem` 与可保存的 `ContentItem` 分开，避免截断预览被回存为完整内容。`remainingItemCount`、`remainingPhotoCount` 和 `remainingAudioCount` 表示未展示的内容项及其中照片、录音项数量，空白文字不占预览，重复使用的媒体仍按各自内容项计数。详情通过同一 `RecordId` 调用 `openRecordContent`，读取完整内容及时间信息。当前列表为全量读取，尚未引入分页，前端列表与时间填写控件待接入。
+浏览卡片的 `preview` 按原顺序展示最多三个内容项，每项文字及媒体说明截取前 80 个 Unicode 码点；录音返回片段 ID 和时长供试听，清单只读展示前三条事项及全部事项、已完成事项数量。`PreviewContentItem` 与可保存的 `ContentItem` 分开，避免截断预览被回存为完整内容。`remainingItemCount`、`remainingPhotoCount` 和 `remainingAudioCount` 表示未展示的内容项及其中照片、录音项数量，空白文字不占预览，重复使用的媒体仍按各自内容项计数。详情通过同一 `RecordId` 调用 `openRecordContent`，读取完整内容及时间信息。当前列表为全量读取，尚未引入分页，本分支已接入前端列表，时间填写控件待接入。
 
-删除与恢复使用 [RecordTrash](app/src/main/java/com/baconaa/folio/records/RecordTrash.kt)：`moveToTrash` 将正式记录和编辑草稿一起隐藏，`listTrash` 与 `openTrashRecord` 只展示上次完成的内容并通过 `hasDraft` 提示未完成修改；`restoreRecord` 用于立即撤销或从回收站恢复，两份内容保持独立。重复删除或恢复返回 `false`。页面负责删除确认、撤销提示和浏览位置，回收站与编辑页面均待接入。
+删除与恢复使用 [RecordTrash](app/src/main/java/com/baconaa/folio/records/RecordTrash.kt)：`moveToTrash` 将正式记录和编辑草稿一起隐藏，`listTrash` 与 `openTrashRecord` 只展示上次完成的内容并通过 `hasDraft` 提示未完成修改；`restoreRecord` 用于立即撤销或从回收站恢复，两份内容保持独立。重复删除或恢复返回 `false`。页面负责删除确认、撤销提示和浏览位置，回收站及编辑页中的删除恢复操作待接入。
 
 用户确认后调用 `deletePermanently`，在同一事务中彻底删除回收站记录、编辑草稿和撤销项。完成、放弃、覆盖最近移除及彻底删除都会收集释放的媒体候选，提交后只删除已无任何引用的 Folio 文件；共享引用、回收站、隐藏草稿及可撤销项继续保护原件。`pendingPhotoCount`、`pendingAudioCount` 分别表示仍待清理的照片、录音数量，`null` 表示该类清理暂不可用；文件清理失败不改变已完成的记录删除。`retryPhotoCleanup`、`retryAudioCleanup` 可在重开应用后重试持久队列。清理不扫描尚未绑定的新导入照片或新录音，也不触及系统相册来源。
 
