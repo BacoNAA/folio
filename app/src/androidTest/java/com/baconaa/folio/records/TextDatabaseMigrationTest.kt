@@ -469,6 +469,28 @@ class TextDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun versionElevenTagsAndDraftRemainIntactWhenPlacesAreAdded() = runBlocking {
+        createDatabase(11) { sql ->
+            sql.execSQL("INSERT INTO text_drafts (id,body,cursor,firstRecordedAt,lastEditedAt) VALUES ('draft','旧草稿',2,100,200)")
+            sql.execSQL("INSERT INTO draft_items (draftId,position,itemId,text) VALUES ('draft',0,'item','旧草稿')")
+            sql.execSQL("INSERT INTO tags VALUES ('tag','旧标签','draft')")
+            sql.execSQL("INSERT INTO draft_tags VALUES ('draft','tag',0)")
+        }
+        val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context))
+            val draft = DraftId("draft")
+            assertEquals(TextEdit("旧草稿", 2), store.openDraft(draft))
+            assertEquals("旧标签", store.openDraftTags(draft)!!.single().name)
+            assertNull(store.openDraftPlace(draft))
+            val place = store.createDraftPlace(draft, PlaceInfo("新地点"))
+            val id = store.completeMixedDraft(draft)
+            assertEquals(place, store.openRecordContent(id)!!.place!!.id)
+            assertEquals("旧标签", store.openRecordContent(id)!!.tags.single().name)
+        } finally { database.close() }
+    }
+
     private fun createDatabase(version: Int, seed: (SQLiteDatabase) -> Unit) {
         val schemaFile = "${FolioDatabase::class.java.name}/$version.json"
         val schema = instrumentation.context.assets.open(schemaFile).bufferedReader().use {

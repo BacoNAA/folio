@@ -43,7 +43,9 @@ internal data class RecordTagPreviewRow(val recordId: String, @Embedded val tag:
 internal const val RECORD_TEXT_MATCH = """(instr(lower(r.body), lower(:keyword)) > 0
     OR EXISTS(SELECT 1 FROM record_items i WHERE i.recordId = r.id AND instr(lower(i.caption), lower(:keyword)) > 0)
     OR EXISTS(SELECT 1 FROM record_tags rt JOIN tags t ON t.id = rt.tagId
-              WHERE rt.recordId = r.id AND t.ownerDraftId IS NULL AND instr(lower(t.name), lower(:keyword)) > 0))"""
+              WHERE rt.recordId = r.id AND t.ownerDraftId IS NULL AND instr(lower(t.name), lower(:keyword)) > 0)
+    OR EXISTS(SELECT 1 FROM record_places rp JOIN places p ON p.id = rp.placeId
+              WHERE rp.recordId = r.id AND p.ownerDraftId IS NULL AND instr(lower(p.name), lower(:keyword)) > 0))"""
 
 @Dao
 internal abstract class TagDao {

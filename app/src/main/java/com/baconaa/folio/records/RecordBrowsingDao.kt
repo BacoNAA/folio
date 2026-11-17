@@ -17,8 +17,9 @@ internal interface RecordBrowsingDao {
     @Query("""SELECT r.id, eventDate, eventClock, eventZone, isStarred, isPinned FROM text_records r
               WHERE deletedAt IS NULL AND (:starredOnly = 0 OR isStarred = 1)
               AND (:allTags = 1 OR EXISTS(SELECT 1 FROM record_tags rt WHERE rt.recordId = r.id AND rt.tagId IN (:tagIds)))
+              AND (:placeId IS NULL OR EXISTS(SELECT 1 FROM record_places rp WHERE rp.recordId = r.id AND rp.placeId = :placeId))
               AND """ + RECORD_TEXT_MATCH + " ORDER BY isPinned DESC, firstRecordedAt DESC, r.rowid DESC")
-    suspend fun activeRecords(keyword: String, tagIds: List<String>, allTags: Boolean, starredOnly: Boolean): List<BrowseRecordRow>
+    suspend fun activeRecords(keyword: String, tagIds: List<String>, allTags: Boolean, starredOnly: Boolean, placeId: String?): List<BrowseRecordRow>
 
     // 每条最多读三项的短预览，不加载所有正式正文，也不逐条发起数据库查询。
     @Query("""SELECT i.recordId, i.itemId, substr(i.text, 1, 80) AS text,
