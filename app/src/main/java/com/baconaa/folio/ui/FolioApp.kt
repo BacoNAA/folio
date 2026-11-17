@@ -64,10 +64,23 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
     val searchScroll = rememberLazyListState()
     var draftPicker by rememberSaveable { mutableStateOf(false) }
     var discardDialog by rememberSaveable { mutableStateOf(false) }
+    var deleteDialog by rememberSaveable { mutableStateOf(false) }
+    var eraseDialog by rememberSaveable { mutableStateOf(false) }
+    var deletedScrollIndex by rememberSaveable { mutableIntStateOf(0) }
+    var deletedScrollOffset by rememberSaveable { mutableIntStateOf(0) }
+    var restoredScrollVersion by rememberSaveable { mutableIntStateOf(0) }
+    LaunchedEffect(state.scrollRestoreVersion, state.loading) {
+        if (!state.loading && state.scrollRestoreVersion > restoredScrollVersion) {
+            val scroll = if (state.page == Page.Search) searchScroll else recordsScroll
+            scroll.scrollToItem(deletedScrollIndex, deletedScrollOffset)
+            restoredScrollVersion = state.scrollRestoreVersion
+        }
+    }
     BackHandler(state.page != Page.Capture) { model.back() }
 
     MaterialTheme(colorScheme = lightColorScheme(
         primary = Accent, onPrimary = Color.White, background = Paper, surface = Paper,
+        secondary = Accent, secondaryContainer = Color(0xFFEADFD0), onSecondaryContainer = Ink,
         onBackground = Ink, onSurface = Ink, surfaceVariant = Color(0xFFEDE7DD),
         onSurfaceVariant = Color(0xFF766B60), outlineVariant = Color(0xFFDFD5C6),
     )) {
@@ -84,6 +97,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                         Text(when (state.page) {
                             Page.Editor -> "记录这一刻"
                             Page.Search -> "搜索全部记录"
+                            Page.Trash, Page.TrashDetail -> "回收站"
                             else -> "记录"
                         }, Modifier.weight(1f), fontSize = 22.sp, fontFamily = FontFamily.Serif)
                         if (state.page == Page.Editor) {
@@ -99,7 +113,8 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                 if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 state.error?.let { error ->
                     ErrorMessage(error, if (state.page == Page.Detail) model::retryDetail
-                        else if (state.page == Page.Records || state.page == Page.Search) model::refresh
+                        else if (state.page == Page.TrashDetail) model::retryTrashDetail
+                        else if (state.page == Page.Records || state.page == Page.Search || state.page == Page.Trash) model::refresh
                         else if (state.editor?.needsReload == true) model::reload else null)
                 }
 
@@ -125,8 +140,10 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                         }
                         Page.Editor -> MixedEditorScreen(model, launchMedia) { discardDialog = true }
                         Page.Records -> Column {
-                            TextButton(onClick = { model.home(Page.Search) }, modifier = Modifier.padding(horizontal = 12.dp)) {
-                                Text("搜索全部记录")
+                            Row {
+                                TextButton(onClick = { model.home(Page.Search) }) { Text("搜索全部记录") }
+                                TextButton(onClick = model::openStarred) { Text("星标") }
+                                TextButton(onClick = { model.home(Page.Trash) }) { Text("回收站") }
                             }
                             if (state.drafts.isNotEmpty()) {
                                 FilledTonalButton(onClick = {
@@ -161,6 +178,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                 label = { Text("搜索记录") }, placeholder = { Text("输入记得的一句话") },
                                 modifier = Modifier.fillMaxWidth().testTag("search"),
                                 trailingIcon = { if (state.query.isNotEmpty()) TextButton(onClick = { model.query("") }) { Text("清空") } })
+                            SearchFilters(model)
                             if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
                             if (!state.loading && state.error == null) {
                                 Text("${state.results.size} 条记录", Modifier.padding(vertical = 12.dp), fontSize = 12.sp)
@@ -174,25 +192,41 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                         Page.Detail -> state.detail?.let { content ->
                             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
                                 verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    FilterChip(content.marks.isStarred, { model.setStarred(!content.marks.isStarred) },
+                                        enabled = !state.busy, label = { Text(if (content.marks.isStarred) "已加星" else "加星") })
+                                    Spacer(Modifier.width(12.dp))
+                                    FilterChip(content.marks.isPinned, { model.setPinned(!content.marks.isPinned) },
+                                        enabled = !state.busy, label = { Text(if (content.marks.isPinned) "已置顶" else "置顶") })
+                                    TextButton(onClick = { deleteDialog = true }, enabled = !state.busy) { Text("删除") }
+                                }
                                 state.drafts.firstOrNull { it.recordId == state.detailId }?.let { draft ->
                                     Text("另有未完成修改，当前显示上次完成的内容。", fontSize = 13.sp)
                                     TextButton(onClick = { model.resume(draft) }, enabled = !state.busy) { Text("继续未完成修改") }
                                 }
-                                Text(content.times.eventTime?.date?.toString() ?: "事件时间未填写", fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                content.items.forEach { item -> when (item) {
-                                    is ContentItem.Text -> Text(item.text, fontSize = 18.sp, lineHeight = 32.sp)
-                                    is ContentItem.Photo -> { Photo(item.photoId); if (item.caption.isNotEmpty()) Text(item.caption) }
-                                    is ContentItem.Audio -> { AudioControl(item.audioId, item.durationMillis, model); if (item.caption.isNotEmpty()) Text(item.caption) }
-                                    is ContentItem.Checklist -> item.entries.forEach { Text("${if (it.checked) "☑" else "☐"} ${it.text}") }
-                                } }
-                                if (content.tags.isNotEmpty()) Text(content.tags.joinToString(" · ") { it.name }, color = Accent)
-                                HorizontalDivider()
-                                Text("记录于 ${formatDate(content.times.firstRecordedAt)}", fontSize = 12.sp)
-                                if (content.times.modifiedAt != content.times.firstRecordedAt) Text("修改于 ${formatDate(content.times.modifiedAt)}", fontSize = 12.sp)
+                                RecordContents(content, model)
+                            }
+                        }
+                        Page.Trash -> TrashScreen(model)
+                        Page.TrashDetail -> state.trashDetail?.let { record ->
+                            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
+                                verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                                Row {
+                                    Button(onClick = { model.restoreRecord(record.id) }, enabled = !state.busy) { Text("恢复记录") }
+                                    TextButton(onClick = { eraseDialog = true }, enabled = !state.busy) { Text("彻底删除") }
+                                }
+                                Text(if (record.hasDraft) "有未完成修改；这里只读展示上次完成的内容，恢复后可继续草稿。" else "这里只读展示上次完成的内容。", fontSize = 13.sp)
+                                RecordContents(record.content, model)
                             }
                         }
                     }
+                }
+                if (state.cleanupPending) ErrorMessage("记录已删除，部分媒体文件待清理。", model::retryCleanup)
+                if (state.notice != null && state.page != Page.Editor) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(state.notice, Modifier.weight(1f), fontSize = 12.sp)
+                    if (state.deleted != null) TextButton(onClick = model::undoDelete, enabled = !state.busy) { Text("撤销删除") }
+                    state.restoredId?.let { id -> TextButton(onClick = { model.openRecord(id) }, enabled = !state.busy) { Text("查看恢复记录") } }
+                    TextButton(onClick = model::dismissNotice) { Text("关闭提示") }
                 }
                 if (state.page == Page.Capture || state.page == Page.Records) {
                     HorizontalDivider(Modifier.padding(horizontal = 22.dp))
@@ -211,6 +245,17 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                 }
             }
         }
+        if (deleteDialog) AlertDialog(onDismissRequest = { deleteDialog = false }, title = { Text("移入回收站？") },
+            text = { Text("正式内容和这条记录的未完成修改会一起保留，可在回收站恢复。") },
+            confirmButton = { TextButton(onClick = {
+                val scroll = if (state.detailOrigin == Page.Search) searchScroll else recordsScroll
+                deletedScrollIndex = scroll.firstVisibleItemIndex; deletedScrollOffset = scroll.firstVisibleItemScrollOffset
+                deleteDialog = false; model.deleteRecord()
+            }) { Text("确认删除") } }, dismissButton = { TextButton(onClick = { deleteDialog = false }) { Text("取消") } })
+        if (eraseDialog) AlertDialog(onDismissRequest = { eraseDialog = false }, title = { Text("彻底删除这条记录？") },
+            text = { Text("正式内容及其未完成草稿会一并删除，无法从回收站找回。") },
+            confirmButton = { TextButton(onClick = { eraseDialog = false; state.trashId?.let(model::deletePermanently) }) { Text("确认彻底删除") } },
+            dismissButton = { TextButton(onClick = { eraseDialog = false }) { Text("取消") } })
         if (draftPicker) AlertDialog(onDismissRequest = { draftPicker = false }, title = { Text("继续草稿") },
             text = { LazyColumn {
                 item { Text("最近编辑的排在前面", fontSize = 12.sp) }
@@ -263,6 +308,10 @@ private fun RecordPreview(record: RecordCard, model: FolioViewModel) {
             is PreviewContentItem.Checklist -> item.entries.forEach { Text("${if (it.checked) "☑" else "☐"} ${it.text}") }
         } }
         if (record.preview.remainingItemCount > 0) Text("还有 ${record.preview.remainingItemCount} 项内容", fontSize = 12.sp)
+        if (record.tags.isNotEmpty()) Row {
+            record.tags.take(2).forEach { tag -> TextButton(onClick = { model.openTag(tag) }) { Text(tag.name) } }
+            if (record.tags.size > 2) Text("另有 ${record.tags.size - 2} 个标签", fontSize = 12.sp)
+        }
         HorizontalDivider()
     }
 }
@@ -304,5 +353,5 @@ internal fun Photo(id: PhotoId) {
     }
 }
 
-private fun formatDate(millis: Long): String = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+internal fun formatDate(millis: Long): String = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
     .format(Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()))

@@ -27,16 +27,17 @@ class MixedEditorNavigationTest {
         compose.onNodeWithContentDescription("完成事项 1").performClick().assertIsOn()
         compose.onNodeWithText("＋ 添加事项").performClick()
         compose.onNodeWithText("事项 2").performTextInput("带上相机")
-        compose.onNodeWithTag("add-content").performScrollTo().performClick()
+        clickEditorItem("add-content")
         compose.onNodeWithText("文字").performClick()
         compose.onNodeWithTag("editor").performTextInput("沿河散步")
         waitText("草稿已保存")
-        compose.onNodeWithTag("item-menu-1").performScrollTo().performClick()
+        clickEditorItem("item-menu-1")
         compose.onNodeWithText("上移一项").performClick()
         compose.waitUntil(10_000) {
             compose.onAllNodes(hasTestTag("item-menu-0") and hasAnySibling(hasText("文字"))).fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithTag("item-menu-0").performClick()
+        clickEditorItem("item-menu-0")
+        waitText("移除这一项")
         compose.onNodeWithText("移除这一项").performClick()
         waitText("撤销移除")
         compose.activityRule.scenario.recreate()
@@ -81,6 +82,12 @@ class MixedEditorNavigationTest {
         assertTrue(audio.durationMillis > 0)
         assertEquals(caption, audio.caption)
         runBlocking { store.moveToTrash(record.id); store.deletePermanently(record.id) }
+    }
+
+    private fun clickEditorItem(tag: String) {
+        // 懒列表在小屏及键盘展开时可能尚未组合目标；先滚动容器，再点击可见按钮。
+        compose.onNodeWithTag("mixed-editor").performScrollToNode(hasTestTag(tag))
+        compose.onNodeWithTag(tag).assertIsDisplayed().assertIsEnabled().performClick()
     }
 
     private fun waitText(text: String) {

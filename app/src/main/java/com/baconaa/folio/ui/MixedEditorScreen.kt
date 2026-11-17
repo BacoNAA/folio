@@ -110,6 +110,7 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
                 OutlinedButton(onClick = { addAfter = null; showAdd = true }, enabled = structureEnabled,
                     modifier = Modifier.fillMaxWidth().testTag("add-content")) { Text("＋ 添加内容") }
             }
+            item("clues") { EditorClues(model) }
         }
         if (state.recording) Row(verticalAlignment = Alignment.CenterVertically) {
             Text("正在录音", Modifier.weight(1f))

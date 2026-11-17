@@ -60,7 +60,7 @@ class LocalEditorMedia(context: Context) : EditorMedia {
 }
 
 data class ExternalTarget(val draftId: String?, val recordId: String?, val afterId: String?,
-    val returnPage: Page, val detailOrigin: Page)
+    val returnPage: Page, val detailOrigin: Page, val eventTime: com.baconaa.folio.records.EventTime? = null)
 
 sealed interface PendingAttachment {
     val after: ItemId?
