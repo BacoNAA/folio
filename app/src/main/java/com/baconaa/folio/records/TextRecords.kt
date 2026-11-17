@@ -32,6 +32,7 @@ data class RecordPreview(
 data class RecordContent(
     val items: List<ContentItem>, val times: RecordTimes, val marks: RecordMarks = RecordMarks(),
     val tags: List<Tag> = emptyList(),
+    val place: Place? = null,
 ) {
     val text: String get() = items.body()
     val photos: List<PhotoId> get() = items.photos()

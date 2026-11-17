@@ -30,10 +30,11 @@ internal fun EditorClues(model: FolioViewModel) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     var timeDialog by rememberSaveable { mutableStateOf(false) }
     var tagDialog by rememberSaveable { mutableStateOf(false) }
+    var placeDialog by rememberSaveable { mutableStateOf(false) }
     val enabled = !model.state.busy && !editor.needsReload && !model.state.recording && model.state.pendingAttachment == null
     Column {
         TextButton(onClick = { expanded = !expanded }, modifier = Modifier.testTag("editor-clues")) {
-            Text(if (expanded) "收起时间与标签" else "时间与标签 · 选填")
+            Text(if (expanded) "收起时间、地点与标签" else "时间、地点与标签 · 选填")
         }
         if (expanded) {
             TextButton(onClick = { timeDialog = true }, enabled = enabled, modifier = Modifier.testTag("edit-time")) {
@@ -44,12 +45,15 @@ internal fun EditorClues(model: FolioViewModel) {
                 Text(if (editor.tags.isEmpty()) "选择或新建文字标签" else "标签：${editor.tags.joinToString("、") { it.name }}")
             }
             if (!editor.hasContent) Text("先留下一点内容，再添加标签。", fontSize = 12.sp)
+            TextButton(onClick = { model.loadPlaces(); placeDialog = true }, enabled = enabled && editor.hasContent,
+                modifier = Modifier.testTag("edit-place")) { Text("地点：${editor.place?.info?.name ?: "暂不填写"}") }
         }
     }
     if (timeDialog) EventTimeDialog(editor.eventTime, onDismiss = { timeDialog = false }) {
         model.changeEventTime(it); timeDialog = false
     }
     if (tagDialog) TagDialog(model, editing = true) { tagDialog = false }
+    if (placeDialog) PlacePicker(model) { placeDialog = false }
 }
 
 @Composable
@@ -149,7 +153,7 @@ internal fun SearchFilters(model: FolioViewModel) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             FilterChip(state.starredOnly, { model.filterStarred(!state.starredOnly) }, label = { Text("只看星标") })
             TextButton(onClick = { showTags = true; model.loadTags() }) { Text("筛选标签${if (state.filterTags.isEmpty()) "" else " · ${state.filterTags.size}"}") }
-            if (state.starredOnly || state.filterTags.isNotEmpty()) TextButton(onClick = model::clearFilters) { Text("清除筛选") }
+            if (state.starredOnly || state.filterTags.isNotEmpty() || state.filterPlace != null) TextButton(onClick = model::clearFilters) { Text("清除筛选") }
         }
         if (state.filterTags.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
             state.filterTags.forEach { id ->
@@ -185,6 +189,7 @@ internal fun TrashScreen(model: FolioViewModel) {
 @Composable
 internal fun RecordContents(content: RecordContent, model: FolioViewModel) {
     Text("事件时间：${content.times.eventTime.label()}", fontSize = 12.sp)
+    content.place?.let { Text("地点", fontSize = 12.sp); PlaceDescription(it) }
     content.items.forEach { item -> when (item) {
         is ContentItem.Text -> Text(item.text, fontSize = 18.sp, lineHeight = 32.sp)
         is ContentItem.Photo -> { Photo(item.photoId); if (item.caption.isNotEmpty()) Text(item.caption) }

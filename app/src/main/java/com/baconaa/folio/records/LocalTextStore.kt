@@ -18,11 +18,13 @@ class LocalTextStore internal constructor(
     private val now: () -> Long = System::currentTimeMillis,
     private val audioOriginals: LocalAudioOriginals,
 ) : TextDrafts, PublishedTextRecords, MixedContentDrafts, RecordTrash, RecordTimeEditing, RecordMarking,
-    RecordBrowsing by LocalRecordBrowsing(database), RecordTags by LocalRecordTags(database, now) {
+    RecordBrowsing by LocalRecordBrowsing(database), RecordTags by LocalRecordTags(database, now),
+    RecordPlaces by LocalRecordPlaces(database, now) {
     private val dao = database.textDao()
     private val itemDao = database.itemDao()
     private val trashDao = database.trashDao()
     private val tagDao = database.tagDao()
+    private val placeDao = database.placeDao()
     private val itemActions = ContentItemActions(database, now)
     private val cleanupQueue = database.photoCleanupDao()
     private val photoCleanup = PhotoCleanup(database, originals)
@@ -205,6 +207,7 @@ class LocalTextStore internal constructor(
         dao.insertEdit(RecordEditRow(draftId.value, record.id, record.revision))
         itemDao.replaceDraftItems(draftId.value, items)
         tagDao.replaceDraftTags(draftId.value, tagDao.recordTags(record.id).map { it.id })
+        placeDao.replaceDraftPlace(draftId.value, placeDao.recordPlace(record.id)?.id)
         draftId
     }
 
@@ -300,6 +303,7 @@ class LocalTextStore internal constructor(
             queueDraftMedia(id.value)
             val slots = items.map { it.asSlot() }
             val tags = tagDao.draftTags(id.value).map { it.id }
+            val place = placeDao.draftPlace(id.value)?.id
             val edit = dao.recordEdit(id.value)
             val recordId = if (edit == null) {
                 val newId = UUID.randomUUID().toString()
@@ -310,7 +314,7 @@ class LocalTextStore internal constructor(
                 val record = checkNotNull(dao.activeRecord(edit.recordId)) { "正式记录已不存在" }
                 check(record.revision == edit.baseRevision) { "正式记录已更新，本次草稿已保留" }
                 if (slots != itemDao.recordItems(record.id) || draft.eventTime != record.eventTime ||
-                    tags != tagDao.recordTags(record.id).map { it.id }
+                    tags != tagDao.recordTags(record.id).map { it.id } || place != placeDao.recordPlace(record.id)?.id
                 ) {
                     queueRecordMedia(record.id)
                     val time = draft.eventTime
@@ -322,6 +326,8 @@ class LocalTextStore internal constructor(
             // 先转为共享再删除草稿，未选择的私有标签随草稿级联丢弃；与正式内容同事务。
             tagDao.promoteSelected(draft.id)
             tagDao.replaceRecordTags(recordId, tags)
+            placeDao.promoteSelected(draft.id)
+            placeDao.replaceRecordPlace(recordId, place)
             check(dao.deleteDraft(draft.id) == 1) { "未能移除已完成的草稿" }
             RecordId(recordId)
         }
@@ -346,7 +352,7 @@ class LocalTextStore internal constructor(
     override suspend fun openRecordContent(id: RecordId): RecordContent? = database.withTransaction {
         val record = dao.activeRecord(id.value) ?: return@withTransaction null
         RecordContent(itemDao.recordItems(id.value).map { it.asItem() }, record.times(), record.marks,
-            tagDao.recordTags(id.value).map { it.asTag() })
+            tagDao.recordTags(id.value).map { it.asTag() }, placeDao.recordPlace(id.value)?.asPlace())
     }
 
     override suspend fun openRecord(id: RecordId): String? = dao.recordBody(id.value)
@@ -363,7 +369,7 @@ class LocalTextStore internal constructor(
         val record = trashDao.trashedRecord(id.value) ?: return@withTransaction null
         TrashedRecord(
             id, RecordContent(itemDao.recordItems(id.value).map { it.asItem() }, record.times(), record.marks,
-                tagDao.recordTags(id.value).map { it.asTag() }),
+                tagDao.recordTags(id.value).map { it.asTag() }, placeDao.recordPlace(id.value)?.asPlace()),
             checkNotNull(record.deletedAt), trashDao.hasDraft(id.value),
         )
     }

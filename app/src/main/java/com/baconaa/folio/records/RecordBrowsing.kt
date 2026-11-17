@@ -35,6 +35,7 @@ data class RecordCard(
     val id: RecordId, val eventTime: EventTime?, val preview: ContentPreview,
     val marks: RecordMarks = RecordMarks(),
     val tags: List<Tag> = emptyList(),
+    val place: Place? = null,
 )
 data class EventYear(val year: Int, val records: List<RecordCard>)
 data class EventTimeline(val years: List<EventYear>, val undated: List<RecordCard>)
@@ -49,7 +50,7 @@ interface RecordBrowsing {
 
     /** 标签多选满足任一，关键词与星标条件同时满足；仅查有效正式内容，不自动放宽条件。 */
     suspend fun queryRecords(
-        keyword: String = "", tagIds: Set<TagId> = emptySet(), starredOnly: Boolean = false,
+        keyword: String = "", tagIds: Set<TagId> = emptySet(), starredOnly: Boolean = false, placeId: PlaceId? = null,
     ): List<RecordCard>
 
     /**
@@ -71,11 +72,12 @@ internal class LocalRecordBrowsing(private val database: FolioDatabase) : Record
 
     override suspend fun listStarredRecords(): List<RecordCard> = queryRecords(starredOnly = true)
 
-    override suspend fun queryRecords(keyword: String, tagIds: Set<TagId>, starredOnly: Boolean): List<RecordCard> = database.withTransaction {
-        val records = dao.activeRecords(keyword, tagIds.map { it.value }, tagIds.isEmpty(), starredOnly)
+    override suspend fun queryRecords(keyword: String, tagIds: Set<TagId>, starredOnly: Boolean, placeId: PlaceId?): List<RecordCard> = database.withTransaction {
+        val records = dao.activeRecords(keyword, tagIds.map { it.value }, tagIds.isEmpty(), starredOnly, placeId?.value)
         val items = dao.previewItems(PREVIEW_BLANK_CHARACTERS).groupBy { it.recordId }
         val counts = dao.previewCounts(PREVIEW_BLANK_CHARACTERS).associateBy { it.recordId }
         val tags = database.tagDao().activeRecordTags().groupBy { it.recordId }
+        val places = database.placeDao().activeRecordPlaces().associate { it.recordId to it.place.asPlace() }
         records.map { record ->
             val previewItems = items[record.id].orEmpty().map { it.slot.asPreview() }
             val count = counts[record.id]
@@ -89,20 +91,23 @@ internal class LocalRecordBrowsing(private val database: FolioDatabase) : Record
                 ),
                 record.marks,
                 tags[record.id].orEmpty().map { it.tag.asTag() },
+                places[record.id],
             )
         }
     }
 
-    override suspend fun listEventTimeline(): EventTimeline {
-        val records = listRecentRecords()
-        val dated = records.filter { it.eventTime != null }.sortedByDescending { it.eventTime!!.date }
-        return EventTimeline(
-            dated.groupBy { it.eventTime!!.date.year }.map { (year, cards) ->
-                EventYear(year, cards.sortedByDescending { it.marks.isPinned })
-            },
-            records.filter { it.eventTime == null },
-        )
-    }
+    override suspend fun listEventTimeline(): EventTimeline = eventTimeline(listRecentRecords())
+}
+
+/** 时间流与地点小册复用同一套精确时间分组；未知时间不推断为记录时间。 */
+fun eventTimeline(records: List<RecordCard>): EventTimeline {
+    val dated = records.filter { it.eventTime != null }.sortedByDescending { it.eventTime!!.date }
+    return EventTimeline(
+        dated.groupBy { it.eventTime!!.date.year }.map { (year, cards) ->
+            EventYear(year, cards.sortedByDescending { it.marks.isPinned })
+        },
+        records.filter { it.eventTime == null },
+    )
 }
 
 private fun ContentSlot.asPreview(): PreviewContentItem = when (val item = asItem()) {

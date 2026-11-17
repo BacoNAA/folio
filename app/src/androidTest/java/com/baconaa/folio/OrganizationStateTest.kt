@@ -187,6 +187,51 @@ class OrganizationStateTest {
         assertFalse(model.state.cleanupPending)
     }
 
+    @Test
+    fun placeReadFailureDoesNotRepeatCreationAndPlaceQueryFailureIsNotAnEmptyList() {
+        var failRead = false
+        var failList = false
+        val places = object : RecordPlaces by store {
+            override suspend fun openDraftPlace(id: DraftId): Place? {
+                if (failRead) throw IOException("place read failure")
+                return store.openDraftPlace(id)
+            }
+            override suspend fun listPlaces(keyword: String): List<PlaceSummary> {
+                if (failList) throw IOException("place list failure")
+                return store.listPlaces(keyword)
+            }
+        }
+        lateinit var model: FolioViewModel
+        main { model = FolioViewModel(store, store, store, store, places = places); model.newText(); model.change(TextFieldValue("地点读取重试")) }
+        saved(model)
+        main { failRead = true; model.createPlace(PlaceInfo("保留一次")) }; idle(model)
+        assertTrue(model.state.editor!!.needsReload)
+        val draft = model.state.editor!!.draftId!!
+        val place = runBlocking { store.openDraftPlace(draft) }!!
+        main { model.createPlace(PlaceInfo("不能重复")); failRead = false; model.reload() }; idle(model)
+        assertEquals(place, model.state.editor!!.place)
+        main { model.discard() }; idle(model)
+        main { failList = true; model.home(Page.Places) }
+        await { !model.state.placesLoading }
+        assertNotNull(model.state.placesError)
+        main { failList = false; model.loadPlaces() }
+        await { !model.state.placesLoading }
+        assertNull(model.state.placesError)
+        val seed = runBlocking { store.saveDraft(null, TextEdit("关联读取重试", 0))!! }
+        val shared = runBlocking { store.createDraftPlace(seed, PlaceInfo("已有地点")) }
+        val record = runBlocking { store.completeMixedDraft(seed) }
+        main { model.openPlace(runBlocking { store.openPlace(shared) }!!); model.chooseExistingRecord() }
+        await { !model.state.loading }
+        main { failRead = true; model.openRecord(record) }; idle(model)
+        assertTrue(model.state.editor!!.needsReload)
+        assertEquals(Page.Editor, model.state.page)
+        main { failRead = false; model.reload() }; idle(model)
+        assertEquals(shared, model.state.editor!!.place!!.id)
+        assertEquals(shared, model.state.filterPlace!!.id)
+        main { model.discard() }; idle(model)
+        clean(record)
+    }
+
     private fun clean(id: RecordId) = runBlocking { store.moveToTrash(id); store.deletePermanently(id) }
     private fun main(action: () -> Unit) = instrumentation.runOnMainSync(action)
     private fun idle(model: FolioViewModel) = await { !model.state.busy }

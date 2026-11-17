@@ -62,6 +62,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
     val state = model.state
     val recordsScroll = rememberLazyListState()
     val searchScroll = rememberLazyListState()
+    val placesScroll = rememberLazyListState()
     var draftPicker by rememberSaveable { mutableStateOf(false) }
     var discardDialog by rememberSaveable { mutableStateOf(false) }
     var deleteDialog by rememberSaveable { mutableStateOf(false) }
@@ -96,7 +97,8 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                         }
                         Text(when (state.page) {
                             Page.Editor -> "记录这一刻"
-                            Page.Search -> "搜索全部记录"
+                            Page.Search -> if (state.filterPlace != null) "地点小册" else "搜索全部记录"
+                            Page.Places -> "按地点"
                             Page.Trash, Page.TrashDetail -> "回收站"
                             else -> "记录"
                         }, Modifier.weight(1f), fontSize = 22.sp, fontFamily = FontFamily.Serif)
@@ -141,7 +143,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                         Page.Editor -> MixedEditorScreen(model, launchMedia) { discardDialog = true }
                         Page.Records -> Column {
                             Row {
-                                TextButton(onClick = { model.home(Page.Search) }) { Text("搜索全部记录") }
+                                TextButton(onClick = model::openSearch) { Text("搜索全部记录") }
                                 TextButton(onClick = model::openStarred) { Text("星标") }
                                 TextButton(onClick = { model.home(Page.Trash) }) { Text("回收站") }
                             }
@@ -155,6 +157,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                             Row(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 FilterChip(selected = !state.recent, onClick = { model.selectRecent(false) }, label = { Text("事件时间") })
                                 FilterChip(selected = state.recent, onClick = { model.selectRecent(true) }, label = { Text("最近记录") })
+                                TextButton(onClick = { model.home(Page.Places) }) { Text("按地点") }
                             }
                             if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
                             if (!state.loading && state.error == null && state.records.isEmpty()) EmptyMessage("还没有记录\n从「写一句」开始，完成后会出现在这里。")
@@ -174,8 +177,10 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                             }
                         }
                         Page.Search -> Column(Modifier.padding(horizontal = 20.dp)) {
+                            PlaceBookHeader(model)
+                            state.linkingPlace?.let { Text("选择要关联到「${it.info.name}」的记录，进入编辑后点完成才生效。", fontSize = 12.sp) }
                             OutlinedTextField(value = state.query, onValueChange = model::query, singleLine = true,
-                                label = { Text("搜索记录") }, placeholder = { Text("输入记得的一句话") },
+                                label = { Text(state.filterPlace?.let { "在${it.info.name}中查找" } ?: "搜索记录") }, placeholder = { Text("输入记得的一句话") },
                                 modifier = Modifier.fillMaxWidth().testTag("search"),
                                 trailingIcon = { if (state.query.isNotEmpty()) TextButton(onClick = { model.query("") }) { Text("清空") } })
                             SearchFilters(model)
@@ -186,7 +191,20 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                             }
                             LazyColumn(state = searchScroll, contentPadding = PaddingValues(vertical = 12.dp),
                                 verticalArrangement = Arrangement.spacedBy(20.dp), modifier = Modifier.testTag("search-results")) {
-                                if (state.error == null) items(state.results, key = { it.id.value }) { RecordPreview(it, model) }
+                                if (state.error == null) {
+                                    if (state.filterPlace == null || state.placeRecent) items(state.results, key = { it.id.value }) { RecordPreview(it, model) }
+                                    else {
+                                        val timeline = eventTimeline(state.results)
+                                        timeline.years.forEach { year ->
+                                            item("year-${year.year}") { Text("${year.year} 年") }
+                                            items(year.records, key = { it.id.value }) { RecordPreview(it, model) }
+                                        }
+                                        if (timeline.undated.isNotEmpty()) {
+                                            item("undated") { Text("时间未定") }
+                                            items(timeline.undated, key = { it.id.value }) { RecordPreview(it, model) }
+                                        }
+                                    }
+                                }
                             }
                         }
                         Page.Detail -> state.detail?.let { content ->
@@ -207,6 +225,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                 RecordContents(content, model)
                             }
                         }
+                        Page.Places -> PlacesScreen(model, placesScroll)
                         Page.Trash -> TrashScreen(model)
                         Page.TrashDetail -> state.trashDetail?.let { record ->
                             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
