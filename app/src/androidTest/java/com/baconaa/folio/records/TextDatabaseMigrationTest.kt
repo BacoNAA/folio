@@ -579,6 +579,51 @@ class TextDatabaseMigrationTest {
         }
     }
 
+    @Test
+    fun versionFifteenKeepsUntitledRecordAndPendingEditWhenTitlesAreAdded() = runBlocking {
+        createDatabase(15) { sql ->
+            sql.execSQL("""INSERT INTO text_records
+                (id,sourceDraftId,body,firstRecordedAt,modifiedAt,eventKind,eventText,eventZone)
+                VALUES ('record','source','校门口',100,200,'description','大学时','Asia/Tokyo')""")
+            sql.execSQL("INSERT INTO record_items (recordId,position,itemId,text) VALUES ('record',0,'item','校门口')")
+            sql.execSQL("""INSERT INTO text_drafts
+                (id,body,cursor,firstRecordedAt,lastEditedAt,activeItemId,eventKind,eventText,eventZone)
+                VALUES ('edit','校门口的书店',3,100,300,'item','description','大学时','Asia/Tokyo')""")
+            sql.execSQL("INSERT INTO text_record_edits VALUES ('edit','record',1)")
+            sql.execSQL("INSERT INTO draft_items (draftId,position,itemId,text) VALUES ('edit',0,'item','校门口的书店')")
+            sql.execSQL("INSERT INTO tags VALUES ('tag','校园','edit')")
+            sql.execSQL("INSERT INTO draft_tags VALUES ('edit','tag',0)")
+        }
+        val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), now = { 400L },
+                audioOriginals = LocalAudioOriginals.get(context))
+            val id = RecordId("record")
+            val edit = DraftId("edit")
+            val time = EventTime.Description("大学时", zone = ZoneId.of("Asia/Tokyo"))
+            val original = store.openRecordContent(id)!!
+            assertNull(original.title)
+            assertEquals("校门口", original.text)
+            assertEquals(RecordTimes(100L, 200L, time), original.times)
+            assertEquals(edit, store.editRecord(id))
+            assertNull(store.openMixedDraft(edit)!!.title)
+            assertEquals(TextEdit("校门口的书店", 3), store.openDraft(edit))
+            assertEquals(DraftTimes(100L, time), store.openDraftTimes(edit))
+            assertEquals("校园", store.openDraftTags(edit)!!.single().name)
+
+            store.saveDraftTitle(edit, "旧书新读")
+            assertTrue(store.queryRecords("旧书新读").isEmpty())
+            assertEquals(id, store.completeMixedDraft(edit))
+            val card = store.queryRecords("旧书新读").single()
+            assertEquals(id, card.id)
+            assertEquals("旧书新读", card.title)
+            assertEquals("校园", card.tags.single().name)
+            val published = store.openRecordContent(id)!!
+            assertEquals("校门口的书店", published.text)
+            assertEquals(RecordTimes(100L, 400L, time), published.times)
+        } finally { database.close() }
+    }
+
     private fun createDatabase(version: Int, seed: (SQLiteDatabase) -> Unit) {
         val schemaFile = "${FolioDatabase::class.java.name}/$version.json"
         val schema = instrumentation.context.assets.open(schemaFile).bufferedReader().use {

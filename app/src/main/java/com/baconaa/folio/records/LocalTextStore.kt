@@ -57,15 +57,33 @@ class LocalTextStore internal constructor(
         null
     }
 
-    private suspend fun createDraft(eventTime: EventTime?): DraftId {
+    private suspend fun createDraft(eventTime: EventTime?, title: String? = null): DraftId {
         val id = DraftId(UUID.randomUUID().toString())
         val timestamp = now()
-        dao.insertDraft(DraftRow(id.value, "", 0, timestamp, timestamp, eventTime = eventTime?.asFields()))
+        dao.insertDraft(DraftRow(id.value, "", 0, timestamp, timestamp, eventTime = eventTime?.asFields(), title = title))
         return id
     }
 
     private suspend fun requireDraft(id: DraftId) =
         checkNotNull(database.loadMixedDraft(id)) { "草稿已不存在" }
+
+    override suspend fun saveDraftTitle(id: DraftId?, title: String?, initialEventTime: EventTime?): DraftId? {
+        val value = title?.takeUnless { it.isBlank() }
+        return database.withTransaction {
+            if (id == null) return@withTransaction value?.let { createDraft(initialEventTime, it) }
+            val draft = checkNotNull(dao.draft(id.value)) { "草稿已不存在" }
+            if (draft.title == value) return@withTransaction id
+            if (value == null && draft.firstContentAt == null && draft.eventTime == null &&
+                draft.activeItemId == null && !itemActions.canUndo(id) && tagDao.draftTags(draft.id).isEmpty() &&
+                placeDao.draftPlace(draft.id) == null && objectDao.draftObjects(draft.id).isEmpty()
+            ) {
+                dao.deleteDraft(draft.id)
+                return@withTransaction null
+            }
+            dao.updateDraft(draft.copy(title = value, lastEditedAt = now()))
+            id
+        }
+    }
 
     private fun requireReadableOriginals(photos: List<PhotoId>) {
         for (photo in photos.distinct()) {
@@ -203,8 +221,10 @@ class LocalTextStore internal constructor(
         val draftId = DraftId(UUID.randomUUID().toString())
         val items = itemDao.recordItems(id.value)
         val focus = items.firstOrNull()
+        val timestamp = now()
         dao.insertDraft(DraftRow(draftId.value, record.body, focus?.text?.length ?: 0,
-            record.firstRecordedAt, now(), activeItemId = focus?.itemId, eventTime = record.eventTime))
+            timestamp, timestamp, activeItemId = focus?.itemId, eventTime = record.eventTime,
+            title = record.title, firstContentAt = record.firstRecordedAt))
         dao.insertEdit(RecordEditRow(draftId.value, record.id, record.revision))
         itemDao.replaceDraftItems(draftId.value, items)
         tagDao.replaceDraftTags(draftId.value, tagDao.recordTags(record.id).map { it.id })
@@ -245,7 +265,7 @@ class LocalTextStore internal constructor(
         if (first == null) {
             if (edit.text.isEmpty()) return this
             val item = ContentItem.Text(newItemId(), edit.text)
-            return MixedDraft(listOf(item) + items, item.id, edit.cursor)
+            return copy(items = listOf(item) + items, activeItemId = item.id, cursor = edit.cursor)
         }
         if (paragraphs.size == 1) return withText(first.id, edit)
         // A full-body replacement has no information about which side of a photo the edits belong to.
@@ -262,7 +282,7 @@ class LocalTextStore internal constructor(
         dao.listDrafts().map { row ->
             DraftPreview(
                 DraftId(row.id), row.excerpt, row.recordId?.let(::RecordId), row.firstPhotoId?.asPhotoId(),
-                row.totalAudioDurationMillis,
+                row.totalAudioDurationMillis, row.title,
             )
         }
 
@@ -270,7 +290,7 @@ class LocalTextStore internal constructor(
         dao.draft(id.value)?.let { TextEdit(it.body, it.cursor) }
 
     override suspend fun openDraftTimes(id: DraftId): DraftTimes? =
-        dao.draft(id.value)?.let { DraftTimes(it.firstRecordedAt, it.eventTime?.asEventTime()) }
+        dao.draft(id.value)?.let { DraftTimes(it.firstContentAt, it.eventTime?.asEventTime()) }
 
     override suspend fun readSeasonMonths(): Map<NamedSeason, SeasonMonths> {
         val settings = database.seasonSettingsDao().settings().associate { it.season to it.months }
@@ -304,7 +324,7 @@ class LocalTextStore internal constructor(
             val body = items.body()
             val photos = items.photos()
             val audios = items.filterIsInstance<ContentItem.Audio>()
-            require(body.isNotBlank() || photos.isNotEmpty() || audios.isNotEmpty()) { "请填写文字、清单事项或添加媒体后再完成" }
+            require(items.hasActualContent(body)) { "请填写文字、清单事项或添加媒体后再完成" }
             requireReadableOriginals(photos)
             for (audio in audios) {
                 if (audioOriginals.inspect(audio.audioId).durationMillis != audio.durationMillis) {
@@ -319,20 +339,25 @@ class LocalTextStore internal constructor(
             val edit = dao.recordEdit(id.value)
             val recordId = if (edit == null) {
                 val newId = UUID.randomUUID().toString()
-                dao.insertRecord(RecordRow(newId, draft.id, body, draft.firstRecordedAt, now(), eventTime = draft.eventTime))
+                val completedAt = now()
+                dao.insertRecord(RecordRow(newId, draft.id, body, draft.firstContentAt ?: completedAt, completedAt,
+                    eventTime = draft.eventTime, title = draft.title))
                 itemDao.replaceRecordItems(newId, slots)
                 newId
             } else {
                 val record = checkNotNull(dao.activeRecord(edit.recordId)) { "正式记录已不存在" }
                 check(record.revision == edit.baseRevision) { "正式记录已更新，本次草稿已保留" }
-                if (slots != itemDao.recordItems(record.id) || draft.eventTime != record.eventTime ||
+                val itemsChanged = slots != itemDao.recordItems(record.id)
+                if (itemsChanged) {
+                    queueRecordMedia(record.id)
+                    itemDao.replaceRecordItems(record.id, slots)
+                }
+                if (itemsChanged || draft.title != record.title || draft.eventTime != record.eventTime ||
                     tags != tagDao.recordTags(record.id).map { it.id } || place != placeDao.recordPlace(record.id)?.id ||
                     objects != objectDao.recordObjects(record.id).map { it.row.id }
                 ) {
-                    queueRecordMedia(record.id)
                     dao.updateRecord(record.copy(body = body, modifiedAt = now(), revision = record.revision + 1,
-                        eventTime = draft.eventTime))
-                    itemDao.replaceRecordItems(record.id, slots)
+                        eventTime = draft.eventTime, title = draft.title))
                 }
                 record.id
             }
@@ -352,7 +377,7 @@ class LocalTextStore internal constructor(
     }
 
     override suspend fun search(keyword: String): List<RecordPreview> =
-        dao.searchRecords(keyword).map { RecordPreview(RecordId(it.id), it.excerpt, it.firstPhotoId?.asPhotoId(), it.marks) }
+        dao.searchRecords(keyword).map { RecordPreview(RecordId(it.id), it.excerpt, it.firstPhotoId?.asPhotoId(), it.marks, it.title) }
 
     override suspend fun setStarred(id: RecordId, starred: Boolean) {
         check(dao.setStarred(id.value, starred) == 1) { "正式记录已不存在或在回收站中，请恢复后再修改标记" }
@@ -368,7 +393,7 @@ class LocalTextStore internal constructor(
         val record = dao.activeRecord(id.value) ?: return@withTransaction null
         RecordContent(itemDao.recordItems(id.value).map { it.asItem() }, record.times(), record.marks,
             tagDao.recordTags(id.value).map { it.asTag() }, placeDao.recordPlace(id.value)?.asPlace(),
-            objectDao.recordObjects(id.value).map { it.asObject() })
+            objectDao.recordObjects(id.value).map { it.asObject() }, record.title)
     }
 
     override suspend fun openRecord(id: RecordId): String? = dao.recordBody(id.value)
@@ -378,7 +403,7 @@ class LocalTextStore internal constructor(
     override suspend fun restoreRecord(id: RecordId): Boolean = trashDao.restore(id.value) == 1
 
     override suspend fun listTrash(): List<TrashPreview> = trashDao.listTrash().map {
-        TrashPreview(RecordId(it.id), it.excerpt, it.firstPhotoId?.asPhotoId(), it.deletedAt, it.hasDraft, it.marks)
+        TrashPreview(RecordId(it.id), it.excerpt, it.firstPhotoId?.asPhotoId(), it.deletedAt, it.hasDraft, it.marks, it.title)
     }
 
     override suspend fun openTrashRecord(id: RecordId): TrashedRecord? = database.withTransaction {
@@ -386,7 +411,7 @@ class LocalTextStore internal constructor(
         TrashedRecord(
             id, RecordContent(itemDao.recordItems(id.value).map { it.asItem() }, record.times(), record.marks,
                 tagDao.recordTags(id.value).map { it.asTag() }, placeDao.recordPlace(id.value)?.asPlace(),
-                objectDao.recordObjects(id.value).map { it.asObject() }),
+                objectDao.recordObjects(id.value).map { it.asObject() }, record.title),
             checkNotNull(record.deletedAt), trashDao.hasDraft(id.value),
         )
     }

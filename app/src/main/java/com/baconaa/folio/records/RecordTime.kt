@@ -69,7 +69,8 @@ sealed interface EventTime {
     }
 }
 
-data class DraftTimes(val firstRecordedAt: Long, val eventTime: EventTime?)
+/** 首次保存实际内容前，只有标题的草稿尚无首次记录时间。 */
+data class DraftTimes(val firstRecordedAt: Long?, val eventTime: EventTime?)
 
 /** 自动时间均为 Unix 毫秒，事件时间保持用户填写的当地表达。 */
 data class RecordTimes(val firstRecordedAt: Long, val modifiedAt: Long, val eventTime: EventTime?)

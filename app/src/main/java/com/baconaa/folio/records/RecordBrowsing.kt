@@ -37,6 +37,7 @@ data class RecordCard(
     val tags: List<Tag> = emptyList(),
     val place: Place? = null,
     val objects: List<RecordObject> = emptyList(),
+    val title: String? = null,
 )
 data class EventYear(val year: Int, val records: List<RecordCard>, val approximate: List<RecordCard> = emptyList())
 data class EventTimeline(val years: List<EventYear>, val undated: List<RecordCard>, val crossYear: List<RecordCard> = emptyList())
@@ -134,6 +135,7 @@ internal class LocalRecordBrowsing(private val database: FolioDatabase) : Record
                 tags[record.id].orEmpty().map { it.tag.asTag() },
                 places[record.id],
                 objects[record.id].orEmpty().map { it.details.asObject() },
+                record.title,
             )
         }
     }

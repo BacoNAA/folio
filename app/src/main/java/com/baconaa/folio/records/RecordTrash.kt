@@ -9,6 +9,7 @@ data class TrashPreview(
     val deletedAt: Long,
     val hasDraft: Boolean,
     val marks: RecordMarks = RecordMarks(),
+    val title: String? = null,
 )
 
 data class TrashedRecord(

@@ -7,6 +7,7 @@ import androidx.room.RewriteQueriesToDropUnusedColumns
 
 internal data class BrowseRecordRow(
     val id: String, @Embedded val eventTime: EventTimeFields?, @Embedded val marks: RecordMarks,
+    val title: String?,
 )
 internal data class PreviewItemRow(val recordId: String, @Embedded val slot: ContentSlot)
 internal data class PreviewCountRow(val recordId: String, val itemCount: Int, val photoCount: Int, val audioCount: Int)
