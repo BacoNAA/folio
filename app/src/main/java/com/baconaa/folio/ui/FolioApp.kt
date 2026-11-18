@@ -188,16 +188,26 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                             if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
                             if (!state.loading && state.error == null) {
                                 Text("${state.results.size} 条记录", Modifier.padding(vertical = 12.dp), fontSize = 12.sp)
-                                if (state.results.isEmpty()) {
-                                    EmptyMessage("没有同时符合这些条件的记录\n可移除筛选条件，或修改搜索词。")
-                                    if (state.mediaTypes.isNotEmpty()) TextButton(onClick = { model.filterMedia(emptySet()) }) {
-                                        Text("移除内容类型限制")
-                                    }
-                                }
                             }
                             LazyColumn(state = searchScroll, contentPadding = PaddingValues(vertical = 12.dp),
                                 verticalArrangement = Arrangement.spacedBy(20.dp), modifier = Modifier.testTag("search-results")) {
                                 if (state.error == null) {
+                                    if (!state.loading && state.undatedMatchCount > 0) item {
+                                        TextButton(onClick = { model.filterEventDate(EventDateFilter.Undated) }) {
+                                            Text("查看时间未定记录（${state.undatedMatchCount} 条）")
+                                        }
+                                    }
+                                    if (!state.loading && state.results.isEmpty()) item {
+                                        Column {
+                                            EmptyMessage("没有同时符合这些条件的记录\n可移除筛选条件，或修改搜索词。")
+                                            if (state.eventDateFilter != null) TextButton(onClick = { model.filterEventDate(null) }) {
+                                                Text("移除时间限制")
+                                            }
+                                            if (state.mediaTypes.isNotEmpty()) TextButton(onClick = { model.filterMedia(emptySet()) }) {
+                                                Text("移除内容类型限制")
+                                            }
+                                        }
+                                    }
                                     if (state.filterPlace == null || state.placeRecent) items(state.results, key = { it.id.value }) { RecordPreview(it, model) }
                                     else {
                                         val timeline = eventTimeline(state.results)
