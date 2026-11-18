@@ -10,6 +10,7 @@ import com.baconaa.folio.media.LocalPhotoOriginals
 import com.baconaa.folio.media.PhotoId
 import com.baconaa.folio.media.createAudioTestClip
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
@@ -539,6 +540,43 @@ class TextDatabaseMigrationTest {
             assertEquals(PlaceCoordinates(30.67, 104.06), store.openRecordContent(record)!!.place!!.info.coordinates)
             assertEquals(listOf(record), store.search("阿婆").map { it.id })
         } finally { database.close() }
+    }
+
+    @Test
+    fun versionFourteenRetainsExactDateTimeAndUndatedDraftsWhenAddingTimeExpressions() = runBlocking {
+        val date = LocalDate.of(2025, 11, 8)
+        val clock = LocalTime.of(0, 30, 12, 345_000_000)
+        val zone = ZoneId.of("Asia/Tokyo")
+        createDatabase(14) { sql ->
+            sql.execSQL("""INSERT INTO text_records
+                (id,sourceDraftId,body,firstRecordedAt,modifiedAt,eventDate,eventClock,eventZone)
+                VALUES ('record','source','夜宵',100,200,?,?,?)""",
+                arrayOf<Any>(date.toEpochDay(), clock.toNanoOfDay(), zone.id))
+            sql.execSQL("INSERT INTO record_items (recordId,position,itemId,text) VALUES ('record',0,'item','夜宵')")
+            sql.execSQL("""INSERT INTO text_drafts
+                (id,body,cursor,firstRecordedAt,lastEditedAt,eventDate,eventZone)
+                VALUES ('edit','夜宵',2,100,300,?,?)""", arrayOf<Any>(date.toEpochDay(), zone.id))
+            sql.execSQL("INSERT INTO draft_items (draftId,position,itemId,text) VALUES ('edit',0,'item','夜宵')")
+            sql.execSQL("INSERT INTO text_record_edits VALUES ('edit','record',1)")
+            sql.execSQL("INSERT INTO text_drafts (id,body,cursor,firstRecordedAt,lastEditedAt) VALUES ('undated','补记',2,150,150)")
+        }
+        val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context))
+            val record = RecordId("record")
+            val edit = DraftId("edit")
+            val published = RecordTimes(100L, 200L, EventTime(date, clock, zone))
+            assertEquals(published, store.openRecordContent(record)!!.times)
+            assertEquals(DraftTimes(100L, EventTime(date, zone = zone)), store.openDraftTimes(edit))
+            assertEquals(DraftTimes(150L, null), store.openDraftTimes(DraftId("undated")))
+            val winter = EventTime.Season(2025, NamedSeason.WINTER)
+            store.saveDraftEventTime(edit, winter)
+            assertEquals(published, store.openRecordContent(record)!!.times)
+            assertEquals(record, store.completeMixedDraft(edit))
+            assertEquals(winter, store.openRecordContent(record)!!.times.eventTime)
+        } finally {
+            database.close()
+        }
     }
 
     private fun createDatabase(version: Int, seed: (SQLiteDatabase) -> Unit) {

@@ -17,7 +17,7 @@ class LocalTextStore internal constructor(
     private val originals: LocalPhotoOriginals,
     private val now: () -> Long = System::currentTimeMillis,
     private val audioOriginals: LocalAudioOriginals,
-) : TextDrafts, PublishedTextRecords, MixedContentDrafts, RecordTrash, RecordTimeEditing, RecordMarking,
+) : TextDrafts, PublishedTextRecords, MixedContentDrafts, RecordTrash, RecordTimeEditing, SeasonSettings, RecordMarking,
     RecordBrowsing by LocalRecordBrowsing(database), RecordTags by LocalRecordTags(database, now),
     RecordPlaces by LocalRecordPlaces(database, now), RecordObjects by LocalRecordObjects(database, now) {
     private val dao = database.textDao()
@@ -272,10 +272,19 @@ class LocalTextStore internal constructor(
     override suspend fun openDraftTimes(id: DraftId): DraftTimes? =
         dao.draft(id.value)?.let { DraftTimes(it.firstRecordedAt, it.eventTime?.asEventTime()) }
 
+    override suspend fun readSeasonMonths(): Map<NamedSeason, SeasonMonths> {
+        val settings = database.seasonSettingsDao().settings().associate { it.season to it.months }
+        return NamedSeason.entries.associateWith { settings[it] ?: SeasonMonths(it.firstMonth, it.lastMonth) }
+    }
+
+    override suspend fun saveSeasonMonths(changes: Map<NamedSeason, SeasonMonths>) {
+        database.seasonSettingsDao().save(changes.map { (season, months) -> SeasonSettingRow(season, months) })
+    }
+
     override suspend fun saveDraftEventTime(id: DraftId, eventTime: EventTime?) {
-        val fields = eventTime?.asFields()
-        check(dao.updateDraftTime(id.value, fields?.eventDate, fields?.eventClock, fields?.eventZone, now()) == 1) {
-            "草稿已不存在"
+        database.withTransaction {
+            val draft = checkNotNull(dao.draft(id.value)) { "草稿已不存在" }
+            dao.updateDraft(draft.copy(eventTime = eventTime?.asFields(), lastEditedAt = now()))
         }
     }
 
@@ -321,8 +330,8 @@ class LocalTextStore internal constructor(
                     objects != objectDao.recordObjects(record.id).map { it.row.id }
                 ) {
                     queueRecordMedia(record.id)
-                    val time = draft.eventTime
-                    dao.updateRecordContent(record.id, body, now(), time?.eventDate, time?.eventClock, time?.eventZone)
+                    dao.updateRecord(record.copy(body = body, modifiedAt = now(), revision = record.revision + 1,
+                        eventTime = draft.eventTime))
                     itemDao.replaceRecordItems(record.id, slots)
                 }
                 record.id

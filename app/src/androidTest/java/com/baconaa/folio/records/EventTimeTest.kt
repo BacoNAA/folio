@@ -44,6 +44,65 @@ internal class EventTimeTest : PhotoStoreFixture() {
         store.completeDraft(requireNotNull(store.saveDraft(null, original, event)), original)
 
     @Test
+    fun changingSeasonMonthsOnlyAffectsNewExpressionsAndSurvivesReopen() = runBlocking {
+        val defaults = store.readSeasonMonths()
+        assertEquals(SeasonMonths(12, 2), defaults.getValue(NamedSeason.WINTER))
+        val zone = ZoneId.of("Asia/Tokyo")
+        val initial = store.createSeasonTime(2025, NamedSeason.WINTER, zone)
+        val published = store.completeMixedDraft(requireNotNull(store.saveDraft(null, original, initial)))
+        val draft = store.editRecord(published)
+        val changes = mapOf(NamedSeason.WINTER to SeasonMonths(11, 3), NamedSeason.SUMMER to SeasonMonths(5, 8))
+        store.saveSeasonMonths(changes)
+        reopen()
+
+        assertEquals(defaults + changes, store.readSeasonMonths())
+        assertEquals(initial, store.openRecordContent(published)!!.times.eventTime)
+        assertEquals(initial, store.openDraftTimes(draft)!!.eventTime)
+        assertEquals(LocalDate.of(2025, 12, 1)..LocalDate.of(2026, 2, 28), initial.dateRange)
+        val updated = store.createSeasonTime(2025, NamedSeason.WINTER, zone)
+        assertEquals(LocalDate.of(2025, 11, 1)..LocalDate.of(2026, 3, 31), updated.dateRange)
+        store.saveDraftEventTime(draft, updated)
+        store.completeMixedDraft(draft)
+        assertEquals(updated, store.openRecordContent(published)!!.times.eventTime)
+    }
+
+    @Test
+    fun customSeasonAndOriginalWordingSurviveReopenAndPublishAsEntered() = runBlocking {
+        val winter = EventTime.Season(2025, NamedSeason.WINTER, firstMonth = 11, lastMonth = 3)
+        val draft = requireNotNull(store.saveDraft(null, original, winter))
+        val place = store.createDraftPlace(draft, PlaceInfo("老街"))
+        reopen()
+        assertEquals(winter, store.openDraftTimes(draft)!!.eventTime)
+        val record = store.completeMixedDraft(draft)
+        assertEquals(winter, store.queryRecords(placeId = place).single().eventTime)
+        assertEquals(RecentExperience.Known(winter), store.listPlaces().single().recentExperience)
+
+        val edit = store.editRecord(record)
+        val college = EventTime.Description("大学时", LocalDate.of(2018, 9, 1)..LocalDate.of(2022, 6, 30))
+        store.saveDraftEventTime(edit, college)
+        reopen()
+        assertEquals(college, store.openDraftTimes(edit)!!.eventTime)
+        assertEquals(winter, store.openRecordContent(record)!!.times.eventTime)
+        assertEquals(record, store.completeMixedDraft(edit))
+        assertEquals(college, store.queryRecords().single().eventTime)
+
+        val unknown = EventTime.Description("搬家前")
+        val nextEdit = store.editRecord(record)
+        store.saveDraftEventTime(nextEdit, unknown)
+        store.completeMixedDraft(nextEdit)
+        reopen()
+        assertEquals(unknown, store.openRecordContent(record)!!.times.eventTime)
+        val abandoned = store.editRecord(record)
+        store.saveDraftEventTime(abandoned, null)
+        store.discardDraft(abandoned)
+        assertEquals(unknown, store.queryRecords().single().eventTime)
+        val cleared = store.editRecord(record)
+        store.saveDraftEventTime(cleared, null)
+        store.completeMixedDraft(cleared)
+        assertNull(store.queryRecords().single().eventTime)
+    }
+
+    @Test
     fun firstSaveKeepsItsTimeAcrossDaysAndZonesWithoutInventingUnknownEventTimes() = runBlocking {
         val previousZone = TimeZone.getDefault()
         try {

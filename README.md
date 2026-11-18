@@ -6,7 +6,7 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 ## 当前进度
 
-当前开发分支已接入安卓文字、拍照与选图、录音、清单和混合编辑页面，以及草稿恢复、记录浏览、搜索和详情；已接入精确事件时间、文字标签、星标置顶、删除撤销和回收站、地点及可选坐标、基础地点小册与最近经历摘要，支持人物／物件线索、别名和具体对象查找。本批接入内容类型组合筛选。具体范围、合入状态、T1—T3 状态及待验收项统一见[当前开发进度](docs/engineering/开发流程.md#当前开发进度)。
+当前开发分支已接入安卓文字、拍照与选图、录音、清单和混合编辑页面，以及草稿恢复、记录浏览、搜索和详情；已接入精确事件时间、文字标签、星标置顶、删除撤销和回收站、地点及可选坐标、基础地点小册与最近经历摘要，支持人物／物件线索、别名和具体对象查找。搜索可按内容类型组合筛选。后端已支持模糊时间及自定义季节，记录流与地点小册已能展示这些时间。具体范围、合入状态、T1—T3 状态及待验收项统一见[当前开发进度](docs/engineering/开发流程.md#当前开发进度)。
 
 从「随手记」的写一句、拍照、选图、录音或清单开始记录，内容自动存入本机草稿；从「记录 → 继续草稿」重开，单份直接续写，多份按最近编辑顺序选择。新建点「完成」后回首页，经「已保存 · 查看」打开详情；搜索只返回正式版本。已有记录可编辑和放弃，完成后回到原记录详情，再返回原浏览或搜索位置。失败时保留输入并显示重试入口，空白记录不能完成。
 
@@ -22,7 +22,7 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 人物与物件可以在记录中分别新建或多选，只填名称即可，区别说明和别名可选（每行一个别名）。查找对象匹配名称、说明及别名，同名按身份区分。新对象随草稿保存，完成后共享，未选中的新对象或放弃草稿时丢弃；已有共享对象即使零记录仍可选用。编辑共享资料前提示影响所有引用，保存不提交记录草稿、不改变记录时间。搜索工具栏可横向滚动选择人物和物件，同类满足任一个、不同类别同时满足；各条件可单独移除，保留搜索词和其他条件。记录卡片的对象按钮可打开该对象的正式记录结果。
 
-页面使用 `FolioViewModel` 持有状态，通过 `LocalTextStore.get(context)` 调用 [TextDrafts 和 PublishedTextRecords](app/src/main/java/com/baconaa/folio/records/TextRecords.kt)、[MixedContentDrafts](app/src/main/java/com/baconaa/folio/records/MixedContent.kt) 等接口。草稿写入串行，完成及离开编辑等待最后输入保存成功；读写错误与空结果分别展示。结构操作提交后重读失败时，只重读而不重复插入。记录列表可切换事件时间和最近记录，未填写事件时间的记录单列。标题、完整模糊时间及时间范围筛选仍待后续实现。
+页面使用 `FolioViewModel` 持有状态，通过 `LocalTextStore.get(context)` 调用 [TextDrafts 和 PublishedTextRecords](app/src/main/java/com/baconaa/folio/records/TextRecords.kt)、[MixedContentDrafts](app/src/main/java/com/baconaa/folio/records/MixedContent.kt) 等接口。草稿写入串行，完成及离开编辑等待最后输入保存成功；读写错误与空结果分别展示。结构操作提交后重读失败时，只重读而不重复插入。记录列表可切换事件时间和最近记录，未填写事件时间的记录单列。模糊时间填写、季节设置页面、时间范围筛选和选填标题仍待实现。
 
 已按[整体需求审查](docs/requirements/整体需求审查.md)整理正文、子操作、共同规则和前置关系，并将已确认的功能边界写入正文。剩余范围与已确认结论索引集中见[待确认问题](docs/requirements/待确认问题.md)。
 
@@ -44,9 +44,9 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 试听使用进程内共享的 [LocalAudioPlayback](app/src/main/java/com/baconaa/folio/media/LocalAudioPlayback.kt)，`play` 新片段会停止上一段；`pause(id)`、`stop(id)` 只影响匹配片段，避免旧列表项误停新播放。控制方法在主线程调用，页面观察 `state` 展示播放或失败状态；统一的前台生命周期持有者负责停止和释放。按已确认技术主线使用平台 MediaRecorder 与 AndroidX Media3 ExoPlayer 1.11.1（Apache 2.0），仅引入基础播放器及其传递依赖，增加包体以复用解码和音频焦点管理；不引入播放器 UI。该版本最低 API 23、编译 API 36，符合本项目 API 29／37 配置。[Media3 发布说明](https://developer.android.com/jetpack/androidx/releases/media3)
 
-事件时间通过 [RecordTimeEditing](app/src/main/java/com/baconaa/folio/records/RecordTime.kt) 保存。新建的 `saveDraft`、`appendPhotos` 可传 `initialEventTime`，随第一份实际内容原子落盘；参数仅在新建时生效。现场默认“现在”由前端选择并传入，补记或未确认照片时间可传 `null`，后端不推断。已有草稿用 `saveDraftEventTime` 修改或清空，`openDraftTimes` 读回；`openRecordContent.times` 返回最后完成的事件时间、首次记录时间和修改时间，回收站详情同样保留正式时间。日期与可选时刻保持事件原时区的当地表达。Room v7 增加事件时间字段，旧记录与草稿迁移后事件时间仍为空。
+事件时间通过 [RecordTimeEditing](app/src/main/java/com/baconaa/folio/records/RecordTime.kt) 保存。新建的 `saveDraft`、`appendPhotos` 可传 `initialEventTime`，随第一份实际内容原子落盘；参数仅在新建时生效。现场默认“现在”由前端选择并传入，补记或未确认照片时间可传 `null`，后端不推断。已有草稿用 `saveDraftEventTime` 修改或清空，`openDraftTimes` 读回；`openRecordContent.times` 返回最后完成的事件时间、首次记录时间和修改时间，回收站详情同样保留正式时间。Room v15 保留 v14 已有的精确日期、时刻、原时区和留空值，新增年、月、季节、日期范围和可附范围的原话。用 `saveSeasonMonths` 保存当地的季节月份，用 `createSeasonTime` 按当前设置生成季节。已写入草稿或正式记录的季节保留填写时的实际范围。
 
-双时间浏览使用 [RecordBrowsing](app/src/main/java/com/baconaa/folio/records/RecordBrowsing.kt)：`listEventTimeline` 按当地年份降序返回 `years`，每年组内先置顶、再按日期降序，未填写事件时间的记录单列在 `undated`；`listRecentRecords` 返回全部有效正式记录，先置顶、再按首次记录时间降序，卡片继续保留事件时间。置顶状态与日期相同的记录沿用最近记录顺序，不据此推断同日实际先后；首次记录时间相同时按入库顺序降序。置顶不跨年份移动，时间未定组内也优先置顶。新建草稿与回收站不进入两种列表，未完成修改不改变正式预览。
+`listEventTimeline` 返回按年份降序的时间流，每年的 `records` 保存具体日期，`approximate` 保存大概时间。普通跨年范围归入 `crossYear`，跨年季节按填写年份归组，留空或只有原话的记录归入 `undated`。各组内置顶优先，具体日期按当地日期降序，大概时间并列。`listRecentRecords` 继续按置顶及首次记录时间降序返回全部有效正式记录。未完成的修改在点「完成」后才改变分组。[浏览接口](app/src/main/java/com/baconaa/folio/records/RecordBrowsing.kt)
 
 星标与置顶通过 [RecordMarking](app/src/main/java/com/baconaa/folio/records/RecordMarks.kt) 的 `setStarred`、`setPinned` 分别设置，正式详情、浏览卡片、搜索结果及回收站返回 `marks`。标记立即生效，保持内容修改时间和编辑版本；完成或放弃已有草稿保留当前标记。`listStarredRecords` 集中返回已加星的正式记录，沿用最近记录的预览和排序；单独加星不改变顺序。回收站只读，恢复后可继续改标记。Room v10 为旧记录补入默认未加星、未置顶状态。
 
@@ -60,7 +60,7 @@ Room v13 为地点增加可空经纬度，v12 旧地点保留原身份和资料�
 
 `search(keyword)` 匹配正式正文、清单、照片和录音说明、标签、地点当前名称、人物物件名称及别名；`queryRecords(keyword, tagIds, starredOnly, placeId, peopleIds, thingIds, mediaTypes)` 返回完整浏览卡片。标签、人物、物件各类别多选满足任一个，各类别及关键词、星标、具体地点同时满足；空集合表示不限该类别，空地点身份表示不限地点，未命中不自动扩大范围。例如“外婆＋搪瓷杯”只返回同时关联两者的记录。两种入口都排除草稿、未完成修改和回收站，不识别原照片中的文字或原录音中的话语。标签、地点、人物与物件按 ID 限定，同名对象不会混在一起；结果沿用置顶及最近记录顺序。在「搜索全部记录 → 内容类型」可多选有照片、有录音、有清单或纯文字，满足其中任一项即可。查询检查整条正式记录，纯文字要求至少一个内容项且每项都是文字。移除内容类型条件会保留关键词及其他筛选。
 
-浏览卡片的 `preview` 按原顺序展示最多三个内容项，每项文字及媒体说明截取前 80 个 Unicode 码点；录音返回片段 ID 和时长供试听，清单只读展示前三条事项及全部事项、已完成事项数量。`PreviewContentItem` 与可保存的 `ContentItem` 分开，避免截断预览被回存为完整内容。`remainingItemCount`、`remainingPhotoCount` 和 `remainingAudioCount` 表示未展示的内容项及其中照片、录音项数量，空白文字不占预览，重复使用的媒体仍按各自内容项计数。详情通过同一 `RecordId` 调用 `openRecordContent`，读取完整内容及时间信息。当前列表为全量读取，尚未引入分页，本分支已接入前端列表与精确事件时间填写，模糊时间另行实现。
+浏览卡片的 `preview` 按原顺序展示最多三个内容项，每项文字及媒体说明截取前 80 个 Unicode 码点；录音返回片段 ID 和时长供试听，清单只读展示前三条事项及全部事项、已完成事项数量。`PreviewContentItem` 与可保存的 `ContentItem` 分开，避免截断预览被回存为完整内容。`remainingItemCount`、`remainingPhotoCount` 和 `remainingAudioCount` 表示未展示的内容项及其中照片、录音项数量，空白文字不占预览，重复使用的媒体仍按各自内容项计数。详情通过同一 `RecordId` 调用 `openRecordContent`，读取完整内容及时间信息。当前列表为全量读取。
 
 删除与恢复使用 [RecordTrash](app/src/main/java/com/baconaa/folio/records/RecordTrash.kt)：`moveToTrash` 将正式记录和编辑草稿一起隐藏，`listTrash` 与 `openTrashRecord` 只展示上次完成的内容并通过 `hasDraft` 提示未完成修改；`restoreRecord` 用于立即撤销或从回收站恢复，两份内容保持独立。重复删除或恢复返回 `false`。详情与回收站页面已接入删除确认、撤销提示和恢复，编辑中的记录可先返回详情再删除。
 

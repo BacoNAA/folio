@@ -12,7 +12,9 @@ import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.PrimaryKey
 import androidx.room.Query
+import androidx.room.RewriteQueriesToDropUnusedColumns
 import androidx.room.RoomDatabase
+import androidx.room.Update
 
 @Entity(tableName = "text_drafts")
 internal data class DraftRow(
@@ -78,12 +80,12 @@ internal interface TextDao {
               WHERE id = :id AND EXISTS (SELECT 1 FROM editable_text_drafts WHERE id = :id)""")
     suspend fun updateDraft(id: String, body: String, cursor: Int, activeItemId: String?, editedAt: Long): Int
 
-    @Query("SELECT id, body, cursor, firstRecordedAt, lastEditedAt, activeItemId, eventDate, eventClock, eventZone FROM editable_text_drafts WHERE id = :id")
+    @RewriteQueriesToDropUnusedColumns
+    @Query("SELECT * FROM editable_text_drafts WHERE id = :id")
     suspend fun draft(id: String): DraftRow?
 
-    @Query("""UPDATE text_drafts SET eventDate = :date, eventClock = :clock, eventZone = :zone, lastEditedAt = :editedAt
-              WHERE id = :id AND EXISTS (SELECT 1 FROM editable_text_drafts WHERE id = :id)""")
-    suspend fun updateDraftTime(id: String, date: Long?, clock: Long?, zone: String?, editedAt: Long): Int
+    @Update
+    suspend fun updateDraft(row: DraftRow)
 
     @Query("UPDATE text_drafts SET lastEditedAt = :editedAt WHERE id = :id")
     suspend fun touchDraft(id: String, editedAt: Long)
@@ -128,9 +130,8 @@ internal interface TextDao {
     @Insert
     suspend fun insertRecord(row: RecordRow)
 
-    @Query("""UPDATE text_records SET body = :body, modifiedAt = :modifiedAt, revision = revision + 1,
-              eventDate = :date, eventClock = :clock, eventZone = :zone WHERE id = :id""")
-    suspend fun updateRecordContent(id: String, body: String, modifiedAt: Long, date: Long?, clock: Long?, zone: String?)
+    @Update
+    suspend fun updateRecord(row: RecordRow)
 
     @Query("DELETE FROM text_drafts WHERE id = :id AND EXISTS (SELECT 1 FROM editable_text_drafts WHERE id = :id)")
     suspend fun deleteDraft(id: String): Int
@@ -154,9 +155,10 @@ internal interface TextDao {
         AudioCleanupEntry::class, TagRow::class, DraftTagRow::class, RecordTagRow::class,
         PlaceRow::class, DraftPlaceRow::class, RecordPlaceRow::class,
         ObjectRow::class, ObjectAliasRow::class, DraftObjectRow::class, PublishedObjectRow::class,
+        SeasonSettingRow::class,
     ],
     views = [EditableDraftRow::class],
-    version = 14,
+    version = 15,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -171,6 +173,7 @@ internal interface TextDao {
         AutoMigration(from = 11, to = 12),
         AutoMigration(from = 12, to = 13),
         AutoMigration(from = 13, to = 14),
+        AutoMigration(from = 14, to = 15),
     ],
 )
 internal abstract class FolioDatabase : RoomDatabase() {
@@ -184,4 +187,5 @@ internal abstract class FolioDatabase : RoomDatabase() {
     abstract fun tagDao(): TagDao
     abstract fun placeDao(): PlaceDao
     abstract fun objectDao(): ObjectDao
+    abstract fun seasonSettingsDao(): SeasonSettingsDao
 }

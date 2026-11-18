@@ -38,8 +38,8 @@ data class RecordCard(
     val place: Place? = null,
     val objects: List<RecordObject> = emptyList(),
 )
-data class EventYear(val year: Int, val records: List<RecordCard>)
-data class EventTimeline(val years: List<EventYear>, val undated: List<RecordCard>)
+data class EventYear(val year: Int, val records: List<RecordCard>, val approximate: List<RecordCard> = emptyList())
+data class EventTimeline(val years: List<EventYear>, val undated: List<RecordCard>, val crossYear: List<RecordCard> = emptyList())
 
 enum class MediaFilter { PHOTO, AUDIO, CHECKLIST, TEXT_ONLY }
 
@@ -59,8 +59,8 @@ interface RecordBrowsing {
     ): List<RecordCard>
 
     /**
-     * 年份降序、留空单列；每组置顶优先，再按当地日期降序。同日沿用最近记录的稳定顺序，
-     * 不推断有时刻与无时刻记录的实际先后。未填时间也沿用最近记录顺序。
+     * 年份降序，年内具体日期与大概时间分组；普通跨年范围和时间未定另列。
+     * 各组置顶优先，具体日期按当地日期降序。大概时间保留输入顺序，不推断先后。
      */
     suspend fun listEventTimeline(): EventTimeline
 }
@@ -110,15 +110,17 @@ internal class LocalRecordBrowsing(private val database: FolioDatabase) : Record
     override suspend fun listEventTimeline(): EventTimeline = eventTimeline(listRecentRecords())
 }
 
-/** 时间流与地点小册复用同一套精确时间分组；未知时间不推断为记录时间。 */
+/** 时间流与地点小册采用相同的归年规则；跨年季节属于填写年，普通跨年范围单列。 */
 fun eventTimeline(records: List<RecordCard>): EventTimeline {
-    val dated = records.filter { it.eventTime != null }.sortedByDescending { it.eventTime!!.date }
-    return EventTimeline(
-        dated.groupBy { it.eventTime!!.date.year }.map { (year, cards) ->
-            EventYear(year, cards.sortedByDescending { it.marks.isPinned })
-        },
-        records.filter { it.eventTime == null },
-    )
+    val byYear = records.groupBy { it.eventTime?.groupingYear }
+    val years = byYear.keys.filterNotNull().sortedDescending().map { year ->
+        val (exact, approximate) = byYear.getValue(year).partition { it.eventTime is EventTime.Exact }
+        val exactOrder = compareByDescending<RecordCard> { it.marks.isPinned }
+            .thenByDescending { (it.eventTime as EventTime.Exact).date }
+        EventYear(year, exact.sortedWith(exactOrder), approximate.sortedByDescending { it.marks.isPinned })
+    }
+    val (undated, crossYear) = byYear[null].orEmpty().partition { it.eventTime?.dateRange == null }
+    return EventTimeline(years, undated.sortedByDescending { it.marks.isPinned }, crossYear.sortedByDescending { it.marks.isPinned })
 }
 
 private fun ContentSlot.asPreview(): PreviewContentItem = when (val item = asItem()) {

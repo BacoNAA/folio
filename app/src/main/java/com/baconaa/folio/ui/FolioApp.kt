@@ -11,6 +11,7 @@ import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -165,16 +166,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                             LazyColumn(state = recordsScroll, contentPadding = PaddingValues(20.dp),
                                 verticalArrangement = Arrangement.spacedBy(20.dp), modifier = Modifier.testTag("records-list")) {
                                 if (state.recent) items(state.records, key = { it.id.value }) { RecordPreview(it, model) }
-                                else {
-                                    state.timeline.years.forEach { year ->
-                                        item("year-${year.year}") { Text("${year.year} 年", style = MaterialTheme.typography.titleLarge) }
-                                        items(year.records, key = { it.id.value }) { RecordPreview(it, model) }
-                                    }
-                                    if (state.timeline.undated.isNotEmpty()) {
-                                        item("undated") { Text("时间未定", style = MaterialTheme.typography.titleMedium) }
-                                        items(state.timeline.undated, key = { it.id.value }) { RecordPreview(it, model) }
-                                    }
-                                }
+                                else eventTimelineItems(state.timeline, model)
                             }
                         }
                         Page.Search -> Column(Modifier.padding(horizontal = 20.dp)) {
@@ -199,17 +191,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                 verticalArrangement = Arrangement.spacedBy(20.dp), modifier = Modifier.testTag("search-results")) {
                                 if (state.error == null) {
                                     if (state.filterPlace == null || state.placeRecent) items(state.results, key = { it.id.value }) { RecordPreview(it, model) }
-                                    else {
-                                        val timeline = eventTimeline(state.results)
-                                        timeline.years.forEach { year ->
-                                            item("year-${year.year}") { Text("${year.year} 年") }
-                                            items(year.records, key = { it.id.value }) { RecordPreview(it, model) }
-                                        }
-                                        if (timeline.undated.isNotEmpty()) {
-                                            item("undated") { Text("时间未定") }
-                                            items(timeline.undated, key = { it.id.value }) { RecordPreview(it, model) }
-                                        }
-                                    }
+                                    else eventTimelineItems(eventTimeline(state.results), model)
                                 }
                             }
                         }
@@ -320,11 +302,32 @@ private fun EmptyMessage(text: String) {
         color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
+private fun LazyListScope.eventTimelineItems(timeline: EventTimeline, model: FolioViewModel) {
+    timeline.years.forEach { year ->
+        item("year-${year.year}") { Text("${year.year} 年", style = MaterialTheme.typography.titleLarge) }
+        items(year.records, key = { it.id.value }) { RecordPreview(it, model) }
+        if (year.approximate.isNotEmpty()) {
+            item("approximate-${year.year}") { Text("大概时间", style = MaterialTheme.typography.titleMedium) }
+            items(year.approximate, key = { it.id.value }) { RecordPreview(it, model) }
+        }
+    }
+    if (timeline.crossYear.isNotEmpty()) {
+        item("cross-year") { Text("跨年经历", style = MaterialTheme.typography.titleMedium) }
+        items(timeline.crossYear, key = { it.id.value }) { RecordPreview(it, model) }
+    }
+    if (timeline.undated.isNotEmpty()) {
+        item("undated") { Text("时间未定", style = MaterialTheme.typography.titleMedium) }
+        items(timeline.undated, key = { it.id.value }) { RecordPreview(it, model) }
+    }
+}
+
 @Composable
 private fun RecordPreview(record: RecordCard, model: FolioViewModel) {
     Column(Modifier.fillMaxWidth().clickable { model.openRecord(record.id) }.padding(vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(listOfNotNull(record.eventTime?.date?.toString(), if (record.marks.isPinned) "置顶" else null,
+        val eventTime = record.eventTime
+        val dateLabel = if (eventTime is EventTime.Exact) eventTime.date.toString() else eventTime?.label
+        Text(listOfNotNull(dateLabel, if (record.marks.isPinned) "置顶" else null,
             if (record.marks.isStarred) "★" else null).joinToString(" · "), fontSize = 12.sp, color = Accent)
         record.preview.items.forEach { item -> when (item) {
             is PreviewContentItem.Text -> Text(item.text, maxLines = 4, lineHeight = 26.sp)

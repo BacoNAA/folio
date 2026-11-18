@@ -23,7 +23,8 @@ internal data class PlaceTimeRow(val placeId: String, @Embedded val eventTime: E
 
 @Dao
 internal abstract class PlaceDao {
-    @Query("""SELECT rp.placeId, r.eventDate, r.eventClock, r.eventZone FROM record_places rp
+    @RewriteQueriesToDropUnusedColumns
+    @Query("""SELECT rp.placeId, r.* FROM record_places rp
         JOIN text_records r ON r.id = rp.recordId WHERE r.deletedAt IS NULL""")
     abstract suspend fun activePlaceTimes(): List<PlaceTimeRow>
     @Insert abstract suspend fun insert(place: PlaceRow)

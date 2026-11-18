@@ -31,6 +31,20 @@ class RecentExperienceTest {
         assertEquals(RecentExperience.Uncertain(0), recentExperience(listOf(repeated, time("2026-11-01", "06:00", "UTC"))))
     }
 
+    @Test fun approximateExperienceUsesItsSavedBoundsAndPreservesItsExpression() {
+        val zone = ZoneId.of("Asia/Shanghai")
+        val winter = EventTime.Season(2025, NamedSeason.WINTER, 11, 3, zone)
+        val beforeWinter = time("2025-10-31", "23:59")
+        val duringWinter = time("2026-03-31", "23:59")
+        val afterWinter = time("2026-04-01")
+        assertEquals(RecentExperience.Known(winter), recentExperience(listOf(winter, beforeWinter)))
+        assertEquals(RecentExperience.Uncertain(0), recentExperience(listOf(winter, duringWinter)))
+        assertEquals(RecentExperience.Known(afterWinter), recentExperience(listOf(afterWinter, winter)))
+        val college = EventTime.Description("大学时", LocalDate.parse("2018-09-01")..LocalDate.parse("2022-06-30"), zone)
+        assertEquals(RecentExperience.Known(college), recentExperience(listOf(college, time("2018-08-31"))))
+        assertEquals(RecentExperience.Uncertain(2), recentExperience(listOf(winter, EventTime.Description("很久以前"), null)))
+    }
+
     @Test fun coordinatesRejectNonFiniteAndOutOfRangeValues() {
         for ((lat, lon) in listOf(Double.NaN to 0.0, 0.0 to Double.POSITIVE_INFINITY, 91.0 to 0.0, 0.0 to -181.0)) {
             assertTrue(runCatching { PlaceCoordinates(lat, lon) }.isFailure)
