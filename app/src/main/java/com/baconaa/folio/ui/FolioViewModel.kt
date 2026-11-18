@@ -37,6 +37,7 @@ data class RecordEditor(
     val eventTime: EventTime? = null,
     val persistedEventTime: EventTime? = null,
     val tags: List<Tag> = emptyList(),
+    val objects: List<RecordObject> = emptyList(),
     val place: Place? = null,
     val persistedPlaceId: PlaceId? = null,
     // 首次落盘分配后端 ID，但当前输入项及其键盘回调保留原身份；写入时再映射。
@@ -76,6 +77,12 @@ data class FolioState(
     val tagsLoading: Boolean = false,
     val tagsError: String? = null,
     val filterTags: Set<TagId> = emptySet(),
+    val sharedObjects: List<RecordObject> = emptyList(),
+    val objectsLoading: Boolean = false,
+    val objectsError: String? = null,
+    val objectSaveVersion: Int = 0,
+    val filterPeople: Set<ObjectId> = emptySet(),
+    val filterThings: Set<ObjectId> = emptySet(),
     val starredOnly: Boolean = false,
     val trash: List<TrashPreview> = emptyList(),
     val trashId: RecordId? = null,
@@ -97,7 +104,8 @@ data class FolioState(
 
 data class DeletedRecord(val id: RecordId, val origin: Page, val query: String,
     val filterTags: Set<TagId>, val starredOnly: Boolean, val recent: Boolean,
-    val filterPlace: Place?, val searchOrigin: Page, val placeRecent: Boolean)
+    val filterPlace: Place?, val searchOrigin: Page, val placeRecent: Boolean,
+    val filterPeople: Set<ObjectId>, val filterThings: Set<ObjectId>)
 
 /** UI 状态由主线程持有；草稿写入串行，完成和离开等待最后一次输入落盘。 */
 class FolioViewModel(
@@ -111,6 +119,7 @@ class FolioViewModel(
     private val marking: RecordMarking? = published as? RecordMarking ?: mixed as? RecordMarking,
     private val trash: RecordTrash? = published as? RecordTrash ?: mixed as? RecordTrash,
     private val places: RecordPlaces? = published as? RecordPlaces ?: mixed as? RecordPlaces,
+    private val objects: RecordObjects? = published as? RecordObjects ?: mixed as? RecordObjects,
 ) : ViewModel() {
     var state by mutableStateOf(FolioState())
         private set
@@ -124,7 +133,7 @@ class FolioViewModel(
         loadVersion++
         state = state.copy(page = page, error = null, loading = false, linkingPlace = if (page == Page.Search) state.linkingPlace else null)
         if (page == Page.Records || page == Page.Search || page == Page.Trash) refresh()
-        if (page == Page.Search) loadTags()
+        if (page == Page.Search) { loadTags(); loadObjects() }
         if (page == Page.Places) loadPlaces(state.placeQuery)
     }
 
@@ -438,6 +447,7 @@ class FolioViewModel(
         val canUndo = withContext(Dispatchers.IO) { mixed.canUndoRemoval(id) }
         val eventTime = withContext(Dispatchers.IO) { times?.openDraftTimes(id)?.eventTime }
         val selectedTags = withContext(Dispatchers.IO) { tags?.openDraftTags(id).orEmpty() }
+        val selectedObjects = withContext(Dispatchers.IO) { objects?.openDraftObjects(id).orEmpty() }
         val selectedPlace = withContext(Dispatchers.IO) { places?.openDraftPlace(id) }
         loadVersion++
         state = state.copy(page = Page.Editor, loading = false, error = null, saveError = null,
@@ -446,7 +456,7 @@ class FolioViewModel(
                 content.items.filterIsInstance<ContentItem.Text>().associate { item -> item.id to TextFieldValue(item.text,
                     TextRange(if (item.id == content.activeItemId) content.cursor else item.text.length)) },
                 content.activeItemId, content.items, returnPage = origin, canUndo = canUndo,
-                eventTime = eventTime, persistedEventTime = eventTime, tags = selectedTags,
+                eventTime = eventTime, persistedEventTime = eventTime, tags = selectedTags, objects = selectedObjects,
                 place = selectedPlace, persistedPlaceId = selectedPlace?.id))
     }
 
@@ -566,12 +576,14 @@ class FolioViewModel(
         val filterTags = state.filterTags
         val starredOnly = state.starredOnly
         val place = state.filterPlace
+        val people = state.filterPeople
+        val things = state.filterThings
         state = state.copy(loading = true, error = null)
         viewModelScope.launch {
             try {
                 if (page == Page.Search) {
                     val (result, currentPlace) = withContext(Dispatchers.IO) {
-                        browsing.queryRecords(query, filterTags, starredOnly, place?.id) to
+                        browsing.queryRecords(query, filterTags, starredOnly, place?.id, people, things) to
                             place?.let { requireNotNull(requireNotNull(places).openPlace(it.id)) }
                     }
                     if (version == loadVersion) state = state.copy(results = result, filterPlace = currentPlace, loading = false)
@@ -643,10 +655,59 @@ class FolioViewModel(
 
     fun filterByTags(ids: Set<TagId>) { state = state.copy(filterTags = ids); refresh() }
     fun filterStarred(value: Boolean) { state = state.copy(starredOnly = value); refresh() }
-    fun clearFilters() { state = state.copy(filterTags = emptySet(), starredOnly = false, filterPlace = null); refresh() }
+    fun clearFilters() { state = state.copy(filterTags = emptySet(), starredOnly = false, filterPlace = null,
+        filterPeople = emptySet(), filterThings = emptySet()); refresh() }
     fun openSearch() { state = state.copy(searchOrigin = Page.Records, filterPlace = null, linkingPlace = null); home(Page.Search) }
-    fun openStarred() { state = state.copy(filterTags = emptySet(), starredOnly = true, query = "", filterPlace = null, searchOrigin = Page.Records, linkingPlace = null); home(Page.Search) }
-    fun openTag(tag: Tag) { state = state.copy(filterTags = setOf(tag.id), starredOnly = false, query = "", filterPlace = null, searchOrigin = Page.Records, linkingPlace = null); home(Page.Search) }
+    fun openStarred() { state = state.copy(filterTags = emptySet(), starredOnly = true, query = "", filterPlace = null, searchOrigin = Page.Records, linkingPlace = null,
+        filterPeople = emptySet(), filterThings = emptySet()); home(Page.Search) }
+    fun openTag(tag: Tag) { state = state.copy(filterTags = setOf(tag.id), starredOnly = false, query = "", filterPlace = null, searchOrigin = Page.Records, linkingPlace = null,
+        filterPeople = emptySet(), filterThings = emptySet()); home(Page.Search) }
+
+    private var objectsVersion = 0
+    fun loadObjects() {
+        val version = ++objectsVersion
+        state = state.copy(objectsLoading = true, objectsError = null)
+        viewModelScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) { requireNotNull(objects).listObjects() }
+                if (version == objectsVersion) state = state.copy(sharedObjects = result, objectsLoading = false)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { if (version == objectsVersion) state = state.copy(objectsLoading = false, objectsError = "人物与物件读取失败，请重试。") }
+        }
+    }
+    fun createObject(kind: ObjectKind, info: ObjectInfo) = editObjects("新对象保存失败，请重试。") {
+        requireNotNull(objects).createDraftObject(it, kind, info)
+    }
+    fun selectObject(value: RecordObject, selected: Boolean) = editObjects("对象选择保存失败，请重试。") { id ->
+        val current = requireNotNull(requireNotNull(objects).openDraftObjects(id)).map { it.id }
+        objects.saveDraftObjects(id, if (selected) (current + value.id).distinct() else current - value.id)
+    }
+    fun updateObject(value: RecordObject, info: ObjectInfo) {
+        if (state.editor != null) editObjects("对象资料保存失败，请重试。") { id ->
+            if (value.isDraft) requireNotNull(objects).updateDraftObject(id, value.id, info)
+            else requireNotNull(objects).updateObject(value.id, info)
+        } else runAction("对象资料保存失败，请重试。") {
+            withContext(Dispatchers.IO) { requireNotNull(objects).updateObject(value.id, info) }
+            state = state.copy(objectSaveVersion = state.objectSaveVersion + 1)
+            loadObjects()
+            refresh()
+        }
+    }
+    private fun editObjects(failure: String, action: suspend (DraftId) -> Unit) = structure(failure) { editor ->
+        withContext(Dispatchers.IO) { action(requireNotNull(editor.draftId)) }
+        state = state.copy(objectSaveVersion = state.objectSaveVersion + 1)
+        loadObjects()
+    }
+    fun filterObjects(kind: ObjectKind, ids: Set<ObjectId>) {
+        state = if (kind == ObjectKind.PERSON) state.copy(filterPeople = ids) else state.copy(filterThings = ids)
+        refresh()
+    }
+    fun openObject(value: RecordObject) {
+        state = state.copy(query = "", filterTags = emptySet(), starredOnly = false, filterPlace = null,
+            filterPeople = if (value.kind == ObjectKind.PERSON) setOf(value.id) else emptySet(),
+            filterThings = if (value.kind == ObjectKind.THING) setOf(value.id) else emptySet(), searchOrigin = Page.Records, linkingPlace = null)
+        home(Page.Search)
+    }
 
     private var placesVersion = 0
     fun loadPlaces(query: String = "") {
@@ -670,13 +731,15 @@ class FolioViewModel(
         withContext(Dispatchers.IO) { requireNotNull(places).updateDraftPlace(requireNotNull(it.draftId), requireNotNull(it.place).id, info) }
     }
     fun openPlace(place: Place) {
-        state = state.copy(filterPlace = place, query = "", filterTags = emptySet(), starredOnly = false, searchOrigin = Page.Places, linkingPlace = null)
+        state = state.copy(filterPlace = place, query = "", filterTags = emptySet(), starredOnly = false, searchOrigin = Page.Places, linkingPlace = null,
+            filterPeople = emptySet(), filterThings = emptySet())
         home(Page.Search)
     }
     fun selectPlaceRecent(value: Boolean) { state = state.copy(placeRecent = value) }
     fun chooseExistingRecord() {
         val place = state.filterPlace ?: return
-        state = state.copy(linkingPlace = place, filterPlace = null, query = "", filterTags = emptySet(), starredOnly = false)
+        state = state.copy(linkingPlace = place, filterPlace = null, query = "", filterTags = emptySet(), starredOnly = false,
+            filterPeople = emptySet(), filterThings = emptySet())
         refresh()
     }
     fun clearPlaceFilter() { state = state.copy(filterPlace = null); refresh() }
@@ -710,7 +773,8 @@ class FolioViewModel(
         if (state.page != Page.Detail) return
         val id = state.detailId ?: return
         val origin = state.detailOrigin
-        val context = DeletedRecord(id, origin, state.query, state.filterTags, state.starredOnly, state.recent, state.filterPlace, state.searchOrigin, state.placeRecent)
+        val context = DeletedRecord(id, origin, state.query, state.filterTags, state.starredOnly, state.recent, state.filterPlace, state.searchOrigin, state.placeRecent,
+            state.filterPeople, state.filterThings)
         val hasDraft = state.drafts.any { it.recordId == id }
         media?.stopPlayback()
         runAction("移入回收站失败，请重试。") {
@@ -730,6 +794,7 @@ class FolioViewModel(
             state = state.copy(page = deleted.origin, deleted = null, notice = "已撤销删除",
                 query = deleted.query, filterTags = deleted.filterTags, starredOnly = deleted.starredOnly, recent = deleted.recent,
                 filterPlace = deleted.filterPlace, searchOrigin = deleted.searchOrigin, placeRecent = deleted.placeRecent,
+                filterPeople = deleted.filterPeople, filterThings = deleted.filterThings,
                 scrollRestoreVersion = state.scrollRestoreVersion + 1)
             refresh()
         }

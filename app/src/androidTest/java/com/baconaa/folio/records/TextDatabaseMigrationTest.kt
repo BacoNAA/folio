@@ -515,6 +515,32 @@ class TextDatabaseMigrationTest {
         } finally { database.close() }
     }
 
+    @Test fun versionThirteenCoordinatesAndPrivateDraftSurviveObjectMigration() = runBlocking {
+        createDatabase(13) { sql ->
+            sql.execSQL("INSERT INTO text_drafts (id,body,cursor,firstRecordedAt,lastEditedAt) VALUES ('draft','旧地点与标签',2,100,200)")
+            sql.execSQL("INSERT INTO draft_items (draftId,position,itemId,text) VALUES ('draft',0,'item','旧地点与标签')")
+            sql.execSQL("INSERT INTO places (id,name,city,address,note,ownerDraftId,latitude,longitude) VALUES ('place','河边','成都','','','draft',30.67,104.06)")
+            sql.execSQL("INSERT INTO draft_places VALUES ('draft','place')")
+            sql.execSQL("INSERT INTO tags VALUES ('tag','旧标签','draft')")
+            sql.execSQL("INSERT INTO draft_tags VALUES ('draft','tag',0)")
+        }
+        val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context))
+            val draft = DraftId("draft")
+            assertTrue(store.listObjects().isEmpty())
+            assertEquals(emptyList<RecordObject>(), store.openDraftObjects(draft))
+            assertEquals(TextEdit("旧地点与标签", 2), store.openDraft(draft))
+            assertEquals(PlaceCoordinates(30.67, 104.06), store.openDraftPlace(draft)!!.info.coordinates)
+            val person = store.createDraftObject(draft, ObjectKind.PERSON, ObjectInfo("外婆", aliases = listOf("阿婆")))
+            val record = store.completeMixedDraft(draft)
+            assertEquals(person, store.openRecordContent(record)!!.objects.single().id)
+            assertEquals("旧标签", store.openRecordContent(record)!!.tags.single().name)
+            assertEquals(PlaceCoordinates(30.67, 104.06), store.openRecordContent(record)!!.place!!.info.coordinates)
+            assertEquals(listOf(record), store.search("阿婆").map { it.id })
+        } finally { database.close() }
+    }
+
     private fun createDatabase(version: Int, seed: (SQLiteDatabase) -> Unit) {
         val schemaFile = "${FolioDatabase::class.java.name}/$version.json"
         val schema = instrumentation.context.assets.open(schemaFile).bufferedReader().use {

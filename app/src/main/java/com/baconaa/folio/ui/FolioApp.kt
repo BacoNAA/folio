@@ -6,6 +6,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.*
@@ -187,7 +188,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                             if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
                             if (!state.loading && state.error == null) {
                                 Text("${state.results.size} 条记录", Modifier.padding(vertical = 12.dp), fontSize = 12.sp)
-                                if (state.results.isEmpty()) EmptyMessage("没有找到匹配的记录\n试试其他词，或清空搜索词。")
+                                if (state.results.isEmpty()) EmptyMessage("没有同时符合这些条件的记录\n可移除筛选条件，或修改搜索词。")
                             }
                             LazyColumn(state = searchScroll, contentPadding = PaddingValues(vertical = 12.dp),
                                 verticalArrangement = Arrangement.spacedBy(20.dp), modifier = Modifier.testTag("search-results")) {
@@ -330,6 +331,11 @@ private fun RecordPreview(record: RecordCard, model: FolioViewModel) {
         if (record.tags.isNotEmpty()) Row {
             record.tags.take(2).forEach { tag -> TextButton(onClick = { model.openTag(tag) }) { Text(tag.name) } }
             if (record.tags.size > 2) Text("另有 ${record.tags.size - 2} 个标签", fontSize = 12.sp)
+        }
+        if (record.objects.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            record.objects.forEach { value -> TextButton(onClick = { model.openObject(value) }) {
+                Text("${value.kind.label}：${value.info.name}${value.info.note.takeIf { it.isNotBlank() }?.let { "（$it）" }.orEmpty()}")
+            } }
         }
         HorizontalDivider()
     }
