@@ -2,18 +2,23 @@ package com.baconaa.folio.media
 
 import android.content.ContentValues
 import android.graphics.Bitmap
+import android.media.ExifInterface
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
+import java.time.LocalDateTime
+import java.time.ZoneOffset
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -67,6 +72,46 @@ class LocalPhotoOriginalsTest {
 
         val reopened = PhotoId(UUID.fromString(id.value.toString()))
         assertArrayEquals(bytes, originals.openOriginal(reopened).use { it.readBytes() })
+    }
+
+    private suspend fun importJpegWithMetadata(tags: ExifInterface.() -> Unit): PhotoId {
+        val source = File.createTempFile("folio-capture-time-", ".jpg", context.cacheDir)
+        try {
+            val bitmap = Bitmap.createBitmap(3, 2, Bitmap.Config.ARGB_8888)
+            try {
+                source.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.JPEG, 95, it)) }
+            } finally {
+                bitmap.recycle()
+            }
+            ExifInterface(source.absolutePath).apply(tags).saveAttributes()
+            return originals.importPhoto(Uri.fromFile(source)).also(imported::add)
+        } finally {
+            source.delete()
+        }
+    }
+
+    @Test
+    fun captureCandidateUsesOriginalLocalTimeAndOnlyAnAvailableOffset() = runBlocking {
+        val local = LocalDateTime.of(2021, 7, 9, 0, 30, 12, 345_000_000)
+        val originalTags: ExifInterface.() -> Unit = {
+            setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, "2021:07:09 00:30:12")
+            setAttribute(ExifInterface.TAG_SUBSEC_TIME_ORIGINAL, "345")
+        }
+        val withoutOffset = importJpegWithMetadata(originalTags)
+        assertEquals(PhotoCaptureTime(local, null), originals.readCaptureTime(withoutOffset))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val withOffset = importJpegWithMetadata {
+                originalTags()
+                setAttribute(ExifInterface.TAG_OFFSET_TIME_ORIGINAL, "+09:00")
+            }
+            assertEquals(PhotoCaptureTime(local, ZoneOffset.ofHours(9)), originals.readCaptureTime(withOffset))
+        }
+    }
+
+    @Test
+    fun photoWithOnlyModificationTimeHasNoCaptureCandidate() = runBlocking {
+        val photo = importJpegWithMetadata { setAttribute(ExifInterface.TAG_DATETIME, "2026:01:01 12:00:00") }
+        assertNull(originals.readCaptureTime(photo))
     }
 
     @Test
