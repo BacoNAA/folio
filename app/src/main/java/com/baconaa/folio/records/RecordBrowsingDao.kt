@@ -22,9 +22,16 @@ internal interface RecordBrowsingDao {
                   WHERE po.recordId = r.id AND o.kind = 'PERSON' AND o.id IN (:peopleIds)))
               AND (:allThings = 1 OR EXISTS(SELECT 1 FROM published_objects po JOIN record_objects o ON o.id = po.objectId
                   WHERE po.recordId = r.id AND o.kind = 'THING' AND o.id IN (:thingIds)))
+              AND (:allMedia OR
+                  (:photo AND EXISTS(SELECT 1 FROM record_items i WHERE i.recordId = r.id AND i.photoId IS NOT NULL)) OR
+                  (:audio AND EXISTS(SELECT 1 FROM record_items i WHERE i.recordId = r.id AND i.audioId IS NOT NULL)) OR
+                  (:checklist AND EXISTS(SELECT 1 FROM record_items i WHERE i.recordId = r.id AND i.checklistJson IS NOT NULL)) OR
+                  (:textOnly AND EXISTS(SELECT 1 FROM record_items i WHERE i.recordId = r.id AND i.text IS NOT NULL)
+                      AND NOT EXISTS(SELECT 1 FROM record_items i WHERE i.recordId = r.id AND i.text IS NULL)))
               AND """ + RECORD_TEXT_MATCH + " ORDER BY isPinned DESC, firstRecordedAt DESC, r.rowid DESC")
     suspend fun activeRecords(keyword: String, tagIds: List<String>, allTags: Boolean, starredOnly: Boolean, placeId: String?,
-        peopleIds: List<String>, allPeople: Boolean, thingIds: List<String>, allThings: Boolean): List<BrowseRecordRow>
+        peopleIds: List<String>, allPeople: Boolean, thingIds: List<String>, allThings: Boolean,
+        allMedia: Boolean, photo: Boolean, audio: Boolean, checklist: Boolean, textOnly: Boolean): List<BrowseRecordRow>
 
     // 每条最多读三项的短预览，不加载所有正式正文，也不逐条发起数据库查询。
     @Query("""SELECT i.recordId, i.itemId, substr(i.text, 1, 80) AS text,
