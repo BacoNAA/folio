@@ -10,6 +10,7 @@ import com.baconaa.folio.media.LocalPhotoOriginals
 import com.baconaa.folio.media.PhotoId
 import com.baconaa.folio.media.createAudioTestClip
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
@@ -538,6 +539,88 @@ class TextDatabaseMigrationTest {
             assertEquals("旧标签", store.openRecordContent(record)!!.tags.single().name)
             assertEquals(PlaceCoordinates(30.67, 104.06), store.openRecordContent(record)!!.place!!.info.coordinates)
             assertEquals(listOf(record), store.search("阿婆").map { it.id })
+        } finally { database.close() }
+    }
+
+    @Test
+    fun versionFourteenRetainsExactDateTimeAndUndatedDraftsWhenAddingTimeExpressions() = runBlocking {
+        val date = LocalDate.of(2025, 11, 8)
+        val clock = LocalTime.of(0, 30, 12, 345_000_000)
+        val zone = ZoneId.of("Asia/Tokyo")
+        createDatabase(14) { sql ->
+            sql.execSQL("""INSERT INTO text_records
+                (id,sourceDraftId,body,firstRecordedAt,modifiedAt,eventDate,eventClock,eventZone)
+                VALUES ('record','source','夜宵',100,200,?,?,?)""",
+                arrayOf<Any>(date.toEpochDay(), clock.toNanoOfDay(), zone.id))
+            sql.execSQL("INSERT INTO record_items (recordId,position,itemId,text) VALUES ('record',0,'item','夜宵')")
+            sql.execSQL("""INSERT INTO text_drafts
+                (id,body,cursor,firstRecordedAt,lastEditedAt,eventDate,eventZone)
+                VALUES ('edit','夜宵',2,100,300,?,?)""", arrayOf<Any>(date.toEpochDay(), zone.id))
+            sql.execSQL("INSERT INTO draft_items (draftId,position,itemId,text) VALUES ('edit',0,'item','夜宵')")
+            sql.execSQL("INSERT INTO text_record_edits VALUES ('edit','record',1)")
+            sql.execSQL("INSERT INTO text_drafts (id,body,cursor,firstRecordedAt,lastEditedAt) VALUES ('undated','补记',2,150,150)")
+        }
+        val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context))
+            val record = RecordId("record")
+            val edit = DraftId("edit")
+            val published = RecordTimes(100L, 200L, EventTime(date, clock, zone))
+            assertEquals(published, store.openRecordContent(record)!!.times)
+            assertEquals(DraftTimes(100L, EventTime(date, zone = zone)), store.openDraftTimes(edit))
+            assertEquals(DraftTimes(150L, null), store.openDraftTimes(DraftId("undated")))
+            val winter = EventTime.Season(2025, NamedSeason.WINTER)
+            store.saveDraftEventTime(edit, winter)
+            assertEquals(published, store.openRecordContent(record)!!.times)
+            assertEquals(record, store.completeMixedDraft(edit))
+            assertEquals(winter, store.openRecordContent(record)!!.times.eventTime)
+        } finally {
+            database.close()
+        }
+    }
+
+    @Test
+    fun versionFifteenKeepsUntitledRecordAndPendingEditWhenTitlesAreAdded() = runBlocking {
+        createDatabase(15) { sql ->
+            sql.execSQL("""INSERT INTO text_records
+                (id,sourceDraftId,body,firstRecordedAt,modifiedAt,eventKind,eventText,eventZone)
+                VALUES ('record','source','校门口',100,200,'description','大学时','Asia/Tokyo')""")
+            sql.execSQL("INSERT INTO record_items (recordId,position,itemId,text) VALUES ('record',0,'item','校门口')")
+            sql.execSQL("""INSERT INTO text_drafts
+                (id,body,cursor,firstRecordedAt,lastEditedAt,activeItemId,eventKind,eventText,eventZone)
+                VALUES ('edit','校门口的书店',3,100,300,'item','description','大学时','Asia/Tokyo')""")
+            sql.execSQL("INSERT INTO text_record_edits VALUES ('edit','record',1)")
+            sql.execSQL("INSERT INTO draft_items (draftId,position,itemId,text) VALUES ('edit',0,'item','校门口的书店')")
+            sql.execSQL("INSERT INTO tags VALUES ('tag','校园','edit')")
+            sql.execSQL("INSERT INTO draft_tags VALUES ('edit','tag',0)")
+        }
+        val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), now = { 400L },
+                audioOriginals = LocalAudioOriginals.get(context))
+            val id = RecordId("record")
+            val edit = DraftId("edit")
+            val time = EventTime.Description("大学时", zone = ZoneId.of("Asia/Tokyo"))
+            val original = store.openRecordContent(id)!!
+            assertNull(original.title)
+            assertEquals("校门口", original.text)
+            assertEquals(RecordTimes(100L, 200L, time), original.times)
+            assertEquals(edit, store.editRecord(id))
+            assertNull(store.openMixedDraft(edit)!!.title)
+            assertEquals(TextEdit("校门口的书店", 3), store.openDraft(edit))
+            assertEquals(DraftTimes(100L, time), store.openDraftTimes(edit))
+            assertEquals("校园", store.openDraftTags(edit)!!.single().name)
+
+            store.saveDraftTitle(edit, "旧书新读")
+            assertTrue(store.queryRecords("旧书新读").isEmpty())
+            assertEquals(id, store.completeMixedDraft(edit))
+            val card = store.queryRecords("旧书新读").single()
+            assertEquals(id, card.id)
+            assertEquals("旧书新读", card.title)
+            assertEquals("校园", card.tags.single().name)
+            val published = store.openRecordContent(id)!!
+            assertEquals("校门口的书店", published.text)
+            assertEquals(RecordTimes(100L, 400L, time), published.times)
         } finally { database.close() }
     }
 

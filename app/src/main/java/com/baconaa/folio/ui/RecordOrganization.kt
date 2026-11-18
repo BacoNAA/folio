@@ -21,9 +21,11 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 
-internal fun EventTime?.label(): String = this?.let {
-    "${it.date}${it.time?.let { clock -> " $clock" }.orEmpty()} · ${it.zone.id}"
-} ?: "暂不填写"
+internal fun EventTime?.label(): String = when (this) {
+    null -> "暂不填写"
+    is EventTime.Season, is EventTime.Description -> dateRange?.let { "$label（${it.start} 至 ${it.endInclusive}）" } ?: label
+    else -> label
+}
 
 @Composable
 internal fun EditorClues(model: FolioViewModel) {
@@ -68,12 +70,14 @@ internal fun EditorClues(model: FolioViewModel) {
 
 @Composable
 private fun EventTimeDialog(value: EventTime?, onDismiss: () -> Unit, save: (EventTime?) -> Unit) {
-    var date by rememberSaveable { mutableStateOf(value?.date?.toString().orEmpty()) }
-    var time by rememberSaveable { mutableStateOf(value?.time?.toString().orEmpty()) }
+    val exact = value as? EventTime.Exact
+    var date by rememberSaveable { mutableStateOf(exact?.date?.toString().orEmpty()) }
+    var time by rememberSaveable { mutableStateOf(exact?.time?.toString().orEmpty()) }
     var zone by rememberSaveable { mutableStateOf(value?.zone?.id ?: ZoneId.systemDefault().id) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("事件时间") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (value != null && exact == null) Text("当前为${value.label()}。填写具体日期可替换原时间。")
             Text("填写事情发生的日期，时刻可留空。补记旧事也可以暂不填写。")
             OutlinedTextField(date, { date = it; error = null }, label = { Text("日期 · YYYY-MM-DD") },
                 singleLine = true, modifier = Modifier.testTag("event-date"))

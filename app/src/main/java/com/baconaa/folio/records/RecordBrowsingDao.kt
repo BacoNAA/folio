@@ -3,9 +3,11 @@ package com.baconaa.folio.records
 import androidx.room.Dao
 import androidx.room.Embedded
 import androidx.room.Query
+import androidx.room.RewriteQueriesToDropUnusedColumns
 
 internal data class BrowseRecordRow(
     val id: String, @Embedded val eventTime: EventTimeFields?, @Embedded val marks: RecordMarks,
+    val title: String?,
 )
 internal data class PreviewItemRow(val recordId: String, @Embedded val slot: ContentSlot)
 internal data class PreviewCountRow(val recordId: String, val itemCount: Int, val photoCount: Int, val audioCount: Int)
@@ -14,7 +16,8 @@ private const val VISIBLE_PREVIEW_ITEM = "(photoId IS NOT NULL OR audioId IS NOT
 
 @Dao
 internal interface RecordBrowsingDao {
-    @Query("""SELECT r.id, eventDate, eventClock, eventZone, isStarred, isPinned FROM text_records r
+    @RewriteQueriesToDropUnusedColumns
+    @Query("""SELECT r.* FROM text_records r
               WHERE deletedAt IS NULL AND (:starredOnly = 0 OR isStarred = 1)
               AND (:allTags = 1 OR EXISTS(SELECT 1 FROM record_tags rt WHERE rt.recordId = r.id AND rt.tagId IN (:tagIds)))
               AND (:placeId IS NULL OR EXISTS(SELECT 1 FROM record_places rp WHERE rp.recordId = r.id AND rp.placeId = :placeId))

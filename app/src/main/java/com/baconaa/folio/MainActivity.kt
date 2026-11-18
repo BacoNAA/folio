@@ -14,9 +14,10 @@ import androidx.lifecycle.ViewModelProvider
 import com.baconaa.folio.records.ItemId
 import com.baconaa.folio.records.LocalTextStore
 import com.baconaa.folio.records.EventTime
+import com.baconaa.folio.records.EventTimeFields
+import com.baconaa.folio.records.asFields
 import java.time.LocalDate
 import java.time.LocalTime
-import java.time.ZoneId
 import com.baconaa.folio.ui.*
 import java.io.File
 
@@ -54,8 +55,7 @@ class MainActivity : ComponentActivity() {
         savedInstanceState?.getBundle("media-target")?.let {
             pendingTarget = ExternalTarget(it.getString("draft"), it.getString("record"), it.getString("after"),
                 Page.valueOf(it.getString("return") ?: "Capture"), Page.valueOf(it.getString("origin") ?: "Records"),
-                it.getString("event-date")?.let { date -> EventTime(LocalDate.parse(date),
-                    it.getString("event-time")?.let(LocalTime::parse), ZoneId.of(it.getString("event-zone"))) })
+                it.readEventTime())
             cameraPath = it.getString("camera")
         }
         model = ViewModelProvider(this, object : ViewModelProvider.Factory {
@@ -95,9 +95,7 @@ class MainActivity : ComponentActivity() {
         pendingTarget?.let { target -> outState.putBundle("media-target", Bundle().apply {
             putString("draft", target.draftId); putString("record", target.recordId); putString("after", target.afterId)
             putString("return", target.returnPage.name); putString("origin", target.detailOrigin.name); putString("camera", cameraPath)
-            putString("event-date", target.eventTime?.date?.toString())
-            putString("event-time", target.eventTime?.time?.toString())
-            putString("event-zone", target.eventTime?.zone?.id)
+            target.eventTime?.let { writeEventTime(it) }
         }) }
         super.onSaveInstanceState(outState)
     }
@@ -106,4 +104,28 @@ class MainActivity : ComponentActivity() {
         model.background()
         super.onStop()
     }
+}
+
+private fun Bundle.writeEventTime(value: EventTime) {
+    val fields = value.asFields()
+    putString("event-zone", fields.eventZone)
+    fields.eventDate?.let { putString("event-date", LocalDate.ofEpochDay(it).toString()) }
+    fields.eventClock?.let { putString("event-time", LocalTime.ofNanoOfDay(it).toString()) }
+    putString("event-kind", fields.eventKind)
+    fields.eventEndDate?.let { putLong("event-end", it) }
+    putString("event-text", fields.eventText)
+    fields.eventSeasonYear?.let { putInt("event-season-year", it) }
+}
+
+private fun Bundle.readEventTime(): EventTime? {
+    val zone = getString("event-zone") ?: return null
+    return EventTimeFields(
+        eventDate = getString("event-date")?.let { LocalDate.parse(it).toEpochDay() },
+        eventClock = getString("event-time")?.let { LocalTime.parse(it).toNanoOfDay() },
+        eventZone = zone,
+        eventKind = getString("event-kind"),
+        eventEndDate = if (containsKey("event-end")) getLong("event-end") else null,
+        eventText = getString("event-text"),
+        eventSeasonYear = if (containsKey("event-season-year")) getInt("event-season-year") else null,
+    ).asEventTime()
 }

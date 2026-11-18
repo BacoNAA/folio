@@ -12,17 +12,25 @@ import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.PrimaryKey
 import androidx.room.Query
+import androidx.room.RewriteQueriesToDropUnusedColumns
 import androidx.room.RoomDatabase
+import androidx.room.Update
+import androidx.room.migration.AutoMigrationSpec
+import androidx.sqlite.SQLiteConnection
+import androidx.sqlite.execSQL
 
 @Entity(tableName = "text_drafts")
 internal data class DraftRow(
     @PrimaryKey val id: String,
     val body: String,
     val cursor: Int,
-    val firstRecordedAt: Long,
+    // v15 的物理列保留原位；标题可以先于第一份实际内容创建草稿。
+    @ColumnInfo(name = "firstRecordedAt") val createdAt: Long,
     val lastEditedAt: Long,
     val activeItemId: String? = null,
     @Embedded val eventTime: EventTimeFields? = null,
+    val title: String? = null,
+    val firstContentAt: Long? = null,
 )
 
 @Entity(tableName = "text_records", indices = [Index(value = ["sourceDraftId"], unique = true)])
@@ -36,6 +44,7 @@ internal data class RecordRow(
     @ColumnInfo(defaultValue = "1") val revision: Long = 1,
     @Embedded val eventTime: EventTimeFields? = null,
     @Embedded val marks: RecordMarks = RecordMarks(),
+    val title: String? = null,
 )
 
 @Entity(
@@ -63,10 +72,12 @@ internal data class EditableDraftRow(
 
 internal data class TextPreviewRow(
     val id: String, val excerpt: String, val firstPhotoId: String?, @Embedded val marks: RecordMarks,
+    val title: String?,
 )
 internal data class DraftPreviewRow(
     val id: String, val excerpt: String, val recordId: String?, val firstPhotoId: String?,
     val totalAudioDurationMillis: Long?,
+    val title: String?,
 )
 
 @Dao
@@ -74,21 +85,22 @@ internal interface TextDao {
     @Insert
     suspend fun insertDraft(row: DraftRow)
 
-    @Query("""UPDATE text_drafts SET body = :body, cursor = :cursor, activeItemId = :activeItemId, lastEditedAt = :editedAt
+    @Query("""UPDATE text_drafts SET body = :body, cursor = :cursor, activeItemId = :activeItemId,
+              lastEditedAt = :editedAt, firstContentAt = COALESCE(firstContentAt, :contentAt)
               WHERE id = :id AND EXISTS (SELECT 1 FROM editable_text_drafts WHERE id = :id)""")
-    suspend fun updateDraft(id: String, body: String, cursor: Int, activeItemId: String?, editedAt: Long): Int
+    suspend fun updateDraft(id: String, body: String, cursor: Int, activeItemId: String?, editedAt: Long, contentAt: Long?): Int
 
-    @Query("SELECT id, body, cursor, firstRecordedAt, lastEditedAt, activeItemId, eventDate, eventClock, eventZone FROM editable_text_drafts WHERE id = :id")
+    @RewriteQueriesToDropUnusedColumns
+    @Query("SELECT * FROM editable_text_drafts WHERE id = :id")
     suspend fun draft(id: String): DraftRow?
 
-    @Query("""UPDATE text_drafts SET eventDate = :date, eventClock = :clock, eventZone = :zone, lastEditedAt = :editedAt
-              WHERE id = :id AND EXISTS (SELECT 1 FROM editable_text_drafts WHERE id = :id)""")
-    suspend fun updateDraftTime(id: String, date: Long?, clock: Long?, zone: String?, editedAt: Long): Int
+    @Update
+    suspend fun updateDraft(row: DraftRow)
 
     @Query("UPDATE text_drafts SET lastEditedAt = :editedAt WHERE id = :id")
     suspend fun touchDraft(id: String, editedAt: Long)
 
-    @Query("""SELECT d.id, substr(d.body, 1, 80) AS excerpt, d.recordId,
+    @Query("""SELECT d.id, d.title, substr(d.body, 1, 80) AS excerpt, d.recordId,
               (SELECT photoId FROM draft_items WHERE draftId = d.id AND photoId IS NOT NULL ORDER BY position LIMIT 1) AS firstPhotoId,
               (SELECT sum(audioDurationMillis) FROM draft_items WHERE draftId = d.id) AS totalAudioDurationMillis
               FROM editable_text_drafts d
@@ -128,15 +140,14 @@ internal interface TextDao {
     @Insert
     suspend fun insertRecord(row: RecordRow)
 
-    @Query("""UPDATE text_records SET body = :body, modifiedAt = :modifiedAt, revision = revision + 1,
-              eventDate = :date, eventClock = :clock, eventZone = :zone WHERE id = :id""")
-    suspend fun updateRecordContent(id: String, body: String, modifiedAt: Long, date: Long?, clock: Long?, zone: String?)
+    @Update
+    suspend fun updateRecord(row: RecordRow)
 
     @Query("DELETE FROM text_drafts WHERE id = :id AND EXISTS (SELECT 1 FROM editable_text_drafts WHERE id = :id)")
     suspend fun deleteDraft(id: String): Int
 
     @Query(
-        """SELECT r.id, substr(r.body, 1, 80) AS excerpt, r.isStarred, r.isPinned,
+        """SELECT r.id, r.title, substr(r.body, 1, 80) AS excerpt, r.isStarred, r.isPinned,
            (SELECT photoId FROM record_items WHERE recordId = r.id AND photoId IS NOT NULL ORDER BY position LIMIT 1) AS firstPhotoId
            FROM text_records r
            WHERE deletedAt IS NULL AND """ + RECORD_TEXT_MATCH + " ORDER BY isPinned DESC, firstRecordedAt DESC, r.rowid DESC",
@@ -154,9 +165,10 @@ internal interface TextDao {
         AudioCleanupEntry::class, TagRow::class, DraftTagRow::class, RecordTagRow::class,
         PlaceRow::class, DraftPlaceRow::class, RecordPlaceRow::class,
         ObjectRow::class, ObjectAliasRow::class, DraftObjectRow::class, PublishedObjectRow::class,
+        SeasonSettingRow::class,
     ],
     views = [EditableDraftRow::class],
-    version = 14,
+    version = 16,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -171,6 +183,8 @@ internal interface TextDao {
         AutoMigration(from = 11, to = 12),
         AutoMigration(from = 12, to = 13),
         AutoMigration(from = 13, to = 14),
+        AutoMigration(from = 14, to = 15),
+        AutoMigration(from = 15, to = 16, spec = DraftTitleMigration::class),
     ],
 )
 internal abstract class FolioDatabase : RoomDatabase() {
@@ -184,4 +198,12 @@ internal abstract class FolioDatabase : RoomDatabase() {
     abstract fun tagDao(): TagDao
     abstract fun placeDao(): PlaceDao
     abstract fun objectDao(): ObjectDao
+    abstract fun seasonSettingsDao(): SeasonSettingsDao
+}
+
+internal class DraftTitleMigration : AutoMigrationSpec {
+    override fun onPostMigrate(connection: SQLiteConnection) {
+        // 旧版创建草稿时已有实际内容，即使后来移除了全部内容也保留首次记录时间。
+        connection.execSQL("UPDATE text_drafts SET firstContentAt = firstRecordedAt")
+    }
 }

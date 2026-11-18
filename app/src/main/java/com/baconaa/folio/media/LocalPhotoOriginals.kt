@@ -2,12 +2,20 @@ package com.baconaa.folio.media
 
 import android.content.Context
 import android.graphics.ImageDecoder
+import android.media.ExifInterface
 import android.net.Uri
+import android.os.Build
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption.ATOMIC_MOVE
+import java.time.DateTimeException
+import java.time.LocalDateTime
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.time.format.ResolverStyle
+import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -15,6 +23,12 @@ import kotlinx.coroutines.withContext
 
 @JvmInline
 value class PhotoId(val value: UUID)
+
+/** 照片中记载的拍摄当地时间；只有原始元数据提供偏移量时才可确定对应瞬间。 */
+data class PhotoCaptureTime(val localDateTime: LocalDateTime, val offset: ZoneOffset?)
+
+private val captureTimeFormat = DateTimeFormatter.ofPattern("uuuu:MM:dd HH:mm:ss", Locale.ROOT)
+    .withResolverStyle(ResolverStyle.STRICT)
 
 class LocalPhotoOriginals private constructor(private val context: Context) {
     private val originals get() = File(context.filesDir, "photo-originals")
@@ -60,6 +74,29 @@ class LocalPhotoOriginals private constructor(private val context: Context) {
 
     /** 在 I/O 线程读取，调用方负责关闭返回的流。 */
     fun openOriginal(id: PhotoId): InputStream = original(id).inputStream()
+
+    /** 从已导入的原件读取时间供用户确认。无有效拍摄时间返回 null，原件本身无法打开时抛出 I/O 错误。 */
+    suspend fun readCaptureTime(id: PhotoId): PhotoCaptureTime? = withContext(Dispatchers.IO) {
+        openOriginal(id).use { input ->
+            val exif = try { ExifInterface(input) } catch (_: IOException) { return@withContext null }
+            val raw = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL) ?: return@withContext null
+            val local = try {
+                LocalDateTime.parse(raw.trim(), captureTimeFormat)
+            } catch (_: DateTimeException) {
+                return@withContext null
+            }
+            val fraction = exif.getAttribute(ExifInterface.TAG_SUBSEC_TIME_ORIGINAL)?.trim().orEmpty()
+            val nanos = if (fraction.isNotEmpty() && fraction.all { it in '0'..'9' }) {
+                fraction.take(9).padEnd(9, '0').toInt()
+            } else 0
+            val offset = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                exif.getAttribute(ExifInterface.TAG_OFFSET_TIME_ORIGINAL)?.let { value ->
+                    try { ZoneOffset.of(value.trim()) } catch (_: DateTimeException) { null }
+                }
+            } else null
+            PhotoCaptureTime(local.withNano(nanos), offset)
+        }
+    }
 
     /** 仅由引用清理在确认无引用后调用；已不存在视为清理成功。 */
     internal fun deleteOriginal(id: PhotoId) {

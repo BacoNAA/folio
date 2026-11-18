@@ -23,7 +23,7 @@ sealed interface ContentItem {
 }
 
 /** cursor 是当前文字项内的 UTF-16 偏移。其他项或空草稿使用 0。 */
-data class MixedDraft(val items: List<ContentItem>, val activeItemId: ItemId?, val cursor: Int)
+data class MixedDraft(val items: List<ContentItem>, val activeItemId: ItemId?, val cursor: Int, val title: String? = null)
 
 interface MixedContentDrafts {
     suspend fun openMixedDraft(id: DraftId): MixedDraft?
@@ -91,7 +91,7 @@ internal fun MixedDraft.withText(id: ItemId, edit: TextEdit): MixedDraft {
     val index = items.indexOfItem(id)
     require(items[index] is ContentItem.Text) { "该项不是文字" }
     val changed = items.toMutableList().apply { set(index, ContentItem.Text(id, edit.text)) }
-    return MixedDraft(changed, id, edit.cursor)
+    return copy(items = changed, activeItemId = id, cursor = edit.cursor)
 }
 
 // v3 的接口使用拼接后的正文和全局光标。混排接口使用稳定的项 ID 和项内光标。
@@ -112,13 +112,17 @@ internal suspend fun FolioDatabase.loadMixedDraft(id: DraftId): MixedDraft? {
     val cursor = if (active is ContentItem.Text) {
         (row.cursor - items.textStart(active.id)).coerceIn(0, active.text.length)
     } else 0
-    return MixedDraft(items, focus, cursor)
+    return MixedDraft(items, focus, cursor, row.title)
 }
 
 /** 调用方在同一 Room 事务中保存有序项、搜索正文和编辑位置。 */
 internal suspend fun FolioDatabase.writeMixedDraft(id: DraftId, draft: MixedDraft, timestamp: Long) {
     val body = draft.items.body()
     val cursor = draft.activeItemId?.let { (draft.items.textStart(it) + draft.cursor).coerceAtMost(body.length) } ?: 0
-    check(textDao().updateDraft(id.value, body, cursor, draft.activeItemId?.value, timestamp) == 1) { "草稿已不存在" }
+    val contentAt = timestamp.takeIf { draft.items.hasActualContent(body) }
+    check(textDao().updateDraft(id.value, body, cursor, draft.activeItemId?.value, timestamp, contentAt) == 1) { "草稿已不存在" }
     itemDao().replaceDraftItems(id.value, draft.items.map { it.asSlot() })
 }
+
+internal fun List<ContentItem>.hasActualContent(body: String): Boolean =
+    body.isNotBlank() || any { it is ContentItem.Photo || it is ContentItem.Audio }

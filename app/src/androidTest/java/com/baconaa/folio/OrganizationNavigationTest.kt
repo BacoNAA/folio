@@ -16,6 +16,23 @@ class OrganizationNavigationTest {
     private val store get() = LocalTextStore.get(compose.activity.applicationContext)
 
     @Test
+    fun namedWinterAppearsInItsYearAndShowsItsActualRangeInDetails() {
+        val winter = EventTime.Season(2095, NamedSeason.WINTER)
+        val text = TextEdit("跨年冬季的回忆", 0)
+        val id = runBlocking { store.completeDraft(requireNotNull(store.saveDraft(null, text, winter)), text) }
+        try {
+            compose.onNodeWithTag("nav-Records").performClick()
+            waitText("2095 年")
+            compose.onNodeWithText("大概时间").assertIsDisplayed()
+            compose.onNodeWithTag("records-list").performScrollToNode(hasText(text.text))
+            compose.onNodeWithText(text.text).performClick()
+            waitText("事件时间：${winter.label}（2095-12-01 至 2096-02-29）")
+        } finally {
+            runBlocking { store.moveToTrash(id); store.deletePermanently(id) }
+        }
+    }
+
+    @Test
     fun continuousKeyboardInputSurvivesFirstDraftCreation() {
         val text = "org-restart-1117-abcdefghijklmnopqrstuvwxyz"
         compose.onNodeWithTag("write").performClick()
@@ -71,7 +88,7 @@ class OrganizationNavigationTest {
         compose.onNodeWithText("事件时间：2021-11-08 · Asia/Tokyo").assertIsDisplayed()
         val record = runBlocking { store.queryRecords(text).single() }
         val content = runBlocking { store.openRecordContent(record.id) }!!
-        assertNull(content.times.eventTime!!.time)
+        assertNull((content.times.eventTime as EventTime.Exact).time)
         assertEquals(tagName, content.tags.single().name)
         compose.onNodeWithText("返回").performClick()
         compose.onNodeWithTag("nav-Records").performClick()
