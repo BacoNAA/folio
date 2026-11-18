@@ -19,9 +19,13 @@ internal data class DraftPlaceRow(@PrimaryKey val draftId: String, val placeId: 
 internal data class RecordPlaceRow(@PrimaryKey val recordId: String, val placeId: String)
 internal data class PlaceCountRow(@Embedded val place: PlaceRow, val recordCount: Int)
 internal data class RecordPlacePreviewRow(val recordId: String, @Embedded val place: PlaceRow)
+internal data class PlaceTimeRow(val placeId: String, @Embedded val eventTime: EventTimeFields?)
 
 @Dao
 internal abstract class PlaceDao {
+    @Query("""SELECT rp.placeId, r.eventDate, r.eventClock, r.eventZone FROM record_places rp
+        JOIN text_records r ON r.id = rp.recordId WHERE r.deletedAt IS NULL""")
+    abstract suspend fun activePlaceTimes(): List<PlaceTimeRow>
     @Insert abstract suspend fun insert(place: PlaceRow)
     @Update abstract suspend fun update(place: PlaceRow)
     @Query("SELECT * FROM places WHERE id = :id") abstract suspend fun place(id: String): PlaceRow?

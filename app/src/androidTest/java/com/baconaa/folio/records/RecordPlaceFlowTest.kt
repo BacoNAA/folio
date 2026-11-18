@@ -80,4 +80,38 @@ internal class RecordPlaceFlowTest : PhotoStoreFixture() {
         assertTrue(store.listPlaces().all { it.recordCount == 0 })
     }
     private suspend fun text(value: String) = store.saveDraft(null, TextEdit(value, 0))!!
+
+    @Test fun coordinatesPersistAndSummaryUsesOnlyActiveCompletedEventTimes() = runBlocking {
+        val first = text("旧事补记")
+        val point = PlaceCoordinates(30.67, 104.06)
+        val place = store.createDraftPlace(first, PlaceInfo("河边", coordinates = point))
+        val latest = EventTime(java.time.LocalDate.of(2024, 5, 1))
+        store.saveDraftEventTime(first, latest)
+        reopenDatabase()
+        assertEquals(point, store.openDraftPlace(first)!!.info.coordinates)
+        val record = store.completeMixedDraft(first)
+        val edit = store.editRecord(record)
+        store.saveDraftEventTime(edit, EventTime(java.time.LocalDate.of(2030, 1, 1)))
+        val second = text("后来才补记更早的事")
+        store.selectDraftPlace(second, place)
+        store.saveDraftEventTime(second, EventTime(java.time.LocalDate.of(2020, 1, 1)))
+        store.completeMixedDraft(second)
+        assertEquals(RecentExperience.Known(latest), store.listPlaces().single().recentExperience)
+        val unknown = text("不确定时间")
+        store.selectDraftPlace(unknown, place)
+        val unknownId = store.completeMixedDraft(unknown)
+        assertEquals(RecentExperience.Uncertain(1), store.listPlaces().single().recentExperience)
+        store.moveToTrash(unknownId)
+        assertEquals(2, store.listPlaces().single().recordCount)
+        assertEquals(RecentExperience.Known(latest), store.listPlaces().single().recentExperience)
+        store.restoreRecord(unknownId)
+        assertEquals(RecentExperience.Uncertain(1), store.listPlaces().single().recentExperience)
+        val originalTimes = store.openRecordContent(record)!!.times
+        store.updatePlace(place, PlaceInfo("新河边", coordinates = null))
+        store.completeMixedDraft(edit)
+        reopenDatabase()
+        assertNull(store.openRecordContent(record)!!.place!!.info.coordinates)
+        assertEquals(originalTimes.firstRecordedAt, store.openRecordContent(record)!!.times.firstRecordedAt)
+        assertEquals("新河边", store.openRecordContent(record)!!.place!!.info.name)
+    }
 }

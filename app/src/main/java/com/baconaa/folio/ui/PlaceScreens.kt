@@ -19,6 +19,7 @@ import com.baconaa.folio.records.*
 internal fun PlaceDescription(place: Place) {
     Text(place.info.name, style = MaterialTheme.typography.titleMedium)
     listOf(place.info.city, place.info.address, place.info.note).filter { it.isNotEmpty() }.forEach { Text(it, fontSize = 12.sp) }
+    place.info.coordinates?.let { Text(it.label(), fontSize = 12.sp) }
 }
 
 @Composable
@@ -33,6 +34,11 @@ internal fun PlacesScreen(model: FolioViewModel, scroll: androidx.compose.founda
                 Column(Modifier.fillMaxWidth().testTag("place-open-${summary.place.id.value}").clickable { model.openPlace(summary.place) }.padding(vertical = 16.dp)) {
                     PlaceDescription(summary.place)
                     Text("${summary.recordCount} 条记录", fontSize = 12.sp)
+                    Text(when (val recent = summary.recentExperience) {
+                        RecentExperience.Empty -> "暂无经历"
+                        is RecentExperience.Known -> "最近经历：${recent.eventTime.label()}"
+                        is RecentExperience.Uncertain -> if (recent.undatedCount > 0) "最近经历待确定 · 含 ${recent.undatedCount} 条时间未定" else "最近经历待确定 · 时间无法确定先后"
+                    }, fontSize = 12.sp)
                     HorizontalDivider()
                 }
             }
@@ -108,6 +114,7 @@ internal fun PlaceBookHeader(model: FolioViewModel) {
         }
         val details = listOf(place.info.city, place.info.address, place.info.note).filter { it.isNotEmpty() }.joinToString(" · ")
         if (details.isNotEmpty()) Text(details, fontSize = 12.sp, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        place.info.coordinates?.let { Text(it.label(), fontSize = 12.sp) }
         TextButton(onClick = model::clearPlaceFilter) { Text("移除地点条件 · 搜索全部记录") }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             FilterChip(!state.placeRecent, { model.selectPlaceRecent(false) }, label = { Text("事件时间") })
@@ -123,10 +130,13 @@ private fun PlaceInfoDialog(model: FolioViewModel, initial: Place?, shared: Bool
     var city by rememberSaveable { mutableStateOf(initial?.info?.city.orEmpty()) }
     var address by rememberSaveable { mutableStateOf(initial?.info?.address.orEmpty()) }
     var note by rememberSaveable { mutableStateOf(initial?.info?.note.orEmpty()) }
+    var latitude by rememberSaveable { mutableStateOf(initial?.info?.coordinates?.latitude) }
+    var longitude by rememberSaveable { mutableStateOf(initial?.info?.coordinates?.longitude) }
     var submitted by rememberSaveable { mutableStateOf(false) }
     val state = model.state
     val current = if (shared) state.filterPlace else state.editor?.place
-    val info = PlaceInfo(name.trim(), city.trim(), address.trim(), note.trim())
+    val coordinates = latitude?.let { lat -> longitude?.let { PlaceCoordinates(lat, it) } }
+    val info = PlaceInfo(name.trim(), city.trim(), address.trim(), note.trim(), coordinates)
     LaunchedEffect(state.busy, current, submitted) {
         if (submitted && !state.busy && state.error == null && current?.info == info) onDismiss()
     }
@@ -137,6 +147,7 @@ private fun PlaceInfoDialog(model: FolioViewModel, initial: Place?, shared: Bool
             OutlinedTextField(city, { city = it }, label = { Text("城市（选填）") }, enabled = !state.busy, modifier = Modifier.testTag("place-city"))
             OutlinedTextField(address, { address = it }, label = { Text("地址（选填）") }, enabled = !state.busy, modifier = Modifier.testTag("place-address"))
             OutlinedTextField(note, { note = it }, label = { Text("区别备注（选填）") }, enabled = !state.busy, modifier = Modifier.testTag("place-note"))
+            PlaceCoordinatesField(coordinates, !state.busy) { latitude = it?.latitude; longitude = it?.longitude }
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             if (state.editor?.needsReload == true) ErrorMessage("地点已保存，请重试读取。", model::reload)
         }
