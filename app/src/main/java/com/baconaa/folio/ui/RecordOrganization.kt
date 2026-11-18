@@ -1,5 +1,6 @@
 package com.baconaa.folio.ui
 
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -154,8 +155,16 @@ internal fun TagDialog(model: FolioViewModel, editing: Boolean, close: () -> Uni
     }
 }
 
+private val MediaFilter.label get() = when (this) {
+    MediaFilter.PHOTO -> "有照片"
+    MediaFilter.AUDIO -> "有录音"
+    MediaFilter.CHECKLIST -> "有清单"
+    MediaFilter.TEXT_ONLY -> "纯文字"
+}
+
 @Composable
 internal fun SearchFilters(model: FolioViewModel) {
+    var showMedia by rememberSaveable { mutableStateOf(false) }
     val state = model.state
     var showTags by rememberSaveable { mutableStateOf(false) }
     var objectKind by rememberSaveable { mutableStateOf<ObjectKind?>(null) }
@@ -163,13 +172,19 @@ internal fun SearchFilters(model: FolioViewModel) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
             FilterChip(state.starredOnly, { model.filterStarred(!state.starredOnly) }, label = { Text("只看星标") })
             TextButton(onClick = { showTags = true; model.loadTags() }) { Text("筛选标签${if (state.filterTags.isEmpty()) "" else " · ${state.filterTags.size}"}") }
-            if (state.starredOnly || state.filterTags.isNotEmpty() || state.filterPlace != null || state.filterPeople.isNotEmpty() || state.filterThings.isNotEmpty())
+            if (state.starredOnly || state.filterTags.isNotEmpty() || state.filterPlace != null || state.filterPeople.isNotEmpty() || state.filterThings.isNotEmpty() || state.mediaTypes.isNotEmpty())
                 TextButton(onClick = model::clearFilters) { Text("清除筛选") }
             ObjectKind.entries.forEach { kind ->
                 TextButton(onClick = { model.loadObjects(); objectKind = kind }) { Text("筛选${kind.label}") }
             }
+            TextButton(onClick = { showMedia = true }) { Text("内容类型") }
         }
-        if (state.filterTags.isNotEmpty() || state.filterPeople.isNotEmpty() || state.filterThings.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+        if (state.filterTags.isNotEmpty() || state.filterPeople.isNotEmpty() || state.filterThings.isNotEmpty() || state.mediaTypes.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            state.mediaTypes.sortedBy { it.ordinal }.forEachIndexed { index, type ->
+                if (index > 0) Text("或", Modifier.align(Alignment.CenterVertically))
+                InputChip(selected = true, onClick = { model.filterMedia(state.mediaTypes - type) },
+                    label = { Text("${type.label} ×") })
+            }
             state.filterTags.forEach { id ->
                 InputChip(selected = true, onClick = { model.filterByTags(state.filterTags - id) },
                     label = { Text("${state.sharedTags.firstOrNull { it.id == id }?.name ?: "已选标签"} ×") })
@@ -185,6 +200,16 @@ internal fun SearchFilters(model: FolioViewModel) {
             }
         }
     }
+    if (showMedia) AlertDialog(onDismissRequest = { showMedia = false }, title = { Text("内容类型 · 满足任一种") },
+        text = { Column { MediaFilter.entries.forEach { type ->
+            val selected = type in state.mediaTypes
+            Row(Modifier.fillMaxWidth().toggleable(value = selected, role = androidx.compose.ui.semantics.Role.Checkbox) {
+                model.filterMedia(if (it) state.mediaTypes + type else state.mediaTypes - type)
+            }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(selected, onCheckedChange = null)
+                Text(type.label, Modifier.padding(start = 12.dp))
+            }
+        } } }, confirmButton = { TextButton(onClick = { showMedia = false }) { Text("完成选择") } })
     if (showTags) TagDialog(model, editing = false) { showTags = false }
     objectKind?.let { ObjectPicker(model, it, editing = false) { objectKind = null } }
 }

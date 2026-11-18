@@ -41,6 +41,8 @@ data class RecordCard(
 data class EventYear(val year: Int, val records: List<RecordCard>)
 data class EventTimeline(val years: List<EventYear>, val undated: List<RecordCard>)
 
+enum class MediaFilter { PHOTO, AUDIO, CHECKLIST, TEXT_ONLY }
+
 /** 返回有效正式记录的全量列表。读取失败抛出异常；无记录时返回空集合。 */
 interface RecordBrowsing {
     /** 置顶优先，其余按首次记录时间降序，时间相同按入库顺序降序。 */
@@ -53,6 +55,7 @@ interface RecordBrowsing {
     suspend fun queryRecords(
         keyword: String = "", tagIds: Set<TagId> = emptySet(), starredOnly: Boolean = false, placeId: PlaceId? = null,
         peopleIds: Set<ObjectId> = emptySet(), thingIds: Set<ObjectId> = emptySet(),
+        mediaTypes: Set<MediaFilter> = emptySet(),
     ): List<RecordCard>
 
     /**
@@ -75,9 +78,11 @@ internal class LocalRecordBrowsing(private val database: FolioDatabase) : Record
     override suspend fun listStarredRecords(): List<RecordCard> = queryRecords(starredOnly = true)
 
     override suspend fun queryRecords(keyword: String, tagIds: Set<TagId>, starredOnly: Boolean, placeId: PlaceId?,
-        peopleIds: Set<ObjectId>, thingIds: Set<ObjectId>): List<RecordCard> = database.withTransaction {
+        peopleIds: Set<ObjectId>, thingIds: Set<ObjectId>, mediaTypes: Set<MediaFilter>): List<RecordCard> = database.withTransaction {
         val records = dao.activeRecords(keyword, tagIds.map { it.value }, tagIds.isEmpty(), starredOnly, placeId?.value,
-            peopleIds.map { it.value }, peopleIds.isEmpty(), thingIds.map { it.value }, thingIds.isEmpty())
+            peopleIds.map { it.value }, peopleIds.isEmpty(), thingIds.map { it.value }, thingIds.isEmpty(),
+            mediaTypes.isEmpty(), MediaFilter.PHOTO in mediaTypes, MediaFilter.AUDIO in mediaTypes,
+            MediaFilter.CHECKLIST in mediaTypes, MediaFilter.TEXT_ONLY in mediaTypes)
         val items = dao.previewItems(PREVIEW_BLANK_CHARACTERS).groupBy { it.recordId }
         val counts = dao.previewCounts(PREVIEW_BLANK_CHARACTERS).associateBy { it.recordId }
         val tags = database.tagDao().activeRecordTags().groupBy { it.recordId }

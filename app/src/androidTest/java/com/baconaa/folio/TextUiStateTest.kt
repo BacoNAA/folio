@@ -113,7 +113,7 @@ class TextUiStateTest {
     fun queryFailureIsAnErrorAndRetryCanReturnEmptyResults() {
         var fail = true
         val failing = object : RecordBrowsing by store {
-            override suspend fun queryRecords(keyword: String, tagIds: Set<TagId>, starredOnly: Boolean, placeId: PlaceId?, peopleIds: Set<ObjectId>, thingIds: Set<ObjectId>): List<RecordCard> {
+            override suspend fun queryRecords(keyword: String, tagIds: Set<TagId>, starredOnly: Boolean, placeId: PlaceId?, peopleIds: Set<ObjectId>, thingIds: Set<ObjectId>, mediaTypes: Set<MediaFilter>): List<RecordCard> {
                 if (fail) throw IOException("test failure")
                 return emptyList()
             }
