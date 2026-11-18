@@ -17,13 +17,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.baconaa.folio.records.*
-import java.time.LocalDate
-import java.time.LocalTime
-import java.time.ZoneId
 
 internal fun EventTime?.label(): String = when (this) {
     null -> "暂不填写"
-    is EventTime.Season, is EventTime.Description -> dateRange?.let { "$label（${it.start} 至 ${it.endInclusive}）" } ?: label
+    is EventTime.Description -> dateRange?.let { val (from, to) = precision.inputs(it); "$label（$from 至 $to）" } ?: label
+    is EventTime.Season -> "$label（${dateRange.start} 至 ${dateRange.endInclusive}）"
     else -> label
 }
 
@@ -60,40 +58,12 @@ internal fun EditorClues(model: FolioViewModel) {
             }
         }
     }
-    if (timeDialog) EventTimeDialog(editor.eventTime, onDismiss = { timeDialog = false }) {
+    if (timeDialog) EventTimeDialog(model, editor.eventTime, onDismiss = { timeDialog = false }) {
         model.changeEventTime(it); timeDialog = false
     }
     if (tagDialog) TagDialog(model, editing = true) { tagDialog = false }
     if (placeDialog) PlacePicker(model) { placeDialog = false }
     objectKind?.let { ObjectPicker(model, it, editing = true) { objectKind = null } }
-}
-
-@Composable
-private fun EventTimeDialog(value: EventTime?, onDismiss: () -> Unit, save: (EventTime?) -> Unit) {
-    val exact = value as? EventTime.Exact
-    var date by rememberSaveable { mutableStateOf(exact?.date?.toString().orEmpty()) }
-    var time by rememberSaveable { mutableStateOf(exact?.time?.toString().orEmpty()) }
-    var zone by rememberSaveable { mutableStateOf(value?.zone?.id ?: ZoneId.systemDefault().id) }
-    var error by rememberSaveable { mutableStateOf<String?>(null) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("事件时间") }, text = {
-        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (value != null && exact == null) Text("当前为${value.label()}。填写具体日期可替换原时间。")
-            Text("填写事情发生的日期，时刻可留空。补记旧事也可以暂不填写。")
-            OutlinedTextField(date, { date = it; error = null }, label = { Text("日期 · YYYY-MM-DD") },
-                singleLine = true, modifier = Modifier.testTag("event-date"))
-            OutlinedTextField(time, { time = it; error = null }, label = { Text("时刻 · HH:mm（选填）") },
-                singleLine = true, modifier = Modifier.testTag("event-time"))
-            OutlinedTextField(zone, { zone = it; error = null }, label = { Text("事件所在地时区") },
-                supportingText = { Text("如 Asia/Shanghai、Asia/Tokyo；回看保持当地时间。") }, singleLine = true,
-                modifier = Modifier.testTag("event-zone"))
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            TextButton(onClick = { save(null) }) { Text("暂不填写") }
-        }
-    }, confirmButton = { TextButton(onClick = {
-        val result = runCatching { EventTime(LocalDate.parse(date.trim()),
-            time.trim().takeIf { it.isNotEmpty() }?.let(LocalTime::parse), ZoneId.of(zone.trim())) }
-        result.onSuccess(save).onFailure { error = "请检查日期、时刻和时区是否有效。" }
-    }) { Text("应用时间") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
 }
 
 @Composable
@@ -168,6 +138,7 @@ private val MediaFilter.label get() = when (this) {
 
 @Composable
 internal fun SearchFilters(model: FolioViewModel) {
+    var showTime by rememberSaveable { mutableStateOf(false) }
     var showMedia by rememberSaveable { mutableStateOf(false) }
     val state = model.state
     var showTags by rememberSaveable { mutableStateOf(false) }
@@ -176,14 +147,22 @@ internal fun SearchFilters(model: FolioViewModel) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
             FilterChip(state.starredOnly, { model.filterStarred(!state.starredOnly) }, label = { Text("只看星标") })
             TextButton(onClick = { showTags = true; model.loadTags() }) { Text("筛选标签${if (state.filterTags.isEmpty()) "" else " · ${state.filterTags.size}"}") }
-            if (state.starredOnly || state.filterTags.isNotEmpty() || state.filterPlace != null || state.filterPeople.isNotEmpty() || state.filterThings.isNotEmpty() || state.mediaTypes.isNotEmpty())
+            if (state.starredOnly || state.filterTags.isNotEmpty() || state.filterPlace != null || state.filterPeople.isNotEmpty() || state.filterThings.isNotEmpty() || state.mediaTypes.isNotEmpty() || state.eventDateFilter != null)
                 TextButton(onClick = model::clearFilters) { Text("清除筛选") }
             ObjectKind.entries.forEach { kind ->
                 TextButton(onClick = { model.loadObjects(); objectKind = kind }) { Text("筛选${kind.label}") }
             }
+            TextButton(onClick = { showTime = true }) { Text("事件时间") }
             TextButton(onClick = { showMedia = true }) { Text("内容类型") }
         }
-        if (state.filterTags.isNotEmpty() || state.filterPeople.isNotEmpty() || state.filterThings.isNotEmpty() || state.mediaTypes.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+        if (state.filterTags.isNotEmpty() || state.filterPeople.isNotEmpty() || state.filterThings.isNotEmpty() || state.mediaTypes.isNotEmpty() || state.eventDateFilter != null) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            state.eventDateFilter?.let { filter ->
+                val label = when (filter) {
+                    EventDateFilter.Undated -> "时间未定"
+                    is EventDateFilter.Range -> listOf(filter.fromInput, filter.toInput).filter { it.isNotEmpty() }.joinToString(" 至 ")
+                }
+                InputChip(selected = true, onClick = { model.filterEventDate(null) }, label = { Text("$label ×") })
+            }
             state.mediaTypes.sortedBy { it.ordinal }.forEachIndexed { index, type ->
                 if (index > 0) Text("或", Modifier.align(Alignment.CenterVertically))
                 InputChip(selected = true, onClick = { model.filterMedia(state.mediaTypes - type) },
@@ -204,6 +183,8 @@ internal fun SearchFilters(model: FolioViewModel) {
             }
         }
     }
+    if (showTime) EventDateFilterDialog(model, state.eventDateFilter, onApply = { model.filterEventDate(it); showTime = false },
+        onDismiss = { showTime = false })
     if (showMedia) AlertDialog(onDismissRequest = { showMedia = false }, title = { Text("内容类型 · 满足任一种") },
         text = { Column { MediaFilter.entries.forEach { type ->
             val selected = type in state.mediaTypes
@@ -254,4 +235,39 @@ internal fun RecordContents(content: RecordContent, model: FolioViewModel) {
     HorizontalDivider()
     Text("记录于 ${formatDate(content.times.firstRecordedAt)}", fontSize = 12.sp)
     if (content.times.modifiedAt != content.times.firstRecordedAt) Text("修改于 ${formatDate(content.times.modifiedAt)}", fontSize = 12.sp)
+}
+
+@Composable
+private fun EventDateFilterDialog(model: FolioViewModel, current: EventDateFilter?, onApply: (EventDateFilter) -> Unit, onDismiss: () -> Unit) {
+    val range = current as? EventDateFilter.Range
+    var from by rememberSaveable { mutableStateOf(range?.fromInput.orEmpty()) }
+    var to by rememberSaveable { mutableStateOf(range?.toInput.orEmpty()) }
+    var showError by rememberSaveable { mutableStateOf(false) }
+    var chooseSeason by rememberSaveable { mutableStateOf(false) }
+    if (chooseSeason) {
+        EventTimeDialog(model, null, onDismiss = { chooseSeason = false }, seasonOnly = true) { selected ->
+            val dates = requireNotNull(selected?.dateRange)
+            from = dates.start.toString()
+            to = dates.endInclusive.toString()
+            chooseSeason = false
+            showError = false
+        }
+        return
+    }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("筛选事件时间") },
+        text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("可填年份、月份或日期，例如 2025、2025-02 或 2025-02-28。只填开始时间即可查这一年、这一月或这一天。")
+            OutlinedTextField(from, { from = it; showError = false }, singleLine = true,
+                label = { Text("开始时间") }, modifier = Modifier.testTag("time-filter-from"))
+            OutlinedTextField(to, { to = it; showError = false }, singleLine = true,
+                label = { Text("结束时间（选填）") }, modifier = Modifier.testTag("time-filter-to"))
+            if (showError) Text("请填写有效时间，并确认结束时间等于或晚于开始时间。", color = MaterialTheme.colorScheme.error)
+            TextButton(onClick = { chooseSeason = true }) { Text("按季节选择范围") }
+            TextButton(onClick = { onApply(EventDateFilter.Undated) }) { Text("只看时间未定") }
+        } },
+        confirmButton = { TextButton(onClick = {
+            val parsed = EventDateFilter.Range.parse(from, to)
+            if (parsed == null) showError = true else onApply(parsed)
+        }) { Text("应用时间条件") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
 }

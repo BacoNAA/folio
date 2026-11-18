@@ -580,6 +580,36 @@ class TextDatabaseMigrationTest {
     }
 
     @Test
+    fun versionSixteenKeepsDayPrecisionAndNewBoundsKeepTheirOwnPrecision() = runBlocking {
+        val start = LocalDate.parse("2018-01-01")
+        val end = LocalDate.parse("2022-06-30")
+        val zone = ZoneId.of("Asia/Tokyo")
+        createDatabase(16) { sql ->
+            sql.execSQL("""INSERT INTO text_records
+                (id,sourceDraftId,body,firstRecordedAt,modifiedAt,eventKind,eventDate,eventEndDate,eventZone)
+                VALUES ('record','source','校园',100,200,'range',${start.toEpochDay()},${end.toEpochDay()},'Asia/Tokyo')""")
+            sql.execSQL("INSERT INTO record_items (recordId,position,itemId,text) VALUES ('record',0,'item','校园')")
+        }
+        val id = RecordId("record")
+        val precision = RangePrecision(DatePrecision.YEAR, DatePrecision.MONTH)
+        val college = EventTime.Description("大学时", start..end, zone, precision)
+        val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        val edit = try {
+            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context))
+            assertEquals(EventTime.Range(start, end, zone), store.openRecordContent(id)!!.times.eventTime)
+            store.editRecord(id).also { store.saveDraftEventTime(it, college) }
+        } finally { database.close() }
+        val reopened = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(reopened, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context))
+            assertEquals(college, store.openDraftTimes(edit)!!.eventTime)
+            store.completeMixedDraft(edit)
+            assertEquals(college, store.queryRecords("大学时").single().eventTime)
+            assertEquals("2018" to "2022-06", college.precision.inputs(requireNotNull(college.dateRange)))
+        } finally { reopened.close() }
+    }
+
+    @Test
     fun versionFifteenKeepsUntitledRecordAndPendingEditWhenTitlesAreAdded() = runBlocking {
         createDatabase(15) { sql ->
             sql.execSQL("""INSERT INTO text_records

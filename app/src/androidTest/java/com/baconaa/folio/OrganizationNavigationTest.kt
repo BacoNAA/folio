@@ -16,6 +16,45 @@ class OrganizationNavigationTest {
     private val store get() = LocalTextStore.get(compose.activity.applicationContext)
 
     @Test
+    fun enterWinterThenFindItAsAPossibleMatch() {
+        val text = "跨年查找" + System.nanoTime()
+        compose.onNodeWithTag("write").performClick()
+        compose.onNodeWithTag("editor").performTextInput(text)
+        waitText("草稿已保存")
+        editorClick("editor-clues")
+        editorClick("edit-time")
+        compose.onNodeWithText("填写方式 · 具体日期").performClick()
+        compose.onNodeWithText("季节").performClick()
+        compose.onNodeWithTag("event-year").performTextReplacement("2095")
+        compose.onNodeWithText("选择季节 · 春天").performScrollTo().performClick()
+        compose.onNodeWithText("冬天").performClick()
+        waitText("实际范围 2095-12-01 至 2096-02-29")
+        compose.onNodeWithText("应用时间").performClick()
+        waitText("草稿已保存")
+        val draft = runBlocking { store.listDrafts().single { it.excerpt == text } }
+        assertEquals(EventTime.Season(2095, NamedSeason.WINTER), runBlocking { store.openDraftTimes(draft.id) }?.eventTime)
+        compose.activityRule.scenario.recreate()
+        compose.onNodeWithText("完成").performClick()
+        waitText("已保存 · 查看")
+        val id = runBlocking { store.queryRecords(text).single().id }
+        try {
+            compose.onNodeWithTag("nav-Records").performClick()
+            compose.onNodeWithText("搜索全部记录").performClick()
+            compose.onNodeWithTag("search").performTextInput(text)
+            waitText("1 条记录")
+            compose.onNodeWithText("事件时间").performScrollTo().performClick()
+            compose.onNodeWithTag("time-filter-from").performTextInput("2095")
+            compose.onNodeWithText("应用时间条件").performClick()
+            compose.onNodeWithTag("search-results").performScrollToNode(hasText("可能符合 1 条"))
+            compose.onNodeWithTag("search-results").performScrollToNode(hasText(text))
+            compose.onNode(hasText(text) and hasAnyAncestor(hasTestTag("search-results"))).performClick()
+            waitText("事件时间：2095 年冬天（2095-12-01 至 2096-02-29）")
+        } finally {
+            runBlocking { store.moveToTrash(id); store.deletePermanently(id) }
+        }
+    }
+
+    @Test
     fun namedWinterAppearsInItsYearAndShowsItsActualRangeInDetails() {
         val winter = EventTime.Season(2095, NamedSeason.WINTER)
         val text = TextEdit("跨年冬季的回忆", 0)
