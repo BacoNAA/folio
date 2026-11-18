@@ -41,6 +41,7 @@ internal data class RecordTagPreviewRow(val recordId: String, @Embedded val tag:
 
 // 两种搜索入口共用当前正式内容规则；参数使用 instr，用户输入的 %/_ 不会被当作通配符。
 internal const val RECORD_TEXT_MATCH = """(instr(lower(r.body), lower(:keyword)) > 0
+    OR (r.eventKind = 'description' AND instr(lower(r.eventText), lower(:keyword)) > 0)
     OR EXISTS(SELECT 1 FROM record_items i WHERE i.recordId = r.id AND instr(lower(i.caption), lower(:keyword)) > 0)
     OR EXISTS(SELECT 1 FROM record_tags rt JOIN tags t ON t.id = rt.tagId
               WHERE rt.recordId = r.id AND t.ownerDraftId IS NULL AND instr(lower(t.name), lower(:keyword)) > 0)

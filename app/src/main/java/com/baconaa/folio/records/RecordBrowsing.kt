@@ -56,7 +56,12 @@ interface RecordBrowsing {
         keyword: String = "", tagIds: Set<TagId> = emptySet(), starredOnly: Boolean = false, placeId: PlaceId? = null,
         peopleIds: Set<ObjectId> = emptySet(), thingIds: Set<ObjectId> = emptySet(),
         mediaTypes: Set<MediaFilter> = emptySet(),
-    ): List<RecordCard>
+    ): List<RecordCard> = queryRecords(
+        RecordQuery(keyword, tagIds, starredOnly, placeId, peopleIds, thingIds, mediaTypes),
+    ).certain
+
+    /** 限定事件时间时分别返回明确与可能符合的记录。未限定时间时所有命中均在 certain。 */
+    suspend fun queryRecords(query: RecordQuery): RecordSearchResult
 
     /**
      * 年份降序，年内具体日期与大概时间分组；普通跨年范围和时间未定另列。
@@ -77,18 +82,44 @@ internal class LocalRecordBrowsing(private val database: FolioDatabase) : Record
 
     override suspend fun listStarredRecords(): List<RecordCard> = queryRecords(starredOnly = true)
 
-    override suspend fun queryRecords(keyword: String, tagIds: Set<TagId>, starredOnly: Boolean, placeId: PlaceId?,
-        peopleIds: Set<ObjectId>, thingIds: Set<ObjectId>, mediaTypes: Set<MediaFilter>): List<RecordCard> = database.withTransaction {
-        val records = dao.activeRecords(keyword, tagIds.map { it.value }, tagIds.isEmpty(), starredOnly, placeId?.value,
-            peopleIds.map { it.value }, peopleIds.isEmpty(), thingIds.map { it.value }, thingIds.isEmpty(),
-            mediaTypes.isEmpty(), MediaFilter.PHOTO in mediaTypes, MediaFilter.AUDIO in mediaTypes,
-            MediaFilter.CHECKLIST in mediaTypes, MediaFilter.TEXT_ONLY in mediaTypes)
+    override suspend fun queryRecords(query: RecordQuery): RecordSearchResult = database.withTransaction {
+        val records = dao.activeRecords(
+            query.keyword, query.tagIds.map { it.value }, query.tagIds.isEmpty(), query.starredOnly, query.placeId?.value,
+            query.peopleIds.map { it.value }, query.peopleIds.isEmpty(), query.thingIds.map { it.value }, query.thingIds.isEmpty(),
+            query.mediaTypes.isEmpty(), MediaFilter.PHOTO in query.mediaTypes, MediaFilter.AUDIO in query.mediaTypes,
+            MediaFilter.CHECKLIST in query.mediaTypes, MediaFilter.TEXT_ONLY in query.mediaTypes,
+        )
+        val dates = when (val filter = query.time) {
+            null -> return@withTransaction RecordSearchResult(readCards(records), emptyList(), 0)
+            EventTimeFilter.Undated -> {
+                val undated = records.filter { it.eventTime?.asEventTime()?.dateRange == null }
+                return@withTransaction RecordSearchResult(readCards(undated), emptyList(), 0)
+            }
+            is EventTimeFilter.Within -> filter.dates
+        }
+        val certain = mutableListOf<BrowseRecordRow>()
+        val possible = mutableListOf<BrowseRecordRow>()
+        var undatedCount = 0
+        for (record in records) {
+            val range = record.eventTime?.asEventTime()?.dateRange
+            when {
+                range == null -> undatedCount++
+                range.start in dates && range.endInclusive in dates -> certain.add(record)
+                range.start <= dates.endInclusive && dates.start <= range.endInclusive -> possible.add(record)
+            }
+        }
+        val cards = readCards(certain + possible)
+        RecordSearchResult(cards.subList(0, certain.size), cards.subList(certain.size, cards.size), undatedCount)
+    }
+
+    private suspend fun readCards(records: List<BrowseRecordRow>): List<RecordCard> {
+        if (records.isEmpty()) return emptyList()
         val items = dao.previewItems(PREVIEW_BLANK_CHARACTERS).groupBy { it.recordId }
         val counts = dao.previewCounts(PREVIEW_BLANK_CHARACTERS).associateBy { it.recordId }
         val tags = database.tagDao().activeRecordTags().groupBy { it.recordId }
         val places = database.placeDao().activeRecordPlaces().associate { it.recordId to it.place.asPlace() }
         val objects = database.objectDao().activeRecordObjects().groupBy { it.recordId }
-        records.map { record ->
+        return records.map { record ->
             val previewItems = items[record.id].orEmpty().map { it.slot.asPreview() }
             val count = counts[record.id]
             RecordCard(
