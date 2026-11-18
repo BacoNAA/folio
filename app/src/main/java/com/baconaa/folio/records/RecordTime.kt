@@ -9,6 +9,20 @@ enum class NamedSeason(val label: String, val firstMonth: Int, val lastMonth: In
     SPRING("春天", 3, 5), SUMMER("夏天", 6, 8), AUTUMN("秋天", 9, 11), WINTER("冬天", 12, 2),
 }
 
+enum class DatePrecision {
+    YEAR, MONTH, DAY;
+
+    fun format(date: LocalDate): String = when (this) {
+        YEAR -> date.year.toString()
+        MONTH -> YearMonth.from(date).toString()
+        DAY -> date.toString()
+    }
+}
+
+data class RangePrecision(val start: DatePrecision = DatePrecision.DAY, val end: DatePrecision = DatePrecision.DAY) {
+    fun inputs(dates: ClosedRange<LocalDate>) = start.format(dates.start) to end.format(dates.endInclusive)
+}
+
 /** 日期范围包含首尾两天。未填写用 null 表示，自由描述没有已知范围时仍保留原话。 */
 sealed interface EventTime {
     val zone: ZoneId
@@ -45,9 +59,10 @@ sealed interface EventTime {
             YearMonth.of(if (lastMonth < firstMonth) year + 1 else year, lastMonth).atEndOfMonth()
     }
 
-    data class Range(val start: LocalDate, val endInclusive: LocalDate, override val zone: ZoneId = ZoneId.systemDefault()) : EventTime {
+    data class Range(val start: LocalDate, val endInclusive: LocalDate, override val zone: ZoneId = ZoneId.systemDefault(),
+        val precision: RangePrecision = RangePrecision()) : EventTime {
         init { require(start <= endInclusive) { "结束日期不能早于开始日期" } }
-        override val label get() = "$start — $endInclusive"
+        override val label get() = "${precision.start.format(start)} — ${precision.end.format(endInclusive)}"
         override val dateRange get() = start..endInclusive
     }
 
@@ -55,6 +70,7 @@ sealed interface EventTime {
         val text: String,
         override val dateRange: ClosedRange<LocalDate>? = null,
         override val zone: ZoneId = ZoneId.systemDefault(),
+        val precision: RangePrecision = RangePrecision(),
     ) : EventTime {
         init {
             require(text.isNotBlank()) { "请填写时间描述" }
@@ -91,19 +107,22 @@ internal data class EventTimeFields(
     val eventEndDate: Long? = null,
     val eventText: String? = null,
     val eventSeasonYear: Int? = null,
+    val eventStartPrecision: DatePrecision? = null,
+    val eventEndPrecision: DatePrecision? = null,
 ) {
     fun asEventTime(): EventTime {
         val zone = ZoneId.of(eventZone)
         val start = eventDate?.let(LocalDate::ofEpochDay)
         val end = eventEndDate?.let(LocalDate::ofEpochDay)
+        val precision = RangePrecision(eventStartPrecision ?: DatePrecision.DAY, eventEndPrecision ?: DatePrecision.DAY)
         return when (eventKind) {
             null -> EventTime(requireNotNull(start), eventClock?.let(LocalTime::ofNanoOfDay), zone)
             "year" -> EventTime.Year(requireNotNull(start).year, zone)
             "month" -> EventTime.Month(YearMonth.from(requireNotNull(start)), zone)
             "season" -> EventTime.Season(requireNotNull(eventSeasonYear), NamedSeason.valueOf(requireNotNull(eventText)),
                 requireNotNull(start).monthValue, requireNotNull(end).monthValue, zone)
-            "range" -> EventTime.Range(requireNotNull(start), requireNotNull(end), zone)
-            "description" -> EventTime.Description(requireNotNull(eventText), start?.let { it..requireNotNull(end) }, zone)
+            "range" -> EventTime.Range(requireNotNull(start), requireNotNull(end), zone, precision)
+            "description" -> EventTime.Description(requireNotNull(eventText), start?.let { it..requireNotNull(end) }, zone, precision)
             else -> error("未知事件时间类型：$eventKind")
         }
     }
@@ -117,8 +136,10 @@ internal fun EventTime.asFields(): EventTimeFields {
         is EventTime.Year -> EventTimeFields(start, null, zone.id, "year", end)
         is EventTime.Month -> EventTimeFields(start, null, zone.id, "month", end)
         is EventTime.Season -> EventTimeFields(start, null, zone.id, "season", end, season.name, year)
-        is EventTime.Range -> EventTimeFields(start, null, zone.id, "range", end)
-        is EventTime.Description -> EventTimeFields(start, null, zone.id, "description", end, text)
+        is EventTime.Range -> EventTimeFields(start, null, zone.id, "range", end,
+            eventStartPrecision = precision.start, eventEndPrecision = precision.end)
+        is EventTime.Description -> EventTimeFields(start, null, zone.id, "description", end, text,
+            eventStartPrecision = precision.start, eventEndPrecision = precision.end)
     }
 }
 

@@ -14,6 +14,7 @@ import androidx.lifecycle.ViewModelProvider
 import com.baconaa.folio.records.ItemId
 import com.baconaa.folio.records.LocalTextStore
 import com.baconaa.folio.records.EventTime
+import com.baconaa.folio.records.DatePrecision
 import com.baconaa.folio.records.EventTimeFields
 import com.baconaa.folio.records.asFields
 import java.time.LocalDate
@@ -114,6 +115,8 @@ private fun Bundle.writeEventTime(value: EventTime) {
     putString("event-kind", fields.eventKind)
     fields.eventEndDate?.let { putLong("event-end", it) }
     putString("event-text", fields.eventText)
+    putString("event-start-precision", fields.eventStartPrecision?.name)
+    putString("event-end-precision", fields.eventEndPrecision?.name)
     fields.eventSeasonYear?.let { putInt("event-season-year", it) }
 }
 
@@ -126,6 +129,8 @@ private fun Bundle.readEventTime(): EventTime? {
         eventKind = getString("event-kind"),
         eventEndDate = if (containsKey("event-end")) getLong("event-end") else null,
         eventText = getString("event-text"),
+        eventStartPrecision = getString("event-start-precision")?.let(DatePrecision::valueOf),
+        eventEndPrecision = getString("event-end-precision")?.let(DatePrecision::valueOf),
         eventSeasonYear = if (containsKey("event-season-year")) getInt("event-season-year") else null,
     ).asEventTime()
 }
