@@ -33,7 +33,7 @@ class MainActivity : ComponentActivity() {
         if (uri != null && target != null) {
             try { contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
             catch (_: SecurityException) { /* 部分旧系统只提供临时读取授权，立即复制原件。 */ }
-            model.receivePhoto(uri, target)
+            model.receivePhoto(uri, target.copy(suggestPhotoTime = true))
         }
     }
     private val camera = registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->

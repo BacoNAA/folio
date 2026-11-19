@@ -18,6 +18,7 @@ interface EditorMedia {
     val recording: StateFlow<AudioRecordingState>
     val playback: StateFlow<AudioPlaybackState>
     suspend fun importPhoto(uri: Uri): PhotoId
+    suspend fun readCaptureTime(id: PhotoId): PhotoCaptureTime?
     fun start()
     fun stop(): AudioClip
     fun cancel()
@@ -50,6 +51,7 @@ class LocalEditorMedia(context: Context) : EditorMedia {
     }
 
     override suspend fun importPhoto(uri: Uri) = photos.importPhoto(uri)
+    override suspend fun readCaptureTime(id: PhotoId) = photos.readCaptureTime(id)
     override fun start() { stopPlayback(); recorder().start() }
     override fun stop() = checkNotNull(recorder).stop()
     override fun cancel() { recorder?.cancel() }
@@ -60,10 +62,12 @@ class LocalEditorMedia(context: Context) : EditorMedia {
 }
 
 data class ExternalTarget(val draftId: String?, val recordId: String?, val afterId: String?,
-    val returnPage: Page, val detailOrigin: Page, val eventTime: com.baconaa.folio.records.EventTime? = null)
+    val returnPage: Page, val detailOrigin: Page, val eventTime: com.baconaa.folio.records.EventTime? = null, val suggestPhotoTime: Boolean = false)
+
+data class PhotoTimeOffer(val time: com.baconaa.folio.records.EventTime.Exact, val usesDeviceZone: Boolean)
 
 sealed interface PendingAttachment {
     val after: ItemId?
-    data class Photo(val id: PhotoId, override val after: ItemId?) : PendingAttachment
+    data class Photo(val id: PhotoId, override val after: ItemId?, val suggestTime: Boolean) : PendingAttachment
     data class Audio(val clip: AudioClip, override val after: ItemId?) : PendingAttachment
 }

@@ -84,6 +84,28 @@ class MixedEditorNavigationTest {
         runBlocking { store.moveToTrash(record.id); store.deletePermanently(record.id) }
     }
 
+    @Test
+    fun titleOnlyDraftIsSelectableByNameAndPublishesAfterWritingText() {
+        val title = "雨天旧照${System.nanoTime()}"
+        compose.onNodeWithTag("write").performClick()
+        compose.onNodeWithTag("mixed-editor").performScrollToNode(hasTestTag("record-title"))
+        compose.onNodeWithTag("record-title").performTextInput(title)
+        waitText("草稿已保存")
+        compose.onNodeWithText("完成").assertIsNotEnabled()
+        compose.onNodeWithText("返回").performClick()
+        compose.onNodeWithTag("nav-Records").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("继续草稿", substring = true).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("继续草稿", substring = true).performClick()
+        compose.onNodeWithText(title).performClick()
+        compose.onNodeWithTag("editor").performTextInput("补上当时的事")
+        compose.onNodeWithText("完成").performClick()
+        waitText("已保存 · 查看")
+        compose.onNodeWithText("已保存 · 查看").performScrollTo().performClick()
+        waitText(title)
+        val id = runBlocking { store.queryRecords(title).single().id }
+        runBlocking { store.moveToTrash(id); store.deletePermanently(id) }
+    }
+
     private fun clickEditorItem(tag: String) {
         // 懒列表在小屏及键盘展开时可能尚未组合目标；先滚动容器，再点击可见按钮。
         compose.onNodeWithTag("mixed-editor").performScrollToNode(hasTestTag(tag))

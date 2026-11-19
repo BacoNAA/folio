@@ -173,6 +173,57 @@ class MixedEditorStateTest {
         await { !model.state.busy && model.state.editor == null }
     }
 
+    @Test
+    fun titleAloneCanResumeAndFirstTextUsesTheSameDraft() {
+        val title = "标题先行${System.nanoTime()}"
+        lateinit var model: FolioViewModel
+        main { model = FolioViewModel(store, store, store, store); model.newText(); model.changeTitle(title); model.leaveEditor() }
+        await { model.state.editor == null && !model.state.busy }
+        val preview = runBlocking { store.listDrafts().single { it.title == title } }
+        assertNull(runBlocking { store.openDraftTimes(preview.id) }!!.firstRecordedAt)
+        assertTrue(runBlocking { store.openMixedDraft(preview.id) }!!.items.isEmpty())
+        main { model = FolioViewModel(store, store, store, store); model.resume(preview) }
+        await { model.state.editor?.title == title && !model.state.busy }
+        main { model.complete() }
+        assertFalse(model.state.editor!!.hasContent)
+        main { model.change(TextFieldValue("第一项实际内容")); model.complete() }
+        await { model.state.savedId != null && !model.state.busy }
+        val id = model.state.savedId!!
+        val record = runBlocking { store.openRecordContent(id) }!!
+        assertEquals(title, record.title)
+        assertEquals("第一项实际内容", (record.items.single() as ContentItem.Text).text)
+        assertEquals(id, runBlocking { store.queryRecords(title).single().id })
+        runBlocking { store.moveToTrash(id); store.deletePermanently(id) }
+    }
+
+    @Test
+    fun importingPhotoOnlyChangesEventTimeWhenAccepted() {
+        val source = photoSource()
+        val capture = PhotoCaptureTime(java.time.LocalDateTime.parse("2012-01-02T03:04:05"), java.time.ZoneOffset.ofHours(9))
+        val media = TestMedia(context).apply { this.capture = capture }
+        lateinit var model: FolioViewModel
+        main { model = FolioViewModel(store, store, store, store, media); model.newText(); model.changeTitle("旧照片") }
+        await { model.state.editor?.draftId != null }
+        val id = model.state.editor!!.draftId!!
+        val original = model.state.editor!!.eventTime
+        // 系统选图回调在启动操作结束后返回。
+        fun picked() = main { model.receivePhoto(Uri.fromFile(source), ExternalTarget(id.value, null, null,
+            Page.Capture, Page.Records, suggestPhotoTime = true)) }
+        picked(); await { !model.state.busy && model.state.editor?.photoTimeOffer != null }
+        main { model.resolvePhotoTime(false) }
+        assertEquals(original, runBlocking { store.openDraftTimes(id) }!!.eventTime)
+        picked(); await { !model.state.busy && model.state.editor?.photoTimeOffer != null }
+        main { model.resolvePhotoTime(true); model.complete() }
+        await { model.state.savedId != null && !model.state.busy }
+        val recordId = model.state.savedId!!
+        val record = runBlocking { store.openRecordContent(recordId) }!!
+        assertEquals(EventTime(capture.localDateTime.toLocalDate(), capture.localDateTime.toLocalTime(), capture.offset!!), record.times.eventTime)
+        assertEquals(2, record.items.filterIsInstance<ContentItem.Photo>().size)
+        assertEquals(2, record.items.size)
+        runBlocking { store.moveToTrash(recordId); store.deletePermanently(recordId) }
+        source.delete()
+    }
+
     private fun photoSource(): File {
         val file = File.createTempFile("ui-source", ".png", context.cacheDir)
         val bitmap = Bitmap.createBitmap(40, 30, Bitmap.Config.ARGB_8888)
@@ -196,6 +247,8 @@ class MixedEditorStateTest {
         override val recording = MutableStateFlow(AudioRecordingState())
         override val playback = MutableStateFlow(AudioPlaybackState())
         lateinit var clip: AudioClip
+        var capture: PhotoCaptureTime? = null
+        override suspend fun readCaptureTime(id: PhotoId) = capture
         var imports = 0
         var stops = 0
         override suspend fun importPhoto(uri: Uri): PhotoId { imports++; return LocalPhotoOriginals.get(context).importPhoto(uri) }

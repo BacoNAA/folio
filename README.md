@@ -22,7 +22,7 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 人物与物件可以在记录中分别新建或多选，只填名称即可，区别说明和别名可选（每行一个别名）。查找对象匹配名称、说明及别名，同名按身份区分。新对象随草稿保存，完成后共享，未选中的新对象或放弃草稿时丢弃；已有共享对象即使零记录仍可选用。编辑共享资料前提示影响所有引用，保存不提交记录草稿、不改变记录时间。搜索工具栏可横向滚动选择人物和物件，同类满足任一个、不同类别同时满足；各条件可单独移除，保留搜索词和其他条件。记录卡片的对象按钮可打开该对象的正式记录结果。
 
-页面使用 `FolioViewModel` 持有状态，通过 `LocalTextStore.get(context)` 调用 [TextDrafts 和 PublishedTextRecords](app/src/main/java/com/baconaa/folio/records/TextRecords.kt)、[MixedContentDrafts](app/src/main/java/com/baconaa/folio/records/MixedContent.kt) 等接口。草稿写入串行，完成及离开编辑等待最后输入保存成功；读写错误与空结果分别展示。结构操作提交后重读失败时，只重读而不重复插入。记录列表可切换事件时间和最近记录，未填写事件时间的记录单列。从「时间、地点与线索 → 事件时间」选择填写方式。日期范围与自由描述的两端可分别填年、月或日，例如「大学时（2018 至 2022-06）」。Room v17 保留每一端的填写精度，v16 的已有日期范围沿用日精度。选填标题的安卓入口待接入。
+页面使用 `FolioViewModel` 持有状态，通过 `LocalTextStore.get(context)` 调用 [TextDrafts 和 PublishedTextRecords](app/src/main/java/com/baconaa/folio/records/TextRecords.kt)、[MixedContentDrafts](app/src/main/java/com/baconaa/folio/records/MixedContent.kt) 等接口。草稿写入串行，完成及离开编辑等待最后输入保存成功；读写错误与空结果分别展示。结构操作提交后重读失败时，只重读而不重复插入。记录列表可切换事件时间和最近记录，未填写事件时间的记录单列。从「时间、地点与线索 → 事件时间」选择填写方式。日期范围与自由描述的两端可分别填年、月或日，例如「大学时（2018 至 2022-06）」。Room v17 保留每一端的填写精度，v16 的已有日期范围沿用日精度。编辑页可只填标题后离开，从「记录 → 继续草稿」按标题找回；补上实际内容才能完成。完成后在记录卡片、详情、地点小册和回收站显示标题。
 
 标题独立于正文和媒体说明。可调用 `saveDraftTitle(null, title)` 先起草，再把内容保存到返回的草稿 ID。只有标题时可以重开；首次记录时间取第一项实际内容成功保存的时刻。已有草稿用 `saveDraftTitle(id, title)` 修改，用 `null` 或空白清除。`openMixedDraft` 与 `listDrafts` 返回草稿标题，点「完成」后详情、浏览卡片和搜索才使用新标题。Room v16 升级后旧标题默认为空，保留已有草稿的首次记录时间。[记录接口](app/src/main/java/com/baconaa/folio/records/TextRecords.kt)
 
@@ -34,7 +34,7 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 照片原图通过 [LocalPhotoOriginals](app/src/main/java/com/baconaa/folio/media/LocalPhotoOriginals.kt) 导入，用返回的 `PhotoId` 读取原图。同一原图可以出现在记录的多个位置，每处都有自己的内容项 ID 和照片说明。
 
-导入后可调用 `readCaptureTime(photoId)`，从原图的 EXIF 原始拍摄标签读取当地日期、时刻和可用的 UTC 偏移。没有拍摄时间时返回 `null`，缺少偏移时保留当地时间。Android 10 的平台接口仅读取当地时间。该接口提供可供用户确认的候选值，记录的事件时间仍由草稿保存接口写入；相册确认页面待接入。
+导入后可调用 `readCaptureTime(photoId)`，从原图的 EXIF 原始拍摄标签读取当地日期、时刻和可用的 UTC 偏移。没有拍摄时间时返回 `null`，缺少偏移时保留当地时间。Android 10 的平台接口仅读取当地时间。该接口提供可供用户确认的候选值，记录的事件时间仍由草稿保存接口写入；从相册选图后可选择采用拍摄时间或保留当前事件时间；照片没有时区时，采用前会显示设备时区。
 
 后端支持同一草稿内交错排列多段文字和照片。用 `saveDraft` 或 `appendPhotos` 起草，随后通过 [MixedContentDrafts](app/src/main/java/com/baconaa/folio/records/MixedContent.kt) 的 `insertText`、`insertPhoto` 追加或紧接指定项插入。`openMixedDraft` 一次读回完整顺序、当前项和光标。`completeMixedDraft` 提交后，`openRecordContent` 的 `items` 按相同顺序返回正式内容。
 
