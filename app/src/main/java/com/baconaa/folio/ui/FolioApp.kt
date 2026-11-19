@@ -288,7 +288,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                 item { Text("最近编辑的排在前面", fontSize = 12.sp) }
                 items(state.drafts, key = { it.id.value }) { draft ->
                     TextButton(onClick = { draftPicker = false; model.resume(draft) }, modifier = Modifier.fillMaxWidth()) {
-                        Text(draft.excerpt.ifBlank { if (draft.firstPhotoId != null) "照片草稿" else if (draft.totalAudioDurationMillis != null) "录音草稿" else "空白草稿" }, maxLines = 3)
+                        Text(draft.title ?: draft.excerpt.ifBlank { if (draft.firstPhotoId != null) "照片草稿" else if (draft.totalAudioDurationMillis != null) "录音草稿" else "空白草稿" }, maxLines = 3)
                     }
                 }
             } }, confirmButton = { TextButton(onClick = { draftPicker = false }) { Text("关闭") } })
@@ -349,6 +349,7 @@ private fun RecordPreview(record: RecordCard, model: FolioViewModel) {
         val dateLabel = if (eventTime is EventTime.Exact) eventTime.date.toString() else eventTime?.label
         Text(listOfNotNull(dateLabel, if (record.marks.isPinned) "置顶" else null,
             if (record.marks.isStarred) "★" else null).joinToString(" · "), fontSize = 12.sp, color = Accent)
+        record.title?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
         record.preview.items.forEach { item -> when (item) {
             is PreviewContentItem.Text -> Text(item.text, maxLines = 4, lineHeight = 26.sp)
             is PreviewContentItem.Photo -> { Photo(item.photoId); if (item.caption.isNotEmpty()) Text(item.caption) }

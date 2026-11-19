@@ -31,11 +31,15 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
     val structureEnabled = enabled && !state.recording && state.pendingAttachment == null && !state.importFailed
     LaunchedEffect(editor.activeItemId) {
         val index = editor.items.indexOfFirst { it.id == editor.activeItemId }
-        if (index >= 0) scroll.animateScrollToItem(index)
+        if (index >= 0) scroll.animateScrollToItem(if (index == 0) 0 else index + 1)
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
         LazyColumn(Modifier.weight(1f).testTag("mixed-editor"), state = scroll,
             verticalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(bottom = 16.dp)) {
+            item("optional-title") {
+                OutlinedTextField(editor.title, model::changeTitle, label = { Text("标题（选填）") },
+                    singleLine = true, enabled = enabled, modifier = Modifier.fillMaxWidth().testTag("record-title"))
+            }
             itemsIndexed(editor.items, key = { _, item -> item.id.value }) { index, item ->
                 var menu by remember { mutableStateOf(false) }
                 Column {
@@ -135,6 +139,15 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
             if (editor.canUndo) TextButton(onClick = model::undo, enabled = structureEnabled) { Text("撤销移除") }
             TextButton(onClick = discard, enabled = !state.busy) { Text("放弃修改") }
         }
+    }
+    editor.photoTimeOffer?.let { offer ->
+        AlertDialog(onDismissRequest = { model.resolvePhotoTime(false) }, title = { Text("采用照片拍摄时间？") },
+            text = { Column {
+                Text(offer.time.label)
+                if (offer.usesDeviceZone) Text("照片未注明时区，将按设备时区 ${offer.time.zone.id} 保存。")
+                Text("当前事件时间：${editor.eventTime.label()}")
+            } }, confirmButton = { TextButton(onClick = { model.resolvePhotoTime(true) }, enabled = enabled) { Text("采用拍摄时间") } },
+            dismissButton = { TextButton(onClick = { model.resolvePhotoTime(false) }, enabled = enabled) { Text("保留当前时间") } })
     }
     if (showAdd) AlertDialog(onDismissRequest = { showAdd = false }, title = { Text(if (addAfter == null) "添加内容" else "在此后添加") },
         text = { Column {

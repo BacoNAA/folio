@@ -209,6 +209,7 @@ internal fun TrashScreen(model: FolioViewModel) {
         LazyColumn(Modifier.testTag("trash-list")) {
             if (state.error == null) items(state.trash, key = { it.id.value }) { record ->
                 Column(Modifier.fillMaxWidth().clickable { model.openTrashRecord(record.id) }.padding(vertical = 16.dp)) {
+                    record.title?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
                     Text(record.excerpt.ifBlank { "媒体记录" })
                     record.firstPhotoId?.let { Photo(it) }
                     if (record.hasDraft) Text("有未完成修改", fontSize = 12.sp)
@@ -222,6 +223,7 @@ internal fun TrashScreen(model: FolioViewModel) {
 
 @Composable
 internal fun RecordContents(content: RecordContent, model: FolioViewModel) {
+    content.title?.let { Text(it, style = MaterialTheme.typography.titleLarge) }
     Text("事件时间：${content.times.eventTime.label()}", fontSize = 12.sp)
     content.place?.let { Text("地点", fontSize = 12.sp); PlaceDescription(it) }
     content.objects.forEach { Text(it.kind.label, fontSize = 12.sp); ObjectDescription(it) }

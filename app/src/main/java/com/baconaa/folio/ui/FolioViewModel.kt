@@ -40,9 +40,15 @@ data class RecordEditor(
     val objects: List<RecordObject> = emptyList(),
     val place: Place? = null,
     val persistedPlaceId: PlaceId? = null,
+    val title: String = "",
+    val persistedTitle: String = "",
+    // 先写标题时，页面的空输入框尚不是草稿内容项。
+    val unboundItem: ItemId? = null,
+    val photoTimeOffer: PhotoTimeOffer? = null,
     // 首次落盘分配后端 ID，但当前输入项及其键盘回调保留原身份；写入时再映射。
     val backendItemIds: Map<ItemId, ItemId> = emptyMap(),
 ) {
+    fun position(id: ItemId?) = id?.takeUnless { it == unboundItem }?.let { backendItemIds[it] ?: it }
     val value: TextFieldValue get() = textValues.values.firstOrNull() ?: TextFieldValue()
     val hasContent: Boolean get() = items.any { it.hasContent() }
 }
@@ -169,6 +175,13 @@ class FolioViewModel(
             savedId = null, error = null, saveError = null, loading = false)
     }
 
+    fun changeTitle(title: String) {
+        val editor = state.editor ?: return
+        if (state.busy || editor.needsReload || editor.title == title) return
+        state = state.copy(editor = editor.copy(title = title, revision = editor.revision + 1), saveError = null)
+        save()
+    }
+
     fun change(value: TextFieldValue) {
         state.editor?.items?.filterIsInstance<ContentItem.Text>()?.firstOrNull()?.let { changeText(it.id, value) }
     }
@@ -212,8 +225,17 @@ class FolioViewModel(
             val snapshot = state.editor ?: return true
             if (snapshot.needsReload) return false
             if (snapshot.revision == snapshot.savedRevision) return true
-            if (snapshot.draftId == null && !snapshot.hasContent) return true
             try {
+                if (snapshot.draftId == null && !snapshot.hasContent && pendingInitialId == null) {
+                    if (snapshot.title.isBlank()) return true
+                    val id = withContext(Dispatchers.IO) {
+                        requireNotNull(drafts.saveDraftTitle(null, snapshot.title, snapshot.eventTime))
+                    }
+                    val current = state.editor ?: return true
+                    state = state.copy(editor = current.copy(draftId = id, persistedTitle = snapshot.title,
+                        persistedEventTime = snapshot.eventTime, unboundItem = snapshot.items.singleOrNull()?.id))
+                    continue
+                }
                 if (snapshot.draftId == null) {
                     // 未落盘时仅有一个输入项；结构操作先等待保存，再交给混排接口。
                     val first = snapshot.items.single()
@@ -231,16 +253,32 @@ class FolioViewModel(
                     val current = state.editor ?: return true
                     val actualId = content.items.single().id
                     state = state.copy(editor = current.copy(draftId = id,
-                        backendItemIds = mapOf(first.id to actualId),
+                        unboundItem = null, backendItemIds = mapOf(first.id to actualId),
                         persistedItems = content.items.map { it.withId(first.id) }, persistedEventTime = savedTime,
                         savedRevision = -1), saveError = null)
                     pendingInitialId = null
                 } else {
-                    withContext(Dispatchers.IO) {
+                    val first = snapshot.items.firstOrNull { it.id == snapshot.unboundItem && it.hasContent() }
+                    if (first != null) {
+                        val itemId = withContext(Dispatchers.IO) {
+                            when (first) {
+                                is ContentItem.Text -> mixed.insertText(snapshot.draftId, null,
+                                    (snapshot.textValues[first.id] ?: TextFieldValue(first.text)).asEdit())
+                                is ContentItem.Checklist -> mixed.insertChecklist(snapshot.draftId, null, first.entries)
+                                else -> error("媒体必须先保存原件")
+                            }
+                        }
+                        val current = state.editor ?: return true
+                        state = state.copy(editor = current.copy(unboundItem = null,
+                            backendItemIds = current.backendItemIds + (first.id to itemId), persistedItems = listOf(first)))
+                        continue
+                    }
+                    val savedId = withContext(Dispatchers.IO) {
                         val previous = snapshot.persistedItems.associateBy { it.id }
                         // 当前文字项最后保存，后端保留该项及项内光标。
                         val ordered = snapshot.items.sortedBy { it.id == snapshot.activeItemId }
                         for (item in ordered) {
+                            if (item.id == snapshot.unboundItem) continue
                             val backendId = snapshot.backendItemIds[item.id] ?: item.id
                             if (item == previous[item.id] && !(item is ContentItem.Text && item.id == snapshot.activeItemId)) continue
                             when (item) {
@@ -257,9 +295,12 @@ class FolioViewModel(
                         if (snapshot.place?.id != snapshot.persistedPlaceId) {
                             requireNotNull(places).selectDraftPlace(snapshot.draftId, snapshot.place?.id)
                         }
+                        if (snapshot.title != snapshot.persistedTitle) drafts.saveDraftTitle(snapshot.draftId, snapshot.title)
+                        else snapshot.draftId
                     }
                     val current = state.editor ?: return true
-                    state = state.copy(editor = current.copy(persistedItems = snapshot.items,
+                    state = state.copy(editor = current.copy(draftId = savedId, persistedTitle = snapshot.title,
+                        persistedItems = snapshot.items.filterNot { it.id == snapshot.unboundItem },
                         persistedEventTime = snapshot.eventTime, persistedPlaceId = snapshot.place?.id,
                         savedRevision = snapshot.revision), saveError = null)
                 }
@@ -284,7 +325,7 @@ class FolioViewModel(
                 state = state.copy(editor = editor.copy(items = listOf(item), activeItemId = item.id,
                     textValues = if (item is ContentItem.Text) mapOf(item.id to TextFieldValue()) else emptyMap(), revision = 0, savedRevision = 0))
             } else withContext(Dispatchers.IO) {
-                val position = after?.let { editor.backendItemIds[it] ?: it }
+                val position = editor.position(after)
                 if (checklist) mixed.insertChecklist(id, position, listOf(ChecklistEntry(ChecklistEntryId.create(), "")))
                 else mixed.insertText(id, position, TextEdit("", 0))
             }
@@ -297,7 +338,7 @@ class FolioViewModel(
 
     fun remove(id: ItemId) = structure("移除失败，请重试。") {
         media?.stopPlayback()
-        if (it.draftId == null) state = state.copy(editor = it.copy(items = emptyList(), textValues = emptyMap(), activeItemId = null))
+        if (it.draftId == null || id == it.unboundItem) state = state.copy(editor = it.copy(items = emptyList(), textValues = emptyMap(), activeItemId = null, unboundItem = null))
         else withContext(Dispatchers.IO) { mixed.removeItem(it.draftId, it.backendItemIds[id] ?: id) }
     }
 
@@ -336,7 +377,7 @@ class FolioViewModel(
             writes.withLock {
                 if (!saveLatest()) return@withLock
                 val editor = state.editor ?: return@withLock
-                launch(ExternalTarget(editor.draftId?.value, editor.recordId?.value, after?.let { (editor.backendItemIds[it] ?: it).value },
+                launch(ExternalTarget(editor.draftId?.value, editor.recordId?.value, editor.position(after)?.value,
                     editor.returnPage, state.detailOrigin, editor.eventTime))
             }
         }
@@ -357,7 +398,7 @@ class FolioViewModel(
             try {
                 restoreTarget(target)
                 val id = requireNotNull(media).importPhoto(uri)
-                state = state.copy(pendingAttachment = PendingAttachment.Photo(id, target.afterId?.let(::ItemId)), importFailed = false)
+                state = state.copy(pendingAttachment = PendingAttachment.Photo(id, target.afterId?.let(::ItemId), target.suggestPhotoTime), importFailed = false)
                 failedPhoto = null
                 writes.withLock { if (saveLatest()) bindPending() }
             } catch (cancelled: CancellationException) { throw cancelled }
@@ -396,6 +437,25 @@ class FolioViewModel(
         }
         state = state.copy(editor = editor.copy(draftId = id), pendingAttachment = null)
         reloadCurrent()
+        if (pending is PendingAttachment.Photo && pending.suggestTime) {
+            try {
+                val capture = media?.readCaptureTime(pending.id) ?: return
+                val current = state.editor ?: return
+                if (current.draftId == id && !current.needsReload) {
+                    val stamp = capture.localDateTime
+                    val time = EventTime.Exact(stamp.toLocalDate(), stamp.toLocalTime(), capture.offset ?: java.time.ZoneId.systemDefault())
+                    state = state.copy(editor = current.copy(photoTimeOffer = PhotoTimeOffer(time, capture.offset == null)))
+                }
+            } catch (_: java.io.IOException) { state = state.copy(error = "照片已加入草稿，无法读取拍摄时间。可手动填写事件时间。") }
+        }
+    }
+
+    fun resolvePhotoTime(adopt: Boolean) {
+        val editor = state.editor ?: return
+        val offer = editor.photoTimeOffer ?: return
+        if (state.busy || editor.needsReload) return
+        state = state.copy(editor = editor.copy(photoTimeOffer = null))
+        if (adopt) changeEventTime(offer.time)
     }
 
     fun startRecording(target: ExternalTarget) = runAction("无法开始录音，请检查麦克风权限或是否被占用。") {
@@ -449,6 +509,9 @@ class FolioViewModel(
             state = state.copy(error = "这份草稿已不存在，请返回记录页刷新。")
             return
         }
+        val titleOnlyInput = if (content.title != null && content.items.isEmpty())
+            ContentItem.Text(ItemId(UUID.randomUUID().toString()), "") else null
+        val editorItems = titleOnlyInput?.let { listOf(it) } ?: content.items
         val canUndo = withContext(Dispatchers.IO) { mixed.canUndoRemoval(id) }
         val eventTime = withContext(Dispatchers.IO) { times?.openDraftTimes(id)?.eventTime }
         val selectedTags = withContext(Dispatchers.IO) { tags?.openDraftTags(id).orEmpty() }
@@ -457,10 +520,10 @@ class FolioViewModel(
         loadVersion++
         state = state.copy(page = Page.Editor, loading = false, error = null, saveError = null,
             detailOrigin = if (recordId != null && origin != Page.Detail) origin else state.detailOrigin,
-            editor = RecordEditor(id, recordId, content.items,
-                content.items.filterIsInstance<ContentItem.Text>().associate { item -> item.id to TextFieldValue(item.text,
+            editor = RecordEditor(id, recordId, editorItems,
+                editorItems.filterIsInstance<ContentItem.Text>().associate { item -> item.id to TextFieldValue(item.text,
                     TextRange(if (item.id == content.activeItemId) content.cursor else item.text.length)) },
-                content.activeItemId, content.items, returnPage = origin, canUndo = canUndo,
+                content.activeItemId, content.items, unboundItem = titleOnlyInput?.id, title = content.title.orEmpty(), persistedTitle = content.title.orEmpty(), returnPage = origin, canUndo = canUndo,
                 eventTime = eventTime, persistedEventTime = eventTime, tags = selectedTags, objects = selectedObjects,
                 place = selectedPlace, persistedPlaceId = selectedPlace?.id))
     }
