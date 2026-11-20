@@ -18,6 +18,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.baconaa.folio.records.*
 
+internal val EventDateFilter.Range.inputLabel: String
+    get() = if (toInput.isEmpty()) fromInput else "$fromInput 至 $toInput"
+
 internal fun EventTime?.label(): String = when (this) {
     null -> "暂不填写"
     is EventTime.Description -> dateRange?.let { val (from, to) = precision.inputs(it); "$label（$from 至 $to）" } ?: label
@@ -170,7 +173,7 @@ internal fun SearchFilters(model: FolioViewModel) {
             state.eventDateFilter?.let { filter ->
                 val label = when (filter) {
                     EventDateFilter.Undated -> "时间未定"
-                    is EventDateFilter.Range -> listOf(filter.fromInput, filter.toInput).filter { it.isNotEmpty() }.joinToString(" 至 ")
+                    is EventDateFilter.Range -> filter.inputLabel
                 }
                 InputChip(selected = true, onClick = { model.filterEventDate(null) }, label = { Text("$label ×") })
             }
