@@ -1,11 +1,14 @@
 package com.baconaa.folio
 
 import android.Manifest
+import android.net.Uri
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.baconaa.folio.media.LocalPhotoOriginals
+import com.baconaa.folio.media.createAudioTestClip
 import com.baconaa.folio.records.*
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
@@ -93,10 +96,16 @@ class MixedEditorNavigationTest {
         waitText("草稿已保存")
         compose.onNodeWithText("完成").assertIsNotEnabled()
         compose.onNodeWithText("返回").performClick()
-        compose.onNodeWithTag("nav-Records").performClick()
-        compose.waitUntil(10_000) { compose.onAllNodesWithText("继续草稿", substring = true).fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithText("继续草稿", substring = true).performClick()
-        compose.onNodeWithText(title).performClick()
+        val otherDraft = runBlocking { requireNotNull(store.saveDraft(null, TextEdit("另一本草稿", 0))) }
+        try {
+            compose.onNodeWithTag("nav-Records").performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("继续草稿 ·", substring = true).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("继续草稿 ·", substring = true).performClick()
+            compose.onNodeWithText(title).performClick()
+        } finally {
+            runBlocking { store.discardDraft(otherDraft) }
+        }
+        compose.waitUntil(10_000) { compose.onAllNodesWithTag("editor").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithTag("editor").performTextInput("补上当时的事")
         compose.onNodeWithText("完成").performClick()
         waitText("已保存 · 查看")
@@ -104,6 +113,30 @@ class MixedEditorNavigationTest {
         waitText(title)
         val id = runBlocking { store.queryRecords(title).single().id }
         runBlocking { store.moveToTrash(id); store.deletePermanently(id) }
+    }
+
+    @Test
+    fun draftPickerShowsAudioDurationAndOpensPhotoDraftFromThumbnail() {
+        val context = compose.activity.applicationContext
+        val photoSource = Uri.parse("android.resource://${context.packageName}/${R.drawable.home_art}")
+        val (photoDraft, audioDraft) = runBlocking {
+            val photo = LocalPhotoOriginals.get(context).importPhoto(photoSource)
+            val audio = createAudioTestClip(context, durationMillis = 3_500)
+            store.appendPhotos(null, listOf(photo)) to store.appendAudio(null, audio.id)
+        }
+        try {
+            compose.onNodeWithTag("nav-Records").performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("继续草稿 ·", substring = true).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("继续草稿 ·", substring = true).performClick()
+            compose.onNodeWithTag("draft-${audioDraft.value}").assertTextContains("录音 · 0:03")
+            val thumbnail = hasContentDescription("草稿照片缩略图") and hasAnyAncestor(hasTestTag("draft-${photoDraft.value}"))
+            compose.waitUntil(10_000) { compose.onAllNodes(thumbnail, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNode(thumbnail, useUnmergedTree = true).performTouchInput { click() }
+            waitText("照片说明（选填）")
+            compose.onNodeWithText("返回").performClick()
+        } finally {
+            runBlocking { store.discardDraft(photoDraft); store.discardDraft(audioDraft) }
+        }
     }
 
     private fun clickEditorItem(tag: String) {
