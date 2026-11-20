@@ -5,12 +5,15 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.baconaa.folio.records.*
@@ -57,6 +60,25 @@ private fun PlaceSearch(model: FolioViewModel) {
 }
 
 @Composable
+private fun ColumnScope.PlaceChoices(state: FolioState, selected: Place?, enabled: Boolean, onSelect: (Place) -> Unit) {
+    LazyColumn(Modifier.weight(1f, fill = false).heightIn(max = 240.dp).testTag("place-choices")) {
+        if (!state.placesLoading && state.placesError == null) {
+            if (state.places.isEmpty()) item { Text("没有匹配的地点。") }
+            items(state.places, key = { it.place.id.value }) { summary ->
+                val place = summary.place
+                val checked = selected?.id == place.id
+                Row(Modifier.fillMaxWidth().testTag("place-choice-${place.id.value}")
+                    .selectable(checked, enabled = enabled, role = Role.RadioButton) { onSelect(place) }
+                    .padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(checked, onClick = null, enabled = enabled)
+                    Column(Modifier.weight(1f).padding(start = 12.dp)) { PlaceDescription(place) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 internal fun PlacePicker(model: FolioViewModel, close: () -> Unit) {
     val state = model.state
     val selected = state.editor?.place
@@ -71,15 +93,7 @@ internal fun PlacePicker(model: FolioViewModel, close: () -> Unit) {
             }
             if (state.editor?.needsReload == true) ErrorMessage("地点已保存，请重试读取。", model::reload)
             else state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            LazyColumn(Modifier.weight(1f, fill = false).heightIn(max = 240.dp).testTag("place-choices")) {
-                if (state.placesError == null) items(state.places, key = { it.place.id.value }) { summary ->
-                    Row(Modifier.fillMaxWidth()) {
-                        RadioButton(selected?.id == summary.place.id, { model.selectPlace(summary.place) }, enabled = enabled,
-                            modifier = Modifier.testTag("place-choice-${summary.place.id.value}"))
-                        Column(Modifier.weight(1f).padding(vertical = 8.dp)) { PlaceDescription(summary.place) }
-                    }
-                }
-            }
+            PlaceChoices(state, selected, enabled, model::selectPlace)
             Row {
                 TextButton(onClick = { form = "new" }, enabled = enabled) { Text("新建地点") }
                 TextButton(onClick = { model.selectPlace(null) }, enabled = enabled && selected != null) { Text("取消地点") }
@@ -95,9 +109,23 @@ internal fun PlacePicker(model: FolioViewModel, close: () -> Unit) {
 }
 
 @Composable
+internal fun SearchPlacePicker(model: FolioViewModel, close: () -> Unit) {
+    val state = model.state
+    AlertDialog(onDismissRequest = close, title = { Text("筛选地点") }, text = {
+        Column {
+            PlaceSearch(model)
+            PlaceChoices(state, state.filterPlace, !state.busy) { place ->
+                model.filterByPlace(place)
+                close()
+            }
+        }
+    }, confirmButton = { TextButton(onClick = close) { Text("取消") } })
+}
+
+@Composable
 internal fun PlaceBookHeader(model: FolioViewModel) {
     val state = model.state
-    val place = state.filterPlace ?: return
+    val place = state.placeBook ?: return
     var editing by rememberSaveable(place.id.value) { mutableStateOf(false) }
     var actions by remember { mutableStateOf(false) }
     Column {
@@ -115,7 +143,7 @@ internal fun PlaceBookHeader(model: FolioViewModel) {
         val details = listOf(place.info.city, place.info.address, place.info.note).filter { it.isNotEmpty() }.joinToString(" · ")
         if (details.isNotEmpty()) Text(details, fontSize = 12.sp, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         place.info.coordinates?.let { Text(it.label(), fontSize = 12.sp) }
-        TextButton(onClick = model::clearPlaceFilter) { Text("移除地点条件 · 搜索全部记录") }
+        TextButton(onClick = { model.filterByPlace(null) }) { Text("移除地点条件 · 搜索全部记录") }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             FilterChip(!state.placeRecent, { model.selectPlaceRecent(false) }, label = { Text("事件时间") })
             FilterChip(state.placeRecent, { model.selectPlaceRecent(true) }, label = { Text("最近记录") })
@@ -134,7 +162,7 @@ private fun PlaceInfoDialog(model: FolioViewModel, initial: Place?, shared: Bool
     var longitude by rememberSaveable { mutableStateOf(initial?.info?.coordinates?.longitude) }
     var submitted by rememberSaveable { mutableStateOf(false) }
     val state = model.state
-    val current = if (shared) state.filterPlace else state.editor?.place
+    val current = if (shared) state.placeBook else state.editor?.place
     val coordinates = latitude?.let { lat -> longitude?.let { PlaceCoordinates(lat, it) } }
     val info = PlaceInfo(name.trim(), city.trim(), address.trim(), note.trim(), coordinates)
     LaunchedEffect(state.busy, current, submitted) {

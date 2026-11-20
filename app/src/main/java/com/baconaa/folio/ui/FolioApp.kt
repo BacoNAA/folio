@@ -99,7 +99,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                         }
                         Text(when (state.page) {
                             Page.Editor -> "记录这一刻"
-                            Page.Search -> if (state.filterPlace != null) "地点小册" else "搜索全部记录"
+                            Page.Search -> if (state.placeBook != null) "地点小册" else "搜索全部记录"
                             Page.Places -> "按地点"
                             Page.Trash, Page.TrashDetail -> "回收站"
                             else -> "记录"
@@ -173,7 +173,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                             PlaceBookHeader(model)
                             state.linkingPlace?.let { Text("选择要关联到「${it.info.name}」的记录，进入编辑后点完成才生效。", fontSize = 12.sp) }
                             OutlinedTextField(value = state.query, onValueChange = model::query, singleLine = true,
-                                label = { Text(state.filterPlace?.let { "在${it.info.name}中查找" } ?: "搜索记录") }, placeholder = { Text("输入记得的一句话") },
+                                label = { Text(state.placeBook?.let { "在${it.info.name}中查找" } ?: "搜索记录") }, placeholder = { Text("输入记得的一句话") },
                                 modifier = Modifier.fillMaxWidth().testTag("search"),
                                 trailingIcon = { if (state.query.isNotEmpty()) TextButton(onClick = { model.query("") }) { Text("清空") } })
                             SearchFilters(model)
@@ -210,7 +210,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                                 RecordPreview(it, model)
                                             }
                                         }
-                                    } else if (state.filterPlace == null || state.placeRecent) items(state.results, key = { it.id.value }) { RecordPreview(it, model) }
+                                    } else if (state.placeBook == null || state.placeRecent) items(state.results, key = { it.id.value }) { RecordPreview(it, model) }
                                     else eventTimelineItems(eventTimeline(state.results), model)
                                 }
                             }
