@@ -100,7 +100,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                         }
                         Text(when (state.page) {
                             Page.Editor -> "记录这一刻"
-                            Page.Search -> if (state.filterPlace != null) "地点小册" else "搜索全部记录"
+                            Page.Search -> if (state.placeBook != null) "地点小册" else "搜索全部记录"
                             Page.Places -> "按地点"
                             Page.Trash, Page.TrashDetail -> "回收站"
                             else -> "记录"
@@ -174,13 +174,13 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                             PlaceBookHeader(model)
                             state.linkingPlace?.let { Text("选择要关联到「${it.info.name}」的记录，进入编辑后点完成才生效。", fontSize = 12.sp) }
                             OutlinedTextField(value = state.query, onValueChange = model::query, singleLine = true,
-                                label = { Text(state.filterPlace?.let { "在${it.info.name}中查找" } ?: "搜索记录") }, placeholder = { Text("输入记得的一句话") },
+                                label = { Text(state.placeBook?.let { "在${it.info.name}中查找" } ?: "搜索记录") }, placeholder = { Text("输入记得的一句话") },
                                 modifier = Modifier.fillMaxWidth().testTag("search"),
                                 trailingIcon = { if (state.query.isNotEmpty()) TextButton(onClick = { model.query("") }) { Text("清空") } })
                             SearchFilters(model)
                             if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
                             if (!state.loading && state.error == null) {
-                                Text("${state.results.size + state.possibleResults.size} 条记录", Modifier.padding(vertical = 12.dp), fontSize = 12.sp)
+                                SearchResultSummary(state.results.size + state.possibleResults.size, state.filterPlace?.info?.name)
                             }
                             LazyColumn(state = searchScroll, contentPadding = PaddingValues(vertical = 12.dp),
                                 verticalArrangement = Arrangement.spacedBy(20.dp), modifier = Modifier.testTag("search-results")) {
@@ -201,17 +201,21 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                             }
                                         }
                                     }
-                                    if (state.eventDateFilter is EventDateFilter.Range) {
+                                    val timeFilter = state.eventDateFilter
+                                    if (timeFilter is EventDateFilter.Range) {
                                         item { Text("明确符合 ${state.results.size} 条") }
                                         items(state.results, key = { it.id.value }) { RecordPreview(it, model) }
                                         item { Text("可能符合 ${state.possibleResults.size} 条") }
-                                        items(state.possibleResults, key = { it.id.value }) {
+                                        items(state.possibleResults, key = { it.id.value }) { record ->
                                             Column {
-                                                Text("可能在这段时间", fontSize = 12.sp)
-                                                RecordPreview(it, model)
+                                                if (!state.loading) {
+                                                    val dates = requireNotNull(record.eventTime?.dateRange)
+                                                    Text("记录范围 ${dates.start} 至 ${dates.endInclusive}，与所查时段（${timeFilter.inputLabel}）部分重合。", fontSize = 12.sp)
+                                                }
+                                                RecordPreview(record, model)
                                             }
                                         }
-                                    } else if (state.filterPlace == null || state.placeRecent) items(state.results, key = { it.id.value }) { RecordPreview(it, model) }
+                                    } else if (state.placeBook == null || state.placeRecent) items(state.results, key = { it.id.value }) { RecordPreview(it, model) }
                                     else eventTimelineItems(eventTimeline(state.results), model)
                                 }
                             }
@@ -339,6 +343,24 @@ internal fun ErrorMessage(message: String, retry: (() -> Unit)?) {
 private fun EmptyMessage(text: String) {
     Text(text, Modifier.fillMaxWidth().padding(vertical = 28.dp), lineHeight = 26.sp,
         color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+@Composable
+private fun SearchResultSummary(count: Int, placeName: String?) {
+    var showScope by rememberSaveable { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically) {
+        Text("$count 条记录", fontSize = 12.sp)
+        TextButton(onClick = { showScope = true }) { Text("搜索范围") }
+    }
+    if (showScope) AlertDialog(onDismissRequest = { showScope = false },
+        title = { Text("可搜索的内容") },
+        text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(placeName?.let { "只查关联到「$it」的正式记录。" } ?: "查找全部正式记录。")
+            Text("可搜标题、正文、清单、标签、地点名、人物和物件的名称及别名，也可搜自己写的时间描述。")
+            Text("照片和录音可搜你填写的说明。照片中的文字和录音中的语音不参与匹配。")
+        } },
+        confirmButton = { TextButton(onClick = { showScope = false }) { Text("关闭") } })
 }
 
 private fun LazyListScope.eventTimelineItems(timeline: EventTimeline, model: FolioViewModel) {

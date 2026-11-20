@@ -18,6 +18,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.baconaa.folio.records.*
 
+internal val EventDateFilter.Range.inputLabel: String
+    get() = if (toInput.isEmpty()) fromInput else "$fromInput 至 $toInput"
+
 internal fun EventTime?.label(): String = when (this) {
     null -> "暂不填写"
     is EventTime.Description -> dateRange?.let { val (from, to) = precision.inputs(it); "$label（$from 至 $to）" } ?: label
@@ -140,7 +143,9 @@ private val MediaFilter.label get() = when (this) {
 internal fun SearchFilters(model: FolioViewModel) {
     var showTime by rememberSaveable { mutableStateOf(false) }
     var showMedia by rememberSaveable { mutableStateOf(false) }
+    var showPlace by rememberSaveable { mutableStateOf(false) }
     val state = model.state
+    val selectedPlace = state.placeScope?.takeUnless { it.isBook }?.place
     var showTags by rememberSaveable { mutableStateOf(false) }
     var objectKind by rememberSaveable { mutableStateOf<ObjectKind?>(null) }
     Column {
@@ -154,12 +159,21 @@ internal fun SearchFilters(model: FolioViewModel) {
             }
             TextButton(onClick = { showTime = true }) { Text("事件时间") }
             TextButton(onClick = { showMedia = true }) { Text("内容类型") }
+            if (state.placeBook == null && state.linkingPlace == null) TextButton(onClick = {
+                model.loadPlaces()
+                showPlace = true
+            }) { Text("筛选地点") }
         }
-        if (state.filterTags.isNotEmpty() || state.filterPeople.isNotEmpty() || state.filterThings.isNotEmpty() || state.mediaTypes.isNotEmpty() || state.eventDateFilter != null) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+        if (selectedPlace != null || state.filterTags.isNotEmpty() || state.filterPeople.isNotEmpty() || state.filterThings.isNotEmpty() || state.mediaTypes.isNotEmpty() || state.eventDateFilter != null) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+            selectedPlace?.info?.let { info ->
+                val label = listOf(info.name, info.city, info.address, info.note).filter { it.isNotBlank() }.joinToString(" · ")
+                InputChip(selected = true, onClick = { model.filterByPlace(null) }, modifier = Modifier.testTag("remove-place-filter"),
+                    label = { Text("地点：$label ×") })
+            }
             state.eventDateFilter?.let { filter ->
                 val label = when (filter) {
                     EventDateFilter.Undated -> "时间未定"
-                    is EventDateFilter.Range -> listOf(filter.fromInput, filter.toInput).filter { it.isNotEmpty() }.joinToString(" 至 ")
+                    is EventDateFilter.Range -> filter.inputLabel
                 }
                 InputChip(selected = true, onClick = { model.filterEventDate(null) }, label = { Text("$label ×") })
             }
@@ -183,6 +197,7 @@ internal fun SearchFilters(model: FolioViewModel) {
             }
         }
     }
+    if (showPlace) SearchPlacePicker(model) { showPlace = false }
     if (showTime) EventDateFilterDialog(model, state.eventDateFilter, onApply = { model.filterEventDate(it); showTime = false },
         onDismiss = { showTime = false })
     if (showMedia) AlertDialog(onDismissRequest = { showMedia = false }, title = { Text("内容类型 · 满足任一种") },
