@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.focus.FocusRequester
@@ -287,15 +288,33 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
             text = { LazyColumn {
                 item { Text("最近编辑的排在前面", fontSize = 12.sp) }
                 items(state.drafts, key = { it.id.value }) { draft ->
-                    TextButton(onClick = { draftPicker = false; model.resume(draft) }, modifier = Modifier.fillMaxWidth()) {
-                        Text(draft.title ?: draft.excerpt.ifBlank { if (draft.firstPhotoId != null) "照片草稿" else if (draft.totalAudioDurationMillis != null) "录音草稿" else "空白草稿" }, maxLines = 3)
-                    }
+                    DraftPickerRow(draft, onClick = { draftPicker = false; model.resume(draft) })
                 }
             } }, confirmButton = { TextButton(onClick = { draftPicker = false }) { Text("关闭") } })
         if (discardDialog) AlertDialog(onDismissRequest = { discardDialog = false }, title = { Text("放弃这次修改？") },
             text = { Text(if (state.editor?.recordId != null) "草稿将移除，已完成的原记录会保留。" else "这份未完成的草稿将被移除。") },
             confirmButton = { TextButton(onClick = { discardDialog = false; model.discard() }) { Text("确认放弃") } },
             dismissButton = { TextButton(onClick = { discardDialog = false }) { Text("继续编辑") } })
+    }
+}
+
+@Composable
+private fun DraftPickerRow(draft: DraftPreview, onClick: () -> Unit) {
+    TextButton(onClick = onClick, modifier = Modifier.fillMaxWidth().testTag("draft-${draft.id.value}")) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            if (draft.excerpt.isBlank()) draft.firstPhotoId?.let { Photo(it, thumbnail = true) }
+            Column {
+                draft.title?.let { Text(it, style = MaterialTheme.typography.titleMedium, maxLines = 2) }
+                val description = when {
+                    draft.excerpt.isNotBlank() -> draft.excerpt
+                    draft.totalAudioDurationMillis != null -> "录音 · ${formatAudioDuration(draft.totalAudioDurationMillis)}"
+                    draft.title == null && draft.firstPhotoId == null -> "空白草稿"
+                    else -> null
+                }
+                description?.let { Text(it, maxLines = 3) }
+            }
+        }
     }
 }
 
@@ -347,16 +366,28 @@ private fun RecordPreview(record: RecordCard, model: FolioViewModel) {
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         val eventTime = record.eventTime
         val dateLabel = if (eventTime is EventTime.Exact) eventTime.date.toString() else eventTime?.label
-        Text(listOfNotNull(dateLabel, if (record.marks.isPinned) "置顶" else null,
-            if (record.marks.isStarred) "★" else null).joinToString(" · "), fontSize = 12.sp, color = Accent)
+        val metadata = listOfNotNull(dateLabel, record.place?.info?.name,
+            "置顶".takeIf { record.marks.isPinned }, "★".takeIf { record.marks.isStarred })
+        if (metadata.isNotEmpty()) Text(metadata.joinToString(" · "), fontSize = 12.sp, color = Accent)
         record.title?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
         record.preview.items.forEach { item -> when (item) {
             is PreviewContentItem.Text -> Text(item.text, maxLines = 4, lineHeight = 26.sp)
             is PreviewContentItem.Photo -> { Photo(item.photoId); if (item.caption.isNotEmpty()) Text(item.caption) }
             is PreviewContentItem.Audio -> { AudioControl(item.audioId, item.durationMillis, model); if (item.caption.isNotEmpty()) Text(item.caption) }
-            is PreviewContentItem.Checklist -> item.entries.forEach { Text("${if (it.checked) "☑" else "☐"} ${it.text}") }
+            is PreviewContentItem.Checklist -> {
+                Text("清单 · 已完成 ${item.checkedEntryCount}/${item.totalEntryCount} 项", fontSize = 12.sp)
+                item.entries.forEach { Text("${if (it.checked) "☑" else "☐"} ${it.text}") }
+            }
         } }
-        if (record.preview.remainingItemCount > 0) Text("还有 ${record.preview.remainingItemCount} 项内容", fontSize = 12.sp)
+        val preview = record.preview
+        if (preview.remainingItemCount > 0) {
+            val remaining = buildList {
+                add("还有 ${preview.remainingItemCount} 项内容")
+                if (preview.remainingPhotoCount > 0) add("${preview.remainingPhotoCount} 张照片")
+                if (preview.remainingAudioCount > 0) add("${preview.remainingAudioCount} 段录音")
+            }
+            Text(remaining.joinToString(" · "), fontSize = 12.sp)
+        }
         if (record.tags.isNotEmpty()) Row {
             record.tags.take(2).forEach { tag -> TextButton(onClick = { model.openTag(tag) }) { Text(tag.name) } }
             if (record.tags.size > 2) Text("另有 ${record.tags.size - 2} 个标签", fontSize = 12.sp)
@@ -371,23 +402,27 @@ private fun RecordPreview(record: RecordCard, model: FolioViewModel) {
 }
 
 @Composable
-internal fun Photo(id: PhotoId) {
+internal fun Photo(id: PhotoId, thumbnail: Boolean = false) {
     val context = LocalContext.current
     var failed by remember(id) { mutableStateOf(false) }
     var expanded by remember(id) { mutableStateOf(false) }
-    val bitmap by produceState<ImageBitmap?>(null, id) {
+    val bitmap by produceState<ImageBitmap?>(null, id, thumbnail) {
         try {
             value = withContext(Dispatchers.IO) {
                 val originals = LocalPhotoOriginals.get(context)
                 val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                 originals.openOriginal(id).use { BitmapFactory.decodeStream(it, null, bounds) }
-                val options = BitmapFactory.Options().apply { inSampleSize = maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / 1024) }
+                val targetSize = if (thumbnail) 192 else 1024
+                val options = BitmapFactory.Options().apply { inSampleSize = maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / targetSize) }
                 originals.openOriginal(id).use { requireNotNull(BitmapFactory.decodeStream(it, null, options)).asImageBitmap() }
             }
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { failed = true }
     }
-    bitmap?.let { Image(it, "记录中的照片，点击放大", Modifier.fillMaxWidth().heightIn(max = 320.dp).clickable { expanded = true }) }
+    bitmap?.let {
+        if (thumbnail) Image(it, "草稿照片缩略图", Modifier.size(64.dp), contentScale = ContentScale.Crop)
+        else Image(it, "记录中的照片，点击放大", Modifier.fillMaxWidth().heightIn(max = 320.dp).clickable { expanded = true })
+    }
         ?: Text(if (failed) "照片读取失败，请重新打开记录。" else "正在读取照片…")
     if (expanded) Dialog(onDismissRequest = { expanded = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         var scale by remember { mutableFloatStateOf(1f) }

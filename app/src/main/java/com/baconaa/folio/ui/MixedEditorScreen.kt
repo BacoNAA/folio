@@ -165,12 +165,15 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
         } }, confirmButton = { TextButton(onClick = { showAdd = false }) { Text("取消") } })
 }
 
+internal fun formatAudioDuration(millis: Long): String =
+    "${millis / 60_000}:${((millis / 1_000) % 60).toString().padStart(2, '0')}"
+
 @Composable
 internal fun AudioControl(id: AudioId, duration: Long, model: FolioViewModel) {
     val playback by model.playback.collectAsState()
     val current = playback.audioId == id
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text("录音 · ${duration / 60_000}:${((duration / 1_000) % 60).toString().padStart(2, '0')}", Modifier.weight(1f))
+        Text("录音 · ${formatAudioDuration(duration)}", Modifier.weight(1f))
         TextButton(onClick = { model.play(id) }, enabled = !model.state.recording) {
             Text(if (current && playback.isPlaying) "暂停" else if (current && playback.isBuffering) "正在加载" else "试听")
         }
