@@ -366,16 +366,28 @@ private fun RecordPreview(record: RecordCard, model: FolioViewModel) {
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         val eventTime = record.eventTime
         val dateLabel = if (eventTime is EventTime.Exact) eventTime.date.toString() else eventTime?.label
-        Text(listOfNotNull(dateLabel, if (record.marks.isPinned) "置顶" else null,
-            if (record.marks.isStarred) "★" else null).joinToString(" · "), fontSize = 12.sp, color = Accent)
+        val metadata = listOfNotNull(dateLabel, record.place?.info?.name,
+            "置顶".takeIf { record.marks.isPinned }, "★".takeIf { record.marks.isStarred })
+        if (metadata.isNotEmpty()) Text(metadata.joinToString(" · "), fontSize = 12.sp, color = Accent)
         record.title?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
         record.preview.items.forEach { item -> when (item) {
             is PreviewContentItem.Text -> Text(item.text, maxLines = 4, lineHeight = 26.sp)
             is PreviewContentItem.Photo -> { Photo(item.photoId); if (item.caption.isNotEmpty()) Text(item.caption) }
             is PreviewContentItem.Audio -> { AudioControl(item.audioId, item.durationMillis, model); if (item.caption.isNotEmpty()) Text(item.caption) }
-            is PreviewContentItem.Checklist -> item.entries.forEach { Text("${if (it.checked) "☑" else "☐"} ${it.text}") }
+            is PreviewContentItem.Checklist -> {
+                Text("清单 · 已完成 ${item.checkedEntryCount}/${item.totalEntryCount} 项", fontSize = 12.sp)
+                item.entries.forEach { Text("${if (it.checked) "☑" else "☐"} ${it.text}") }
+            }
         } }
-        if (record.preview.remainingItemCount > 0) Text("还有 ${record.preview.remainingItemCount} 项内容", fontSize = 12.sp)
+        val preview = record.preview
+        if (preview.remainingItemCount > 0) {
+            val remaining = buildList {
+                add("还有 ${preview.remainingItemCount} 项内容")
+                if (preview.remainingPhotoCount > 0) add("${preview.remainingPhotoCount} 张照片")
+                if (preview.remainingAudioCount > 0) add("${preview.remainingAudioCount} 段录音")
+            }
+            Text(remaining.joinToString(" · "), fontSize = 12.sp)
+        }
         if (record.tags.isNotEmpty()) Row {
             record.tags.take(2).forEach { tag -> TextButton(onClick = { model.openTag(tag) }) { Text(tag.name) } }
             if (record.tags.size > 2) Text("另有 ${record.tags.size - 2} 个标签", fontSize = 12.sp)

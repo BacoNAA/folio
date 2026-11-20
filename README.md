@@ -68,7 +68,7 @@ Room v13 为地点增加可空经纬度，v12 旧地点保留原身份和资料�
 
 向 `queryRecords` 传入 `RecordQuery` 可在同一次查询中叠加事件时间。`EventTimeFilter.Within(start..end)` 按事件当地日期筛选，包含首尾两天。`certain`、`possible` 各自按置顶及最近记录排序，列表长度就是对应计数。以 2025 年为例，2025 年秋天明确符合，2025 年冬天因延续到次年 2 月而可能符合。`undatedCount` 给出同样条件下可另行查看的时间未定条数。用 `query.copy(time = EventTimeFilter.Undated)` 单独查看，用 `query.copy(time = null)` 移除时间限制，关键词及其他条件继续生效。[查询接口](app/src/main/java/com/baconaa/folio/records/RecordQuery.kt)
 
-浏览卡片的 `preview` 按原顺序展示最多三个内容项，每项文字及媒体说明截取前 80 个 Unicode 码点；录音返回片段 ID 和时长供试听，清单只读展示前三条事项及全部事项、已完成事项数量。`PreviewContentItem` 与可保存的 `ContentItem` 分开，避免截断预览被回存为完整内容。`remainingItemCount`、`remainingPhotoCount` 和 `remainingAudioCount` 表示未展示的内容项及其中照片、录音项数量，空白文字不占预览，重复使用的媒体仍按各自内容项计数。详情通过同一 `RecordId` 调用 `openRecordContent`，读取完整内容及时间信息。当前列表为全量读取。
+记录流和搜索结果的卡片显示已填地点，按原顺序预览最多三个内容项。清单展示前三条事项和整张清单的完成数，例如「已完成 2/4 项」。还有内容时显示剩余项数，其中有照片或录音时分别显示数量。每项文字及媒体说明截取前 80 个 Unicode 码点，录音可直接试听。`PreviewContentItem` 与可保存的 `ContentItem` 分开，避免截断预览被回存为完整内容。`remainingItemCount`、`remainingPhotoCount` 和 `remainingAudioCount` 表示未展示的内容项及其中照片、录音项数量，空白文字不占预览，重复使用的媒体仍按各自内容项计数。详情通过同一 `RecordId` 调用 `openRecordContent`，读取完整内容及时间信息。当前列表为全量读取。
 
 删除与恢复使用 [RecordTrash](app/src/main/java/com/baconaa/folio/records/RecordTrash.kt)：`moveToTrash` 将正式记录和编辑草稿一起隐藏，`listTrash` 与 `openTrashRecord` 只展示上次完成的内容并通过 `hasDraft` 提示未完成修改；`restoreRecord` 用于立即撤销或从回收站恢复，两份内容保持独立。重复删除或恢复返回 `false`。详情与回收站页面已接入删除确认、撤销提示和恢复，编辑中的记录可先返回详情再删除。
 
