@@ -2,6 +2,7 @@ package com.baconaa.folio
 
 import android.Manifest
 import android.net.Uri
+import androidx.activity.compose.setContent
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.lifecycle.Lifecycle
@@ -10,6 +11,10 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.baconaa.folio.media.LocalPhotoOriginals
 import com.baconaa.folio.media.createAudioTestClip
 import com.baconaa.folio.records.*
+import com.baconaa.folio.ui.FolioApp
+import com.baconaa.folio.ui.FolioViewModel
+import java.io.IOException
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Rule
@@ -113,6 +118,41 @@ class MixedEditorNavigationTest {
         waitText(title)
         val id = runBlocking { store.queryRecords(title).single().id }
         runBlocking { store.moveToTrash(id); store.deletePermanently(id) }
+    }
+
+    @Test
+    fun retryOpensTheDraftThatFailedToRead() {
+        val selectedText = "重新读取草稿${System.nanoTime()}"
+        val (other, selected) = runBlocking {
+            requireNotNull(store.saveDraft(null, TextEdit("另一份草稿", 0))) to
+                requireNotNull(store.saveDraft(null, TextEdit(selectedText, 2)))
+        }
+        val firstRead = AtomicBoolean(true)
+        val unreliable = object : MixedContentDrafts by store {
+            override suspend fun openMixedDraft(id: DraftId): MixedDraft? {
+                if (id == selected && firstRead.getAndSet(false)) throw IOException("test draft read failure")
+                return store.openMixedDraft(id)
+            }
+        }
+        try {
+            compose.runOnUiThread {
+                val model = FolioViewModel(store, store, unreliable, store)
+                compose.activity.setContent { FolioApp(model) }
+            }
+            compose.onNodeWithTag("nav-Records").performClick()
+            compose.waitUntil(10_000) {
+                compose.onAllNodesWithText("继续草稿 ·", substring = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithText("继续草稿 ·", substring = true).performClick()
+            compose.onNodeWithTag("draft-${selected.value}").performClick()
+            waitText("草稿读取失败，请重试。")
+            compose.onNodeWithText("重试").performClick()
+            waitText(selectedText)
+            compose.onNodeWithTag("editor").assertTextContains(selectedText)
+            assertNotNull(runBlocking { store.openDraft(other) })
+        } finally {
+            runBlocking { store.discardDraft(selected); store.discardDraft(other) }
+        }
     }
 
     @Test

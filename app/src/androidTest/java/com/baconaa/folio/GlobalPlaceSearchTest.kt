@@ -1,11 +1,16 @@
 package com.baconaa.folio
 
 import android.net.Uri
+import androidx.activity.compose.setContent
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import com.baconaa.folio.media.LocalPhotoOriginals
 import com.baconaa.folio.records.*
+import com.baconaa.folio.ui.FolioApp
+import com.baconaa.folio.ui.FolioViewModel
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -97,17 +102,116 @@ class GlobalPlaceSearchTest {
         search(keyword)
         choosePlace(place, name, "成都")
         waitCount(17)
+        visitResultAndReturn("$keyword 4", 17)
+        compose.onNodeWithTag("search").assertTextContains(keyword)
+        compose.onNodeWithTag("remove-place-filter").assertExists()
+    }
+
+    @Test fun tagAlternativesRemainIndependentOfKeywordAndStar() {
+        val keyword = "咖啡${System.nanoTime()}"
+        val suffix = keyword.takeLast(4)
+        val travel = "旅行$suffix"
+        val dining = "聚餐$suffix"
+        val (travelTag, diningTag) = runBlocking {
+            suspend fun draft(label: String) = requireNotNull(store.saveDraft(null, TextEdit("$keyword $label", 0)))
+            suspend fun publish(draft: DraftId, starred: Boolean = true) {
+                val record = store.completeMixedDraft(draft)
+                records += record
+                if (starred) store.setStarred(record, true)
+            }
+            val travelDraft = draft("旅行记录")
+            val travelId = store.createDraftTag(travelDraft, travel)
+            publish(travelDraft)
+            val diningDraft = draft("聚餐 0")
+            val diningId = store.createDraftTag(diningDraft, dining)
+            publish(diningDraft)
+            for (index in 1..16) {
+                val anotherDiningDraft = draft("聚餐 $index")
+                store.saveDraftTags(anotherDiningDraft, listOf(diningId))
+                publish(anotherDiningDraft, starred = index != 16)
+            }
+            publish(draft("无标签"))
+            travelId to diningId
+        }
+
+        search(keyword)
+        waitCount(19)
+        tapFilter("只看星标")
+        waitCount(18)
+        tapFilter("筛选标签")
+        compose.waitUntil(10_000) {
+            compose.onAllNodes(hasAnyAncestor(hasTestTag("tag-choices")) and hasClickAction()).fetchSemanticsNodes().isNotEmpty()
+        }
+        chooseTag(travelTag)
+        chooseTag(diningTag)
+        compose.onNodeWithText("关闭标签").performClick()
+        waitCount(17)
+        compose.onNodeWithText("标签：").assertIsDisplayed()
+        compose.onNodeWithText("或").assertIsDisplayed()
+        assertResult("$keyword 旅行记录")
+        assertResult("$keyword 聚餐 0")
+
+        compose.onNodeWithText("$travel ×").performScrollTo().performClick()
+        waitCount(16)
+        compose.onNodeWithText("$travel ×").assertDoesNotExist()
+        compose.onNodeWithText("或").assertDoesNotExist()
+        // 用中间结果核对滚动偏移，留出列表末尾的空间供键盘收起后重新布局。
+        visitResultAndReturn("$keyword 聚餐 7", 16)
+        compose.onNodeWithTag("search").assertTextContains(keyword)
+        compose.onNodeWithText("只看星标").assertIsSelected()
+        compose.onNodeWithText("$dining ×").assertIsDisplayed()
+    }
+
+    @Test fun changingFiltersDoesNotOfferResultsFromThePreviousQuery() {
+        val keyword = "筛选读取${System.nanoTime()}"
+        val oldResult = "$keyword 未加星"
+        val currentResult = "$keyword 已加星"
+        runBlocking {
+            records += store.completeMixedDraft(requireNotNull(store.saveDraft(null, TextEdit(oldResult, 0))))
+            val starred = store.completeMixedDraft(requireNotNull(store.saveDraft(null, TextEdit(currentResult, 0))))
+            records += starred
+            store.setStarred(starred, true)
+        }
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val delayed = object : RecordBrowsing by store {
+            override suspend fun queryRecords(query: RecordQuery): RecordSearchResult {
+                if (query.starredOnly) {
+                    started.complete(Unit)
+                    withTimeout(15_000) { release.await() }
+                }
+                return store.queryRecords(query)
+            }
+        }
+        compose.runOnUiThread {
+            val model = FolioViewModel(store, store, store, delayed)
+            compose.activity.setContent { FolioApp(model) }
+        }
+        search(keyword)
+        waitCount(2)
+        assertResult(oldResult)
+        tapFilter("只看星标")
+        try {
+            runBlocking { withTimeout(10_000) { started.await() } }
+            compose.onNodeWithText(oldResult).assertDoesNotExist()
+        } finally {
+            release.complete(Unit)
+        }
+        waitCount(1)
+        assertResult(currentResult)
+        compose.onNodeWithText(oldResult).assertDoesNotExist()
+    }
+
+    private fun visitResultAndReturn(body: String, count: Int) {
         val results = compose.onNodeWithTag("search-results")
-        val target = hasText("$keyword 4") and hasAnyAncestor(hasTestTag("search-results"))
+        val target = hasText(body) and hasAnyAncestor(hasTestTag("search-results"))
         results.performScrollToNode(target)
         val row = compose.onNode(target).assertIsDisplayed()
         val originalTop = row.fetchSemanticsNode().boundsInRoot.top - results.fetchSemanticsNode().boundsInRoot.top
         row.performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithText("编辑").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("返回").performClick()
-        waitCount(17)
-        compose.onNodeWithTag("search").assertTextContains(keyword)
-        compose.onNodeWithTag("remove-place-filter").assertExists()
+        waitCount(count)
         val restoredTop = row.assertIsDisplayed().fetchSemanticsNode().boundsInRoot.top - results.fetchSemanticsNode().boundsInRoot.top
         assertEquals(originalTop, restoredTop, 1f)
     }
@@ -115,6 +219,12 @@ class GlobalPlaceSearchTest {
     private fun assertResult(body: String) {
         compose.onNodeWithTag("search-results").performScrollToNode(hasText(body))
         compose.onNodeWithText(body).assertIsDisplayed()
+    }
+
+    private fun chooseTag(id: TagId) {
+        val choice = hasTestTag("tag-choice-${id.value}")
+        compose.onNodeWithTag("tag-choices").performScrollToNode(choice)
+        compose.onNode(choice).assertIsEnabled().performClick()
     }
 
     private fun choosePlace(id: PlaceId, query: String, displayedInfo: String) {

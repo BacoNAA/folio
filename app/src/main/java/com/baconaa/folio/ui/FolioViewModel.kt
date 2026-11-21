@@ -66,6 +66,7 @@ data class FolioState(
     val page: Page = Page.Capture,
     val editor: RecordEditor? = null,
     val drafts: List<DraftPreview> = emptyList(),
+    val draftReadRetry: DraftPreview? = null,
     val records: List<RecordCard> = emptyList(),
     val timeline: EventTimeline = EventTimeline(emptyList(), emptyList()),
     val recent: Boolean = false,
@@ -148,7 +149,8 @@ class FolioViewModel(
         if (state.busy || state.editor != null) return
         media?.stopPlayback()
         loadVersion++
-        state = state.copy(page = page, error = null, loading = false, linkingPlace = if (page == Page.Search) state.linkingPlace else null)
+        state = state.copy(page = page, error = null, loading = false, draftReadRetry = null,
+            linkingPlace = if (page == Page.Search) state.linkingPlace else null)
         if (page == Page.Records || page == Page.Search || page == Page.Trash) refresh()
         if (page == Page.Search) { loadTags(); loadObjects() }
         if (page == Page.Places) loadPlaces(directoryPlaceQuery)
@@ -494,7 +496,16 @@ class FolioViewModel(
     fun background() { media?.stopPlayback(); if (state.recording) stopRecording() else save() }
     override fun onCleared() { media?.release(); super.onCleared() }
 
-    fun resume(preview: DraftPreview) = loadEditor(preview.id, preview.recordId, state.page)
+    fun resume(preview: DraftPreview) {
+        val origin = state.page
+        runAction("草稿读取失败，请重试。") {
+            state = state.copy(draftReadRetry = preview)
+            readEditor(preview.id, preview.recordId, origin)
+            state = state.copy(draftReadRetry = null)
+        }
+    }
+
+    fun retryDraftRead() { state.draftReadRetry?.let(::resume) }
 
     fun editRecord() {
         val id = state.detailId ?: return
@@ -503,10 +514,6 @@ class FolioViewModel(
             val draftId = withContext(Dispatchers.IO) { drafts.editRecord(id) }
             readEditor(draftId, id, Page.Detail)
         }
-    }
-
-    private fun loadEditor(id: DraftId, recordId: RecordId?, origin: Page) {
-        runAction("草稿读取失败，请重试。") { readEditor(id, recordId, origin) }
     }
 
     private suspend fun readEditor(id: DraftId, recordId: RecordId?, origin: Page) {
@@ -654,7 +661,7 @@ class FolioViewModel(
         val things = state.filterThings
         val mediaTypes = state.mediaTypes
         val eventDateFilter = state.eventDateFilter
-        state = state.copy(loading = true, error = null)
+        state = state.copy(loading = true, error = null, draftReadRetry = null)
         viewModelScope.launch {
             try {
                 if (page == Page.Search) {
@@ -868,7 +875,8 @@ class FolioViewModel(
         val hasDraft = state.drafts.any { it.recordId == id }
         media?.stopPlayback()
         runAction("移入回收站失败，请重试。") {
-            withContext(Dispatchers.IO) { requireNotNull(trash).moveToTrash(id) }
+            val moved = withContext(Dispatchers.IO) { requireNotNull(trash).moveToTrash(id) }
+            check(moved)
             state = state.copy(page = origin, detail = null, detailId = null, savedId = null,
                 deleted = context, restoredId = null,
                 notice = if (hasDraft) "已移入回收站，未完成修改也已保留" else "已移入回收站")
@@ -880,7 +888,8 @@ class FolioViewModel(
         if (state.editor != null) return
         val deleted = state.deleted ?: return
         runAction("恢复失败，请重试。") {
-            withContext(Dispatchers.IO) { requireNotNull(trash).restoreRecord(deleted.id) }
+            val restored = withContext(Dispatchers.IO) { requireNotNull(trash).restoreRecord(deleted.id) }
+            check(restored)
             state = state.copy(page = deleted.origin, deleted = null, notice = "已撤销删除",
                 query = deleted.query, filterTags = deleted.filterTags, starredOnly = deleted.starredOnly, recent = deleted.recent,
                 placeScope = deleted.placeScope, searchOrigin = deleted.searchOrigin, placeRecent = deleted.placeRecent,
@@ -902,7 +911,8 @@ class FolioViewModel(
     fun retryTrashDetail() { state.trashId?.let(::openTrashRecord) }
     fun restoreRecord(id: RecordId) = runAction("恢复失败，请重试。") {
         media?.stopPlayback()
-        withContext(Dispatchers.IO) { requireNotNull(trash).restoreRecord(id) }
+        val restored = withContext(Dispatchers.IO) { requireNotNull(trash).restoreRecord(id) }
+        check(restored)
         state = state.copy(page = Page.Trash, trashDetail = null, restoredId = id, deleted = null, notice = "已恢复")
         refresh()
     }
@@ -910,8 +920,10 @@ class FolioViewModel(
     fun deletePermanently(id: RecordId) = runAction("彻底删除失败，请重试。") {
         media?.stopPlayback()
         val result = withContext(Dispatchers.IO) { requireNotNull(trash).deletePermanently(id) }
+        state = state.copy(cleanupPending = result.pendingPhotoCount != 0 || result.pendingAudioCount != 0)
+        check(result.deleted)
         state = state.copy(page = Page.Trash, trashDetail = null, restoredId = null, deleted = null,
-            notice = "已彻底删除", cleanupPending = result.pendingPhotoCount != 0 || result.pendingAudioCount != 0)
+            notice = "已彻底删除")
         refresh()
     }
 
@@ -924,7 +936,7 @@ class FolioViewModel(
 
     private fun runAction(failure: String, afterSuccess: (() -> Unit)? = null, action: suspend () -> Unit) {
         if (state.busy) return
-        state = state.copy(busy = true, error = null)
+        state = state.copy(busy = true, error = null, draftReadRetry = null)
         viewModelScope.launch {
             var success = false
             try { action(); success = true }

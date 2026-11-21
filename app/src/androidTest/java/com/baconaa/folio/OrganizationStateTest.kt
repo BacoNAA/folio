@@ -188,6 +188,46 @@ class OrganizationStateTest {
     }
 
     @Test
+    fun staleTrashActionsDoNotReportSuccess() {
+        val id = runBlocking {
+            val draft = requireNotNull(store.saveDraft(null, TextEdit("回收站状态已变化", 0)))
+            store.completeMixedDraft(draft)
+        }
+        val model = model()
+        try {
+            main { model.openRecord(id) }; idle(model)
+            runBlocking { assertTrue(store.moveToTrash(id)) }
+            main { model.deleteRecord() }; idle(model)
+            assertEquals(Page.Detail, model.state.page)
+            assertNull(model.state.deleted)
+            assertNotNull(model.state.error)
+
+            main { model.home(Page.Trash); model.openTrashRecord(id) }; idle(model)
+            runBlocking { assertTrue(store.restoreRecord(id)) }
+            main { model.restoreRecord(id) }; idle(model)
+            assertEquals(Page.TrashDetail, model.state.page)
+            assertNull(model.state.restoredId)
+            assertNotNull(model.state.error)
+
+            main { model.openRecord(id) }; idle(model)
+            main { model.deleteRecord() }; idle(model)
+            runBlocking { assertTrue(store.restoreRecord(id)) }
+            main { model.undoDelete() }; idle(model)
+            assertNotNull(model.state.deleted)
+            assertNotNull(model.state.error)
+
+            runBlocking { assertTrue(store.moveToTrash(id)) }
+            main { model.openTrashRecord(id) }; idle(model)
+            runBlocking { assertTrue(store.deletePermanently(id).deleted) }
+            main { model.deletePermanently(id) }; idle(model)
+            assertEquals(Page.TrashDetail, model.state.page)
+            assertNotNull(model.state.error)
+        } finally {
+            clean(id)
+        }
+    }
+
+    @Test
     fun placeReadFailureDoesNotRepeatCreationAndPlaceQueryFailureIsNotAnEmptyList() {
         var failRead = false
         var failList = false
