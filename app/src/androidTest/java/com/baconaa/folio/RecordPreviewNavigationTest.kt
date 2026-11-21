@@ -1,6 +1,7 @@
 package com.baconaa.folio
 
 import android.net.Uri
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import com.baconaa.folio.media.LocalPhotoOriginals
@@ -40,6 +41,50 @@ class RecordPreviewNavigationTest {
             compose.onNodeWithTag("search").performTextInput(keyword)
             waitForText("1 条记录")
             assertPreview("search-results", keyword, placeName)
+        } finally {
+            runBlocking { store.moveToTrash(id); store.deletePermanently(id) }
+        }
+    }
+
+    @Test fun photoViewerSupportsZoomAndResetUsingButtons() {
+        val context = compose.activity.applicationContext
+        val store = LocalTextStore.get(context)
+        val keyword = "照片缩放${System.nanoTime()}"
+        val id = runBlocking {
+            val photo = LocalPhotoOriginals.get(context).importPhoto(
+                Uri.parse("android.resource://${context.packageName}/${R.drawable.home_art}"))
+            val draft = requireNotNull(store.saveDraft(null, TextEdit(keyword, 0)))
+            store.appendPhotos(draft, listOf(photo))
+            store.completeMixedDraft(draft)
+        }
+        try {
+            compose.onNodeWithTag("nav-Records").performClick()
+            compose.onNodeWithText("搜索全部记录").performClick()
+            compose.onNodeWithTag("search").performTextInput(keyword)
+            waitForText("1 条记录")
+            val results = hasTestTag("search-results")
+            compose.onNode(results).performScrollToNode(hasText(keyword))
+            compose.onNode(hasText(keyword) and hasAnyAncestor(results), useUnmergedTree = true)
+                .performTouchInput { click() }
+            val preview = "记录中的照片，点击放大"
+            compose.waitUntil(10_000) {
+                compose.onAllNodesWithContentDescription(preview).fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithContentDescription(preview).performScrollTo().performClick()
+
+            val photo = compose.onNodeWithContentDescription("照片")
+            photo.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "缩放 100%"))
+            compose.onNodeWithText("缩小").assertIsNotEnabled()
+            compose.onNodeWithText("放大").performClick()
+            photo.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "缩放 150%"))
+            compose.onNodeWithText("缩小").performClick()
+            photo.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "缩放 100%"))
+            compose.onNodeWithText("放大").performClick()
+            compose.onNodeWithText("还原").performClick()
+            photo.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "缩放 100%"))
+            compose.onNodeWithText("关闭照片").performClick()
+            photo.assertDoesNotExist()
+            compose.onNodeWithContentDescription(preview).assertIsDisplayed()
         } finally {
             runBlocking { store.moveToTrash(id); store.deletePermanently(id) }
         }

@@ -39,6 +39,7 @@ import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.IntOffset
@@ -52,6 +53,7 @@ import com.baconaa.folio.records.*
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -442,19 +444,47 @@ internal fun Photo(id: PhotoId, thumbnail: Boolean = false) {
         else Image(it, "记录中的照片，点击放大", Modifier.fillMaxWidth().heightIn(max = 320.dp).clickable { expanded = true })
     }
         ?: Text(if (failed) "照片读取失败，请重新打开记录。" else "正在读取照片…")
-    if (expanded) Dialog(onDismissRequest = { expanded = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        var scale by remember { mutableFloatStateOf(1f) }
-        var offset by remember { mutableStateOf(Offset.Zero) }
-        val transform = rememberTransformableState { zoom, pan, _ ->
-            scale = (scale * zoom).coerceIn(1f, 5f)
-            offset = if (scale == 1f) Offset.Zero else offset + pan
-        }
+    if (expanded) bitmap?.let { PhotoViewer(it) { expanded = false } }
+}
+
+@Composable
+private fun PhotoViewer(bitmap: ImageBitmap, close: () -> Unit) {
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+    val maxScale = 5f
+    val zoomStep = 1.5f
+    val transform = rememberTransformableState { _, zoom, pan, _ ->
+        scale = (scale * zoom).coerceIn(1f, maxScale)
+        offset = if (scale == 1f) Offset.Zero else offset + pan
+    }
+    val controlBackground = Color.Black.copy(alpha = 0.8f)
+    val controlColors = ButtonDefaults.textButtonColors(
+        contentColor = Color.White, disabledContentColor = Color.White.copy(alpha = 0.45f),
+    )
+    Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize(), color = Color.Black) {
             Box(Modifier.fillMaxSize().safeDrawingPadding()) {
-                bitmap?.let { Image(it, "照片", Modifier.fillMaxSize().transformable(transform).graphicsLayer {
-                    scaleX = scale; scaleY = scale; translationX = offset.x; translationY = offset.y
-                }) }
-                TextButton(onClick = { expanded = false }, modifier = Modifier.align(Alignment.TopEnd)) { Text("关闭照片", color = Color.White) }
+                Image(bitmap, "照片", Modifier.fillMaxSize().transformable(transform).graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    translationX = offset.x
+                    translationY = offset.y
+                }.semantics { stateDescription = "缩放 ${(scale * 100).roundToInt()}%" })
+                TextButton(onClick = close, colors = controlColors,
+                    modifier = Modifier.align(Alignment.TopEnd).background(controlBackground)) { Text("关闭照片") }
+                Row(Modifier.align(Alignment.BottomCenter).background(controlBackground)) {
+                    TextButton(onClick = {
+                        scale = (scale / zoomStep).coerceAtLeast(1f)
+                        if (scale == 1f) offset = Offset.Zero
+                    }, enabled = scale > 1f, colors = controlColors) { Text("缩小") }
+                    TextButton(onClick = {
+                        scale = (scale * zoomStep).coerceAtMost(maxScale)
+                    }, enabled = scale < maxScale, colors = controlColors) { Text("放大") }
+                    TextButton(onClick = {
+                        scale = 1f
+                        offset = Offset.Zero
+                    }, enabled = scale > 1f, colors = controlColors) { Text("还原") }
+                }
             }
         }
     }
