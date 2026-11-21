@@ -97,17 +97,76 @@ class GlobalPlaceSearchTest {
         search(keyword)
         choosePlace(place, name, "成都")
         waitCount(17)
+        visitResultAndReturn("$keyword 4", 17)
+        compose.onNodeWithTag("search").assertTextContains(keyword)
+        compose.onNodeWithTag("remove-place-filter").assertExists()
+    }
+
+    @Test fun tagAlternativesRemainIndependentOfKeywordAndStar() {
+        val keyword = "咖啡${System.nanoTime()}"
+        val suffix = keyword.takeLast(4)
+        val travel = "旅行$suffix"
+        val dining = "聚餐$suffix"
+        val (travelTag, diningTag) = runBlocking {
+            suspend fun draft(label: String) = requireNotNull(store.saveDraft(null, TextEdit("$keyword $label", 0)))
+            suspend fun publish(draft: DraftId, starred: Boolean = true) {
+                val record = store.completeMixedDraft(draft)
+                records += record
+                if (starred) store.setStarred(record, true)
+            }
+            val travelDraft = draft("旅行记录")
+            val travelId = store.createDraftTag(travelDraft, travel)
+            publish(travelDraft)
+            val diningDraft = draft("聚餐 0")
+            val diningId = store.createDraftTag(diningDraft, dining)
+            publish(diningDraft)
+            for (index in 1..16) {
+                val anotherDiningDraft = draft("聚餐 $index")
+                store.saveDraftTags(anotherDiningDraft, listOf(diningId))
+                publish(anotherDiningDraft, starred = index != 16)
+            }
+            publish(draft("无标签"))
+            travelId to diningId
+        }
+
+        search(keyword)
+        waitCount(19)
+        tapFilter("只看星标")
+        waitCount(18)
+        tapFilter("筛选标签")
+        compose.waitUntil(10_000) {
+            compose.onAllNodes(hasAnyAncestor(hasTestTag("tag-choices")) and hasClickAction()).fetchSemanticsNodes().isNotEmpty()
+        }
+        chooseTag(travelTag)
+        chooseTag(diningTag)
+        compose.onNodeWithText("关闭标签").performClick()
+        waitCount(17)
+        compose.onNodeWithText("标签：").assertIsDisplayed()
+        compose.onNodeWithText("或").assertIsDisplayed()
+        assertResult("$keyword 旅行记录")
+        assertResult("$keyword 聚餐 0")
+
+        compose.onNodeWithText("$travel ×").performScrollTo().performClick()
+        waitCount(16)
+        compose.onNodeWithText("$travel ×").assertDoesNotExist()
+        compose.onNodeWithText("或").assertDoesNotExist()
+        // 用中间结果核对滚动偏移，留出列表末尾的空间供键盘收起后重新布局。
+        visitResultAndReturn("$keyword 聚餐 7", 16)
+        compose.onNodeWithTag("search").assertTextContains(keyword)
+        compose.onNodeWithText("只看星标").assertIsSelected()
+        compose.onNodeWithText("$dining ×").assertIsDisplayed()
+    }
+
+    private fun visitResultAndReturn(body: String, count: Int) {
         val results = compose.onNodeWithTag("search-results")
-        val target = hasText("$keyword 4") and hasAnyAncestor(hasTestTag("search-results"))
+        val target = hasText(body) and hasAnyAncestor(hasTestTag("search-results"))
         results.performScrollToNode(target)
         val row = compose.onNode(target).assertIsDisplayed()
         val originalTop = row.fetchSemanticsNode().boundsInRoot.top - results.fetchSemanticsNode().boundsInRoot.top
         row.performClick()
         compose.waitUntil(10_000) { compose.onAllNodesWithText("编辑").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("返回").performClick()
-        waitCount(17)
-        compose.onNodeWithTag("search").assertTextContains(keyword)
-        compose.onNodeWithTag("remove-place-filter").assertExists()
+        waitCount(count)
         val restoredTop = row.assertIsDisplayed().fetchSemanticsNode().boundsInRoot.top - results.fetchSemanticsNode().boundsInRoot.top
         assertEquals(originalTop, restoredTop, 1f)
     }
@@ -115,6 +174,12 @@ class GlobalPlaceSearchTest {
     private fun assertResult(body: String) {
         compose.onNodeWithTag("search-results").performScrollToNode(hasText(body))
         compose.onNodeWithText(body).assertIsDisplayed()
+    }
+
+    private fun chooseTag(id: TagId) {
+        val choice = hasTestTag("tag-choice-${id.value}")
+        compose.onNodeWithTag("tag-choices").performScrollToNode(choice)
+        compose.onNode(choice).assertIsEnabled().performClick()
     }
 
     private fun choosePlace(id: PlaceId, query: String, displayedInfo: String) {
