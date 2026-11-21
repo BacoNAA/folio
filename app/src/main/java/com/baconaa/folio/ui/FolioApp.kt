@@ -427,11 +427,12 @@ private fun RecordPreview(record: RecordCard, model: FolioViewModel) {
 }
 
 @Composable
-internal fun Photo(id: PhotoId, thumbnail: Boolean = false) {
+internal fun Photo(id: PhotoId, thumbnail: Boolean = false) = key(id, thumbnail) {
     val context = LocalContext.current
-    var failed by remember(id) { mutableStateOf(false) }
-    var expanded by remember(id) { mutableStateOf(false) }
-    val bitmap by produceState<ImageBitmap?>(null, id, thumbnail) {
+    var failed by remember { mutableStateOf(false) }
+    var expanded by remember { mutableStateOf(false) }
+    var attempt by remember { mutableIntStateOf(0) }
+    val bitmap by produceState<ImageBitmap?>(null, attempt) {
         try {
             value = withContext(Dispatchers.IO) {
                 val originals = LocalPhotoOriginals.get(context)
@@ -444,12 +445,21 @@ internal fun Photo(id: PhotoId, thumbnail: Boolean = false) {
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { failed = true }
     }
-    bitmap?.let {
-        if (thumbnail) Image(it, "草稿照片缩略图", Modifier.size(64.dp), contentScale = ContentScale.Crop)
-        else Image(it, "记录中的照片，点击放大", Modifier.fillMaxWidth().heightIn(max = 320.dp).clickable { expanded = true })
+    val image = bitmap
+    when {
+        image != null && thumbnail -> Image(image, "草稿照片缩略图", Modifier.size(64.dp), contentScale = ContentScale.Crop)
+        image != null -> Image(image, "记录中的照片，点击放大",
+            Modifier.fillMaxWidth().heightIn(max = 320.dp).clickable { expanded = true })
+        failed -> Column {
+            Text("照片读取失败。")
+            if (!thumbnail) TextButton(onClick = {
+                failed = false
+                attempt++
+            }) { Text("重试读取照片") }
+        }
+        else -> Text("正在读取照片…")
     }
-        ?: Text(if (failed) "照片读取失败，请重新打开记录。" else "正在读取照片…")
-    if (expanded) bitmap?.let { PhotoViewer(it) { expanded = false } }
+    if (expanded && image != null) PhotoViewer(image) { expanded = false }
 }
 
 @Composable

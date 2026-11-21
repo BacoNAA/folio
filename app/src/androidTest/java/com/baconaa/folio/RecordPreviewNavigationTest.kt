@@ -7,6 +7,8 @@ import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import com.baconaa.folio.media.LocalPhotoOriginals
 import com.baconaa.folio.media.createAudioTestClip
 import com.baconaa.folio.records.*
+import java.io.File
+import java.nio.file.Files
 import kotlinx.coroutines.runBlocking
 import org.junit.Rule
 import org.junit.Test
@@ -46,18 +48,21 @@ class RecordPreviewNavigationTest {
         }
     }
 
-    @Test fun photoViewerSupportsZoomAndResetUsingButtons() {
+    @Test fun photoViewerRetriesReadAndSupportsZoomUsingButtons() {
         val context = compose.activity.applicationContext
         val store = LocalTextStore.get(context)
         val keyword = "照片缩放${System.nanoTime()}"
-        val id = runBlocking {
+        val (id, photoId) = runBlocking {
             val photo = LocalPhotoOriginals.get(context).importPhoto(
                 Uri.parse("android.resource://${context.packageName}/${R.drawable.home_art}"))
             val draft = requireNotNull(store.saveDraft(null, TextEdit(keyword, 0)))
             store.appendPhotos(draft, listOf(photo))
-            store.completeMixedDraft(draft)
+            store.completeMixedDraft(draft) to photo
         }
+        val original = File(context.filesDir, "photo-originals/${photoId.value}").toPath()
+        val unavailable = original.resolveSibling("${original.fileName}.unavailable")
         try {
+            Files.move(original, unavailable)
             compose.onNodeWithTag("nav-Records").performClick()
             compose.onNodeWithText("搜索全部记录").performClick()
             compose.onNodeWithTag("search").performTextInput(keyword)
@@ -66,6 +71,10 @@ class RecordPreviewNavigationTest {
             compose.onNode(results).performScrollToNode(hasText(keyword))
             compose.onNode(hasText(keyword) and hasAnyAncestor(results), useUnmergedTree = true)
                 .performTouchInput { click() }
+            waitForText("编辑")
+            waitForText("照片读取失败。")
+            Files.move(unavailable, original)
+            compose.onNodeWithText("重试读取照片").performScrollTo().performClick()
             val preview = "记录中的照片，点击放大"
             compose.waitUntil(10_000) {
                 compose.onAllNodesWithContentDescription(preview).fetchSemanticsNodes().isNotEmpty()
@@ -86,6 +95,7 @@ class RecordPreviewNavigationTest {
             photo.assertDoesNotExist()
             compose.onNodeWithContentDescription(preview).assertIsDisplayed()
         } finally {
+            if (Files.exists(unavailable)) Files.move(unavailable, original)
             runBlocking { store.moveToTrash(id); store.deletePermanently(id) }
         }
     }
