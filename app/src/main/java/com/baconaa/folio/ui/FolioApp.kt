@@ -119,10 +119,15 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                 }
                 if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 state.error?.let { error ->
-                    ErrorMessage(error, if (state.page == Page.Detail) model::retryDetail
-                        else if (state.page == Page.TrashDetail) model::retryTrashDetail
-                        else if (state.page == Page.Records || state.page == Page.Search || state.page == Page.Trash) model::refresh
-                        else if (state.editor?.needsReload == true) model::reload else null)
+                    val retry = when {
+                        state.draftReadRetry != null -> model::retryDraftRead
+                        state.page == Page.Detail -> model::retryDetail
+                        state.page == Page.TrashDetail -> model::retryTrashDetail
+                        state.page == Page.Records || state.page == Page.Search || state.page == Page.Trash -> model::refresh
+                        state.editor?.needsReload == true -> model::reload
+                        else -> null
+                    }
+                    ErrorMessage(error, retry)
                 }
 
                 Box(Modifier.weight(1f).fillMaxWidth()) {

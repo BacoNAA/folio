@@ -66,6 +66,7 @@ data class FolioState(
     val page: Page = Page.Capture,
     val editor: RecordEditor? = null,
     val drafts: List<DraftPreview> = emptyList(),
+    val draftReadRetry: DraftPreview? = null,
     val records: List<RecordCard> = emptyList(),
     val timeline: EventTimeline = EventTimeline(emptyList(), emptyList()),
     val recent: Boolean = false,
@@ -148,7 +149,8 @@ class FolioViewModel(
         if (state.busy || state.editor != null) return
         media?.stopPlayback()
         loadVersion++
-        state = state.copy(page = page, error = null, loading = false, linkingPlace = if (page == Page.Search) state.linkingPlace else null)
+        state = state.copy(page = page, error = null, loading = false, draftReadRetry = null,
+            linkingPlace = if (page == Page.Search) state.linkingPlace else null)
         if (page == Page.Records || page == Page.Search || page == Page.Trash) refresh()
         if (page == Page.Search) { loadTags(); loadObjects() }
         if (page == Page.Places) loadPlaces(directoryPlaceQuery)
@@ -494,7 +496,16 @@ class FolioViewModel(
     fun background() { media?.stopPlayback(); if (state.recording) stopRecording() else save() }
     override fun onCleared() { media?.release(); super.onCleared() }
 
-    fun resume(preview: DraftPreview) = loadEditor(preview.id, preview.recordId, state.page)
+    fun resume(preview: DraftPreview) {
+        val origin = state.page
+        runAction("草稿读取失败，请重试。") {
+            state = state.copy(draftReadRetry = preview)
+            readEditor(preview.id, preview.recordId, origin)
+            state = state.copy(draftReadRetry = null)
+        }
+    }
+
+    fun retryDraftRead() { state.draftReadRetry?.let(::resume) }
 
     fun editRecord() {
         val id = state.detailId ?: return
@@ -503,10 +514,6 @@ class FolioViewModel(
             val draftId = withContext(Dispatchers.IO) { drafts.editRecord(id) }
             readEditor(draftId, id, Page.Detail)
         }
-    }
-
-    private fun loadEditor(id: DraftId, recordId: RecordId?, origin: Page) {
-        runAction("草稿读取失败，请重试。") { readEditor(id, recordId, origin) }
     }
 
     private suspend fun readEditor(id: DraftId, recordId: RecordId?, origin: Page) {
@@ -654,7 +661,7 @@ class FolioViewModel(
         val things = state.filterThings
         val mediaTypes = state.mediaTypes
         val eventDateFilter = state.eventDateFilter
-        state = state.copy(loading = true, error = null)
+        state = state.copy(loading = true, error = null, draftReadRetry = null)
         viewModelScope.launch {
             try {
                 if (page == Page.Search) {
@@ -929,7 +936,7 @@ class FolioViewModel(
 
     private fun runAction(failure: String, afterSuccess: (() -> Unit)? = null, action: suspend () -> Unit) {
         if (state.busy) return
-        state = state.copy(busy = true, error = null)
+        state = state.copy(busy = true, error = null, draftReadRetry = null)
         viewModelScope.launch {
             var success = false
             try { action(); success = true }
