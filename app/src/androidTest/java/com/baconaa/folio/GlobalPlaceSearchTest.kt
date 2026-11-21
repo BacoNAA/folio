@@ -1,11 +1,16 @@
 package com.baconaa.folio
 
 import android.net.Uri
+import androidx.activity.compose.setContent
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import com.baconaa.folio.media.LocalPhotoOriginals
 import com.baconaa.folio.records.*
+import com.baconaa.folio.ui.FolioApp
+import com.baconaa.folio.ui.FolioViewModel
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -155,6 +160,46 @@ class GlobalPlaceSearchTest {
         compose.onNodeWithTag("search").assertTextContains(keyword)
         compose.onNodeWithText("只看星标").assertIsSelected()
         compose.onNodeWithText("$dining ×").assertIsDisplayed()
+    }
+
+    @Test fun changingFiltersDoesNotOfferResultsFromThePreviousQuery() {
+        val keyword = "筛选读取${System.nanoTime()}"
+        val oldResult = "$keyword 未加星"
+        val currentResult = "$keyword 已加星"
+        runBlocking {
+            records += store.completeMixedDraft(requireNotNull(store.saveDraft(null, TextEdit(oldResult, 0))))
+            val starred = store.completeMixedDraft(requireNotNull(store.saveDraft(null, TextEdit(currentResult, 0))))
+            records += starred
+            store.setStarred(starred, true)
+        }
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val delayed = object : RecordBrowsing by store {
+            override suspend fun queryRecords(query: RecordQuery): RecordSearchResult {
+                if (query.starredOnly) {
+                    started.complete(Unit)
+                    withTimeout(15_000) { release.await() }
+                }
+                return store.queryRecords(query)
+            }
+        }
+        compose.runOnUiThread {
+            val model = FolioViewModel(store, store, store, delayed)
+            compose.activity.setContent { FolioApp(model) }
+        }
+        search(keyword)
+        waitCount(2)
+        assertResult(oldResult)
+        tapFilter("只看星标")
+        try {
+            runBlocking { withTimeout(10_000) { started.await() } }
+            compose.onNodeWithText(oldResult).assertDoesNotExist()
+        } finally {
+            release.complete(Unit)
+        }
+        waitCount(1)
+        assertResult(currentResult)
+        compose.onNodeWithText(oldResult).assertDoesNotExist()
     }
 
     private fun visitResultAndReturn(body: String, count: Int) {
