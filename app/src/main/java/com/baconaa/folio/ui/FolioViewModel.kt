@@ -868,7 +868,8 @@ class FolioViewModel(
         val hasDraft = state.drafts.any { it.recordId == id }
         media?.stopPlayback()
         runAction("移入回收站失败，请重试。") {
-            withContext(Dispatchers.IO) { requireNotNull(trash).moveToTrash(id) }
+            val moved = withContext(Dispatchers.IO) { requireNotNull(trash).moveToTrash(id) }
+            check(moved)
             state = state.copy(page = origin, detail = null, detailId = null, savedId = null,
                 deleted = context, restoredId = null,
                 notice = if (hasDraft) "已移入回收站，未完成修改也已保留" else "已移入回收站")
@@ -880,7 +881,8 @@ class FolioViewModel(
         if (state.editor != null) return
         val deleted = state.deleted ?: return
         runAction("恢复失败，请重试。") {
-            withContext(Dispatchers.IO) { requireNotNull(trash).restoreRecord(deleted.id) }
+            val restored = withContext(Dispatchers.IO) { requireNotNull(trash).restoreRecord(deleted.id) }
+            check(restored)
             state = state.copy(page = deleted.origin, deleted = null, notice = "已撤销删除",
                 query = deleted.query, filterTags = deleted.filterTags, starredOnly = deleted.starredOnly, recent = deleted.recent,
                 placeScope = deleted.placeScope, searchOrigin = deleted.searchOrigin, placeRecent = deleted.placeRecent,
@@ -902,7 +904,8 @@ class FolioViewModel(
     fun retryTrashDetail() { state.trashId?.let(::openTrashRecord) }
     fun restoreRecord(id: RecordId) = runAction("恢复失败，请重试。") {
         media?.stopPlayback()
-        withContext(Dispatchers.IO) { requireNotNull(trash).restoreRecord(id) }
+        val restored = withContext(Dispatchers.IO) { requireNotNull(trash).restoreRecord(id) }
+        check(restored)
         state = state.copy(page = Page.Trash, trashDetail = null, restoredId = id, deleted = null, notice = "已恢复")
         refresh()
     }
@@ -910,8 +913,10 @@ class FolioViewModel(
     fun deletePermanently(id: RecordId) = runAction("彻底删除失败，请重试。") {
         media?.stopPlayback()
         val result = withContext(Dispatchers.IO) { requireNotNull(trash).deletePermanently(id) }
+        state = state.copy(cleanupPending = result.pendingPhotoCount != 0 || result.pendingAudioCount != 0)
+        check(result.deleted)
         state = state.copy(page = Page.Trash, trashDetail = null, restoredId = null, deleted = null,
-            notice = "已彻底删除", cleanupPending = result.pendingPhotoCount != 0 || result.pendingAudioCount != 0)
+            notice = "已彻底删除")
         refresh()
     }
 
