@@ -3,8 +3,6 @@ package com.baconaa.folio.records
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.baconaa.folio.media.LocalAudioOriginals
-import com.baconaa.folio.media.LocalPhotoOriginals
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -26,7 +24,7 @@ class LocalTextStoreTest {
     @Before
     fun openDatabase() {
         database = Room.databaseBuilder(context, FolioDatabase::class.java, databaseName).build()
-        store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context), now = { millis })
+        store = LocalTextStore(database, context) { millis }
     }
 
     @After

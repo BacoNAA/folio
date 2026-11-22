@@ -293,6 +293,7 @@ class FolioViewModel(
                                 is ContentItem.Text -> mixed.editTextItem(snapshot.draftId, backendId,
                                     (snapshot.textValues[item.id] ?: TextFieldValue(item.text)).asEdit())
                                 is ContentItem.Photo -> mixed.editPhotoCaption(snapshot.draftId, backendId, item.caption)
+                                is ContentItem.Pdf -> Unit // 文件信息随原件导入，编辑器没有待回写的字段。
                                 is ContentItem.Audio -> mixed.editAudioCaption(snapshot.draftId, backendId, item.caption)
                                 is ContentItem.Checklist -> mixed.editChecklist(snapshot.draftId, backendId, item.entries)
                             }
@@ -675,7 +676,7 @@ class FolioViewModel(
                 } else if (page == Page.Trash) {
                     val (result, pending) = withContext(Dispatchers.IO) {
                         val result = requireNotNull(trash).listTrash()
-                        val pending = try { trash.retryPhotoCleanup() + trash.retryAudioCleanup() > 0 }
+                        val pending = try { trash.retryMediaCleanup() > 0 }
                             catch (cancelled: CancellationException) { throw cancelled }
                             catch (_: Exception) { true }
                         result to pending
@@ -920,7 +921,7 @@ class FolioViewModel(
     fun deletePermanently(id: RecordId) = runAction("彻底删除失败，请重试。") {
         media?.stopPlayback()
         val result = withContext(Dispatchers.IO) { requireNotNull(trash).deletePermanently(id) }
-        state = state.copy(cleanupPending = result.pendingPhotoCount != 0 || result.pendingAudioCount != 0)
+        state = state.copy(cleanupPending = result.pendingPhotoCount != 0 || result.pendingAudioCount != 0 || result.pendingImportCount != 0)
         check(result.deleted)
         state = state.copy(page = Page.Trash, trashDetail = null, restoredId = null, deleted = null,
             notice = "已彻底删除")
@@ -928,7 +929,7 @@ class FolioViewModel(
     }
 
     fun retryCleanup() = runAction("部分文件尚未清理，请稍后重试。") {
-        val remaining = withContext(Dispatchers.IO) { requireNotNull(trash).retryPhotoCleanup() + trash.retryAudioCleanup() }
+        val remaining = withContext(Dispatchers.IO) { requireNotNull(trash).retryMediaCleanup() }
         state = state.copy(cleanupPending = remaining > 0)
     }
 
@@ -958,6 +959,7 @@ private fun TextFieldValue.asEdit() = TextEdit(text, selection.end.coerceIn(0, t
 private fun ContentItem.withId(id: ItemId): ContentItem = when (this) {
     is ContentItem.Text -> copy(id = id)
     is ContentItem.Photo -> copy(id = id)
+    is ContentItem.Pdf -> copy(id = id)
     is ContentItem.Audio -> copy(id = id)
     is ContentItem.Checklist -> copy(id = id)
 }

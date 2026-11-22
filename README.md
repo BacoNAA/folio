@@ -38,6 +38,10 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 后端支持同一草稿内交错排列多段文字和照片。用 `saveDraft` 或 `appendPhotos` 起草，随后通过 [MixedContentDrafts](app/src/main/java/com/baconaa/folio/records/MixedContent.kt) 的 `insertText`、`insertPhoto` 追加或紧接指定项插入。`openMixedDraft` 一次读回完整顺序、当前项和光标。`completeMixedDraft` 提交后，`openRecordContent` 的 `items` 按相同顺序返回正式内容。
 
+第二版 M01 的本机接口为 `LocalTextStore.get(context).importMedia(source, type, draftId, after, initialEventTime)`。选择成功后传入来源 URI 与 `ImportType.PDF` 或 `ImportType.AUDIO`。省略 `draftId` 时以文件起草，省略 `after` 时追加到末尾，指定 `ItemId` 时紧接该项插入。取消选择时由页面保留插入位置。成功返回的 `ImportedItem` 包含草稿 ID 和已保存的内容项。来源失效、文件无法读取或位置已失效时抛出异常，原草稿可继续编辑。[Kotlin 接口](app/src/main/java/com/baconaa/folio/records/MediaImports.kt)
+
+PDF 项保存显示名和实际复制的字节数。仅含 PDF 的草稿可直接调用 `completeMixedDraft`。从草稿、正式或回收站详情取得 `ContentItem.Pdf` 后，可用 `openPdf(pdfId)` 读取本机原件。页面也可启动 `pdfViewIntent(item)`，向系统查看器授予只读访问权限。缺少查看器时由页面提示重试。已有录音返回带实测时长的 `ContentItem.Audio`，用原有播放控制按 `audioId` 试听。页面联验可复用[一页虚构收据和两段测试音频](app/src/androidTest/assets/m01)。
+
 `moveItem` 按相邻位置移动一项，`removeItem` 和 `undoRemoval` 支持移除和恢复最近一项。草稿重开后可以通过 `canUndoRemoval` 查询是否还能撤销；移除后对其他项的修改会保留。
 
 清单通过 `appendChecklist` 单独起草或追加，`insertChecklist` 在指定项后插入，`editChecklist` 保存条目文字及勾选状态。每条 `ChecklistEntry` 带稳定 ID，修改时保留该 ID。清单支持草稿重开、移动、移除撤销、完成、放弃和删除恢复；完成前列表和详情仍展示原正式版本。空清单不能独立起草或发布，清空已有项可以暂存草稿。Room v8 将清单内容保存在有序项中，旧文字、照片、事件时间及撤销项通过迁移保留。
@@ -76,7 +80,7 @@ Room v13 为地点增加可空经纬度，v12 旧地点保留原身份和资料�
 
 删除与恢复使用 [RecordTrash](app/src/main/java/com/baconaa/folio/records/RecordTrash.kt)：`moveToTrash` 将正式记录和编辑草稿一起隐藏，`listTrash` 与 `openTrashRecord` 只展示上次完成的内容并通过 `hasDraft` 提示未完成修改；`restoreRecord` 用于立即撤销或从回收站恢复，两份内容保持独立。重复删除或恢复返回 `false`。详情与回收站页面已接入删除确认、撤销提示和恢复，编辑中的记录可先返回详情再删除。
 
-用户确认后调用 `deletePermanently`，在同一事务中彻底删除回收站记录、编辑草稿和撤销项。完成、放弃、覆盖最近移除及彻底删除都会收集释放的媒体候选，提交后只删除已无任何引用的 Folio 文件；共享引用、回收站、隐藏草稿及可撤销项继续保护原件。`pendingPhotoCount`、`pendingAudioCount` 分别表示仍待清理的照片、录音数量，`null` 表示该类清理暂不可用；文件清理失败不改变已完成的记录删除。`retryPhotoCleanup`、`retryAudioCleanup` 可在重开应用后重试持久队列。清理不扫描尚未绑定的新导入照片或新录音，也不触及系统相册来源。
+用户确认后调用 `deletePermanently`，在同一事务中彻底删除回收站记录、编辑草稿和撤销项。完成、放弃、覆盖最近移除及彻底删除都会收集释放的媒体候选，提交后仅清理已无引用的 Folio 原件。共享引用、回收站、隐藏草稿及可撤销项继续保护原件。`pendingPhotoCount`、`pendingAudioCount` 分别统计待清理的照片和已绑定过的录音，`pendingImportCount` 统计待清理的 PDF 及未完成的文件导入。计数为 `null` 表示该类清理暂不可用。可分别通过 `retryPhotoCleanup`、`retryAudioCleanup`、`retryImportCleanup` 重试。文件导入先登记清理候选，再复制和校验原件，绑定草稿项时在同一事务移除候选。进程中断留下的文件可在下次导入或重试清理时回收。
 
 开发者和 AI 从[开发入口](AGENTS.md)定位本轮需求，按[开发流程](docs/engineering/开发流程.md)领卡、联调和验收。
 

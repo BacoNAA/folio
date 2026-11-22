@@ -9,6 +9,7 @@ import androidx.room.Index
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.RenameTable
+import androidx.room.RewriteQueriesToDropUnusedColumns
 import androidx.room.Transaction
 import androidx.room.migration.AutoMigrationSpec
 import androidx.sqlite.SQLiteConnection
@@ -23,6 +24,9 @@ internal data class ContentSlot(
     val checklistJson: String? = null,
     val audioId: String? = null,
     val audioDurationMillis: Long? = null,
+    val pdfId: String? = null,
+    val pdfName: String? = null,
+    val pdfSizeBytes: Long? = null,
 )
 
 @Entity(
@@ -49,10 +53,12 @@ internal data class RecordItemRow(val recordId: String, val position: Int, @Embe
 
 @Dao
 internal abstract class ContentItemDao {
-    @Query("SELECT itemId, text, photoId, caption, checklistJson, audioId, audioDurationMillis FROM draft_items WHERE draftId = :id ORDER BY position")
+    @RewriteQueriesToDropUnusedColumns
+    @Query("SELECT * FROM draft_items WHERE draftId = :id ORDER BY position")
     abstract suspend fun draftItems(id: String): List<ContentSlot>
 
-    @Query("SELECT itemId, text, photoId, caption, checklistJson, audioId, audioDurationMillis FROM record_items WHERE recordId = :id ORDER BY position")
+    @RewriteQueriesToDropUnusedColumns
+    @Query("SELECT * FROM record_items WHERE recordId = :id ORDER BY position")
     abstract suspend fun recordItems(id: String): List<ContentSlot>
 
     @Transaction

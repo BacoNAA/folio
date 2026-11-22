@@ -261,6 +261,7 @@ internal fun RecordContents(content: RecordContent, model: FolioViewModel) {
     content.objects.forEach { Text(it.kind.label, fontSize = 12.sp); ObjectDescription(it) }
     content.items.forEach { item -> when (item) {
         is ContentItem.Text -> Text(item.text, fontSize = 18.sp, lineHeight = 32.sp)
+        is ContentItem.Pdf -> Text(item.displayName)
         is ContentItem.Photo -> { Photo(item.photoId); if (item.caption.isNotEmpty()) Text(item.caption) }
         is ContentItem.Audio -> { AudioControl(item.audioId, item.durationMillis, model); if (item.caption.isNotEmpty()) Text(item.caption) }
         is ContentItem.Checklist -> item.entries.forEach { Text("${if (it.checked) "☑" else "☐"} ${it.text}") }

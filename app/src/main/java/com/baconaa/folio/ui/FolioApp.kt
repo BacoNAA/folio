@@ -397,6 +397,7 @@ private fun RecordPreview(record: RecordCard, model: FolioViewModel) {
         record.title?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
         record.preview.items.forEach { item -> when (item) {
             is PreviewContentItem.Text -> Text(item.text, maxLines = 4, lineHeight = 26.sp)
+            is PreviewContentItem.Pdf -> Text(item.displayName)
             is PreviewContentItem.Photo -> { Photo(item.photoId); if (item.caption.isNotEmpty()) Text(item.caption) }
             is PreviewContentItem.Audio -> { AudioControl(item.audioId, item.durationMillis, model); if (item.caption.isNotEmpty()) Text(item.caption) }
             is PreviewContentItem.Checklist -> {

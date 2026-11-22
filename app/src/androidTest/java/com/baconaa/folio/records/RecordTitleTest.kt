@@ -2,8 +2,6 @@ package com.baconaa.folio.records
 
 import android.graphics.Color
 import androidx.test.platform.app.InstrumentationRegistry
-import com.baconaa.folio.media.LocalAudioOriginals
-import com.baconaa.folio.media.LocalPhotoOriginals
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -17,7 +15,7 @@ internal class RecordTitleTest : PhotoStoreFixture() {
     @Before
     fun useTestClock() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        store = LocalTextStore(database, LocalPhotoOriginals.get(context), { now }, LocalAudioOriginals.get(context))
+        store = LocalTextStore(database, context) { now }
     }
 
     @Test

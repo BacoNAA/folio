@@ -10,6 +10,7 @@ sealed interface PreviewContentItem {
 
     data class Text(override val id: ItemId, val text: String) : PreviewContentItem
     data class Photo(override val id: ItemId, val photoId: PhotoId, val caption: String) : PreviewContentItem
+    data class Pdf(override val id: ItemId, val displayName: String) : PreviewContentItem
     data class Audio(
         override val id: ItemId, val audioId: AudioId, val durationMillis: Long, val caption: String,
     ) : PreviewContentItem
@@ -159,6 +160,7 @@ fun eventTimeline(records: List<RecordCard>): EventTimeline {
 private fun ContentSlot.asPreview(): PreviewContentItem = when (val item = asItem()) {
     is ContentItem.Text -> PreviewContentItem.Text(item.id, item.text)
     is ContentItem.Photo -> PreviewContentItem.Photo(item.id, item.photoId, item.caption)
+    is ContentItem.Pdf -> PreviewContentItem.Pdf(item.id, item.displayName)
     is ContentItem.Audio -> PreviewContentItem.Audio(item.id, item.audioId, item.durationMillis, item.caption)
     is ContentItem.Checklist -> PreviewContentItem.Checklist(
         item.id,

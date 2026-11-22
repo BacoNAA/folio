@@ -47,6 +47,7 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
                         Text(when (item) {
                             is ContentItem.Text -> "文字"
                             is ContentItem.Photo -> "照片"
+                            is ContentItem.Pdf -> "附件"
                             is ContentItem.Audio -> "录音"
                             is ContentItem.Checklist -> "清单"
                         }, Modifier.weight(1f), fontSize = 12.sp)
@@ -76,6 +77,7 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
                                 minLines = 4, maxLines = 12, placeholder = { Text("写下一句话，也可以慢慢写……") },
                                 textStyle = MaterialTheme.typography.bodyLarge.copy(lineHeight = 28.sp))
                         }
+                        is ContentItem.Pdf -> Text(item.displayName)
                         is ContentItem.Photo -> {
                             Photo(item.photoId)
                             OutlinedTextField(item.caption, { model.changeCaption(item.id, it) }, enabled = enabled,

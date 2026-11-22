@@ -1,6 +1,7 @@
 package com.baconaa.folio.media
 
 import android.content.Context
+import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import java.io.File
@@ -42,7 +43,10 @@ class LocalAudioOriginals private constructor(private val context: Context) {
         Files.deleteIfExists(originalFile(id).toPath())
     }
 
-    internal fun originalFile(id: AudioId) = File(originals, "${id.value}.m4a")
+    internal fun importedFile(id: AudioId) = File(originals, "${id.value}.audio")
+
+    internal fun originalFile(id: AudioId): File =
+        importedFile(id).takeIf { it.exists() } ?: File(originals, "${id.value}.m4a")
 
     internal fun createRecordingFile(): File = File.createTempFile("audio-", ".part", pending)
 
@@ -60,27 +64,42 @@ class LocalAudioOriginals private constructor(private val context: Context) {
         }
     }
 
-    private fun inspectDuration(file: File): Long {
+    internal fun inspectDuration(file: File): Long {
         if (!file.isFile || !file.canRead() || file.length() == 0L) {
-            throw IOException("录音文件不存在或无法读取，请重新录制")
+            throw IOException("录音文件不存在或无法读取")
         }
         val extractor = MediaExtractor()
         try {
-            file.inputStream().use { extractor.setDataSource(it.fd) }
-            val track = (0 until extractor.trackCount).firstOrNull {
-                extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME) == "audio/mp4a-latm"
-            } ?: throw IOException("录音中没有可读取的 AAC 音轨，请重新录制")
+            file.inputStream().use {
+                try {
+                    extractor.setDataSource(it.fd)
+                } catch (failure: IOException) {
+                    throw IOException("无法读取音频格式，请选择 MP3 或 M4A（AAC）录音", failure)
+                }
+            }
+            val tracks = (0 until extractor.trackCount).map {
+                extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME).orEmpty()
+            }
+            if (tracks.any { it.startsWith("video/") }) throw IOException("请选择音频文件，当前文件包含视频")
+            val track = tracks.indexOfFirst { it == MediaFormat.MIMETYPE_AUDIO_AAC || it == MediaFormat.MIMETYPE_AUDIO_MPEG }
+            if (track < 0) throw IOException("没有可读取的 MP3 或 AAC 音轨，请重新选择录音")
             val format = extractor.getTrackFormat(track)
+            if (MediaCodecList(MediaCodecList.REGULAR_CODECS).findDecoderForFormat(format) == null) {
+                throw IOException("当前设备无法解码这段录音，请重新选择")
+            }
             val duration = if (format.containsKey(MediaFormat.KEY_DURATION)) {
                 format.getLong(MediaFormat.KEY_DURATION) / 1_000
             } else 0L
             extractor.selectTrack(track)
+            if (extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_ENCRYPTED != 0) {
+                throw IOException("这段录音受保护，请选择可直接播放的文件")
+            }
             if (duration <= 0 || extractor.readSampleData(ByteBuffer.allocate(64 * 1024), 0) <= 0) {
-                throw IOException("录音过短或不完整，请重新录制")
+                throw IOException("录音过短或不完整")
             }
             return duration
         } catch (failure: RuntimeException) {
-            throw IOException("录音无法读取，请重新录制", failure)
+            throw IOException("录音无法读取，请检查音频文件", failure)
         } finally {
             extractor.release()
         }
