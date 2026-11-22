@@ -9,6 +9,7 @@ import android.provider.OpenableColumns
 import androidx.core.content.FileProvider
 import com.baconaa.folio.records.ContentItem
 import com.baconaa.folio.records.ImportType
+import com.baconaa.folio.records.MediaImportException
 import com.baconaa.folio.records.newItemId
 import java.io.File
 import java.io.FileNotFoundException
@@ -38,7 +39,7 @@ internal class ImportedOriginals(private val context: Context, private val audio
         val item = when (type) {
             ImportType.PDF -> {
                 inspectPdf(temp)
-                ContentItem.Pdf(newItemId(), PdfId(id), displayName(source), size)
+                ContentItem.Pdf(newItemId(), PdfId(id), displayName(source) ?: "附件.pdf", size)
             }
             ImportType.AUDIO -> ContentItem.Audio(newItemId(), AudioId(id), audio.inspectDuration(temp))
         }
@@ -54,10 +55,10 @@ internal class ImportedOriginals(private val context: Context, private val audio
         val asset = try {
             context.contentResolver.openAssetFileDescriptor(source, "r")
         } catch (failure: FileNotFoundException) {
-            throw IOException("来源文件已不存在或无法读取，请重新选择", failure)
+            throw MediaImportException("来源文件已不存在或无法读取，请重新选择", failure)
         } catch (failure: SecurityException) {
-            throw IOException("来源文件的读取授权已失效，请重新选择", failure)
-        } ?: throw IOException("无法打开来源文件，请重新选择")
+            throw MediaImportException("来源文件的读取授权已失效，请重新选择", failure)
+        } ?: throw MediaImportException("无法打开来源文件，请重新选择")
         return asset.use {
             val expected = it.length
             val size = it.createInputStream().use { input ->
@@ -75,19 +76,22 @@ internal class ImportedOriginals(private val context: Context, private val audio
                     copied
                 }
             }
-            if (size == 0L || (expected >= 0 && size != expected)) throw IOException("来源文件为空或读取不完整，请重新选择")
+            if (size == 0L || (expected >= 0 && size != expected)) throw MediaImportException("来源文件为空或读取不完整，请重新选择")
             size
         }
     }
 
-    private fun displayName(source: Uri): String {
+    fun displayName(source: Uri): String? = try {
         val name = if (source.scheme == "content") {
             context.contentResolver.query(source, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
                 val column = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                 if (column >= 0 && it.moveToFirst()) it.getString(column) else null
             }
         } else source.lastPathSegment
-        return name?.takeIf { it.isNotBlank() } ?: "附件.pdf"
+        name?.takeIf { it.isNotBlank() }
+    } catch (_: RuntimeException) {
+        // 文件提供方可能只允许打开内容，或已撤销本次授权。
+        null
     }
 
     private fun inspectPdf(file: File) {
@@ -98,11 +102,11 @@ internal class ImportedOriginals(private val context: Context, private val audio
                     document.openPage(0).close()
                 }
             } catch (failure: SecurityException) {
-                throw IOException("无法打开受保护的 PDF，请选择普通 PDF", failure)
+                throw MediaImportException("无法打开受保护的 PDF，请选择普通 PDF", failure)
             } catch (failure: IllegalArgumentException) {
-                throw IOException("文件不是可读取的 PDF，请重新选择", failure)
+                throw MediaImportException("文件不是可读取的 PDF，请重新选择", failure)
             } catch (failure: IOException) {
-                throw IOException("PDF 无法读取，请检查文件并重新选择", failure)
+                throw MediaImportException("PDF 无法读取，请检查文件并重新选择", failure)
             }
         }
     }

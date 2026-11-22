@@ -22,6 +22,8 @@ import kotlinx.coroutines.withContext
 
 enum class Page { Capture, Records, Search, Detail, Editor, Trash, TrashDetail, Places }
 
+data class FileImportFailure(val type: ImportType, val after: ItemId?, val message: String)
+
 data class RecordEditor(
     val draftId: DraftId? = null,
     val recordId: RecordId? = null,
@@ -47,6 +49,7 @@ data class RecordEditor(
     val photoTimeOffer: PhotoTimeOffer? = null,
     // 首次落盘分配后端 ID，但当前输入项及其键盘回调保留原身份；写入时再映射。
     val backendItemIds: Map<ItemId, ItemId> = emptyMap(),
+    val fileImportFailure: FileImportFailure? = null,
 ) {
     fun position(id: ItemId?) = id?.takeUnless { it == unboundItem }?.let { backendItemIds[it] ?: it }
     val value: TextFieldValue get() = textValues.values.firstOrNull() ?: TextFieldValue()
@@ -138,6 +141,7 @@ class FolioViewModel(
     private val trash: RecordTrash? = published as? RecordTrash ?: mixed as? RecordTrash,
     private val places: RecordPlaces? = published as? RecordPlaces ?: mixed as? RecordPlaces,
     private val objects: RecordObjects? = published as? RecordObjects ?: mixed as? RecordObjects,
+    private val imports: MediaImports? = mixed as? MediaImports ?: published as? MediaImports,
 ) : ViewModel() {
     var state by mutableStateOf(FolioState())
         private set
@@ -169,9 +173,13 @@ class FolioViewModel(
         } }
     }
 
-    fun newText() = begin(ContentItem.Text(ItemId(UUID.randomUUID().toString()), ""))
-    fun newChecklist() = begin(ContentItem.Checklist(ItemId(UUID.randomUUID().toString()),
-        listOf(ChecklistEntry(ChecklistEntryId.create(), ""))))
+    fun newText() = begin(emptyItem(EmptyInput.Text))
+    fun newChecklist() = begin(emptyItem(EmptyInput.Checklist))
+
+    private fun emptyItem(input: EmptyInput) = when (input) {
+        EmptyInput.Text -> ContentItem.Text(newItemId(), "")
+        EmptyInput.Checklist -> ContentItem.Checklist(newItemId(), listOf(ChecklistEntry(ChecklistEntryId.create(), "")))
+    }
 
     private fun begin(item: ContentItem? = null, currentTime: Boolean = true) {
         if (state.busy || state.editor != null) return
@@ -329,8 +337,7 @@ class FolioViewModel(
         structure("添加失败，请重试。") { editor ->
             val id = editor.draftId
             if (id == null) {
-                val item = if (checklist) ContentItem.Checklist(ItemId(UUID.randomUUID().toString()),
-                    listOf(ChecklistEntry(ChecklistEntryId.create(), ""))) else ContentItem.Text(ItemId(UUID.randomUUID().toString()), "")
+                val item = emptyItem(if (checklist) EmptyInput.Checklist else EmptyInput.Text)
                 state = state.copy(editor = editor.copy(items = listOf(item), activeItemId = item.id,
                     textValues = if (item is ContentItem.Text) mapOf(item.id to TextFieldValue()) else emptyMap(), revision = 0, savedRevision = 0))
             } else withContext(Dispatchers.IO) {
@@ -386,19 +393,63 @@ class FolioViewModel(
             writes.withLock {
                 if (!saveLatest()) return@withLock
                 val editor = state.editor ?: return@withLock
-                launch(ExternalTarget(editor.draftId?.value, editor.recordId?.value, editor.position(after)?.value,
-                    editor.returnPage, state.detailOrigin, editor.eventTime))
+                val emptyInput = if (editor.draftId == null) when (editor.items.singleOrNull()) {
+                    is ContentItem.Text -> EmptyInput.Text
+                    is ContentItem.Checklist -> EmptyInput.Checklist
+                    else -> null
+                } else null
+                launch(ExternalTarget(editor.draftId?.value, editor.recordId?.value,
+                    editor.draftId?.let { editor.position(after)?.value }, editor.returnPage, state.detailOrigin,
+                    editor.eventTime, emptyInput = emptyInput, placeBookId = state.placeBook?.id?.value))
             }
         }
     }
 
     private suspend fun restoreTarget(target: ExternalTarget) {
         if (state.editor == null) {
+            val book = target.placeBookId?.let { withContext(Dispatchers.IO) { places?.openPlace(PlaceId(it)) } }
             if (target.draftId != null) readEditor(DraftId(target.draftId), target.recordId?.let(::RecordId), target.returnPage)
-            else state = state.copy(page = Page.Editor, editor = RecordEditor(returnPage = target.returnPage, eventTime = target.eventTime))
-            state = state.copy(detailOrigin = target.detailOrigin)
+            else {
+                val item = target.emptyInput?.let(::emptyItem)
+                state = state.copy(page = Page.Editor, editor = RecordEditor(items = listOfNotNull(item),
+                    activeItemId = item?.id, returnPage = target.returnPage, eventTime = target.eventTime,
+                    place = book.takeIf { target.returnPage == Page.Search }))
+            }
+            state = state.copy(detailOrigin = target.detailOrigin,
+                placeScope = book?.let { PlaceScope(it, isBook = true) } ?: state.placeScope)
         }
         check(state.editor != null && state.editor?.draftId?.value == target.draftId) { "原草稿已不可编辑" }
+    }
+
+    fun receiveDocument(uri: Uri?, type: ImportType, target: ExternalTarget) {
+        if (uri == null && state.editor != null) return
+        runAction("无法回到原草稿，请从记录页重新打开。") {
+            writes.withLock {
+                restoreTarget(target)
+                if (uri == null || !saveLatest()) return@withLock
+                val editor = requireNotNull(state.editor)
+                val after = target.afterId?.let(::ItemId)
+                val result = try {
+                    requireNotNull(imports).importMedia(uri, type, editor.draftId, after, target.eventTime, editor.place?.id)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    val message = (failure as? MediaImportException)?.message ?: "文件未能加入草稿，请重新选择或继续编辑。"
+                    state = state.copy(editor = editor.copy(fileImportFailure = FileImportFailure(type, after, message)))
+                    return@withLock
+                }
+                state = state.copy(editor = editor.copy(draftId = result.draftId, fileImportFailure = null))
+                reloadCurrent()
+            }
+        }
+    }
+
+    fun dismissFileImportFailure() {
+        state.editor?.let { state = state.copy(editor = it.copy(fileImportFailure = null)) }
+    }
+
+    suspend fun pdfViewIntent(item: ContentItem.Pdf) = withContext(Dispatchers.IO) {
+        requireNotNull(imports).pdfViewIntent(item)
     }
 
     fun receivePhoto(uri: Uri, target: ExternalTarget) {

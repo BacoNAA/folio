@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
+import com.baconaa.folio.records.MediaImportException
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
@@ -66,7 +67,7 @@ class LocalAudioOriginals private constructor(private val context: Context) {
 
     internal fun inspectDuration(file: File): Long {
         if (!file.isFile || !file.canRead() || file.length() == 0L) {
-            throw IOException("录音文件不存在或无法读取")
+            throw MediaImportException("录音文件不存在或无法读取")
         }
         val extractor = MediaExtractor()
         try {
@@ -74,32 +75,32 @@ class LocalAudioOriginals private constructor(private val context: Context) {
                 try {
                     extractor.setDataSource(it.fd)
                 } catch (failure: IOException) {
-                    throw IOException("无法读取音频格式，请选择 MP3 或 M4A（AAC）录音", failure)
+                    throw MediaImportException("无法读取音频格式，请选择 MP3 或 M4A（AAC）录音", failure)
                 }
             }
             val tracks = (0 until extractor.trackCount).map {
                 extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME).orEmpty()
             }
-            if (tracks.any { it.startsWith("video/") }) throw IOException("请选择音频文件，当前文件包含视频")
+            if (tracks.any { it.startsWith("video/") }) throw MediaImportException("请选择音频文件，当前文件包含视频")
             val track = tracks.indexOfFirst { it == MediaFormat.MIMETYPE_AUDIO_AAC || it == MediaFormat.MIMETYPE_AUDIO_MPEG }
-            if (track < 0) throw IOException("没有可读取的 MP3 或 AAC 音轨，请重新选择录音")
+            if (track < 0) throw MediaImportException("没有可读取的 MP3 或 AAC 音轨，请重新选择录音")
             val format = extractor.getTrackFormat(track)
             if (MediaCodecList(MediaCodecList.REGULAR_CODECS).findDecoderForFormat(format) == null) {
-                throw IOException("当前设备无法解码这段录音，请重新选择")
+                throw MediaImportException("当前设备无法解码这段录音，请重新选择")
             }
             val duration = if (format.containsKey(MediaFormat.KEY_DURATION)) {
                 format.getLong(MediaFormat.KEY_DURATION) / 1_000
             } else 0L
             extractor.selectTrack(track)
             if (extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_ENCRYPTED != 0) {
-                throw IOException("这段录音受保护，请选择可直接播放的文件")
+                throw MediaImportException("这段录音受保护，请选择可直接播放的文件")
             }
             if (duration <= 0 || extractor.readSampleData(ByteBuffer.allocate(64 * 1024), 0) <= 0) {
-                throw IOException("录音过短或不完整")
+                throw MediaImportException("录音过短或不完整")
             }
             return duration
         } catch (failure: RuntimeException) {
-            throw IOException("录音无法读取，请检查音频文件", failure)
+            throw MediaImportException("录音无法读取，请检查音频文件", failure)
         } finally {
             extractor.release()
         }

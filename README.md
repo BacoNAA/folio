@@ -10,7 +10,7 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 从「随手记」的写一句、拍照、选图、录音或清单开始记录，内容自动存入本机草稿。从「记录 → 继续草稿」重开，单份草稿直接续写，多份按最近编辑顺序排列。可以看首张照片的缩略图或已保存录音的总时长来辨认草稿，点选后继续编辑。新建点「完成」后回首页，经「已保存 · 查看」打开详情；搜索只返回正式版本。已有记录可编辑和放弃，完成后回到原记录详情，再返回原浏览或搜索位置。失败时保留输入并显示重试入口，空白记录不能完成。
 
-编辑页按顺序展示文字、照片、录音和清单。「＋ 添加内容」追加到末尾；每项「⋯」支持在此后添加、相邻移动、移除与撤销，重开草稿仍可撤销最近移除。照片复制原件后加入草稿，可重复添加多张，点图可放大；清单支持增删事项与勾选。录音按需申请麦克风权限，拒绝后仍可编辑其他内容；可取消或停止并保存、试听和填写说明。离开编辑或进入后台会停止录制并保存有效片段，后台不继续长录音。媒体绑定失败保留原件 ID 重试，只有加入草稿成功才显示保存完成；导入失败可重试或放弃这张照片继续编辑。
+编辑页可混排文字、照片、录音、清单和 PDF 附件。「＋ 添加内容」追加到末尾；每项「⋯」支持在此后添加、相邻移动、移除与撤销，重开草稿仍可撤销最近移除。照片复制原件后加入草稿，可重复添加多张，点图可放大；清单支持增删事项与勾选。现场录音按需申请麦克风权限，拒绝后仍可编辑其他内容；可取消或停止并保存、试听和填写说明。离开编辑或进入后台会停止录制并保存有效片段，后台不继续长录音。媒体绑定失败保留原件 ID 重试，只有加入草稿成功才显示保存完成；导入失败可重试或放弃这张照片继续编辑。
 
 编辑页末尾展开「时间、地点与线索」可填写日期、可选时刻及时区，或清空事件时间；现场新建默认现在，从首页导入相册照片默认留空。时间随实际内容存入草稿，完成前不改变正式记录。文字标签可选择已有标签、新建或改名，同名标签保持独立；新标签随记录完成后才供其他记录选用，共享标签改名会先说明影响范围并立即同步引用。标签需要先有实际内容，整理信息不是保存前提。
 
@@ -38,9 +38,11 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 后端支持同一草稿内交错排列多段文字和照片。用 `saveDraft` 或 `appendPhotos` 起草，随后通过 [MixedContentDrafts](app/src/main/java/com/baconaa/folio/records/MixedContent.kt) 的 `insertText`、`insertPhoto` 追加或紧接指定项插入。`openMixedDraft` 一次读回完整顺序、当前项和光标。`completeMixedDraft` 提交后，`openRecordContent` 的 `items` 按相同顺序返回正式内容。
 
-第二版 M01 的本机接口为 `LocalTextStore.get(context).importMedia(source, type, draftId, after, initialEventTime)`。选择成功后传入来源 URI 与 `ImportType.PDF` 或 `ImportType.AUDIO`。省略 `draftId` 时以文件起草，省略 `after` 时追加到末尾，指定 `ItemId` 时紧接该项插入。取消选择时由页面保留插入位置。成功返回的 `ImportedItem` 包含草稿 ID 和已保存的内容项。来源失效、文件无法读取或位置已失效时抛出异常，原草稿可继续编辑。[Kotlin 接口](app/src/main/java/com/baconaa/folio/records/MediaImports.kt)
+第二版 M01 支持从编辑页「＋ 添加内容」选择「PDF 附件」或「导入已有录音」。要插在某一项之后，打开该项的「⋯ → 在此后添加」。系统选择器返回后可直接打开 PDF 或试听录音，取消会回到原编辑位置。导入失败时可查看原因，在原位置重新选择，或继续编辑已有内容。
 
-PDF 项保存显示名和实际复制的字节数。仅含 PDF 的草稿可直接调用 `completeMixedDraft`。从草稿、正式或回收站详情取得 `ContentItem.Pdf` 后，可用 `openPdf(pdfId)` 读取本机原件。页面也可启动 `pdfViewIntent(item)`，向系统查看器授予只读访问权限。缺少查看器时由页面提示重试。已有录音返回带实测时长的 `ContentItem.Audio`，用原有播放控制按 `audioId` 试听。页面联验可复用[一页虚构收据和两段测试音频](app/src/androidTest/assets/m01)。
+本机接口 `LocalTextStore.get(context).importMedia(source, type, draftId, after, initialEventTime, initialPlaceId)` 接收选中的来源 URI 与 `ImportType.PDF` 或 `ImportType.AUDIO`。省略 `draftId` 时以文件起草，可带入初始事件时间和地点小册的地点。省略 `after` 时追加到末尾，指定 `ItemId` 时紧接该项插入。成功返回的 `ImportedItem` 包含草稿 ID 和已保存的内容项。来源或文件读写失败时，`MediaImportException` 提供可展示的原因，文件提供方返回名称时一并指出文件。原草稿可继续编辑。[Kotlin 接口](app/src/main/java/com/baconaa/folio/records/MediaImports.kt)
+
+PDF 项显示文件名和实际体积，仅含 PDF 的草稿也能点「完成」。从草稿、正式或回收站详情点「打开 PDF」，页面通过 `pdfViewIntent(item)` 给系统查看器授予这份 Folio 副本的只读权限。缺少查看器时，附件旁会提示安装后重试。业务代码也可用 `openPdf(pdfId)` 读取原件。已有录音沿用共享播放器和实测时长，可在草稿中填写说明。完成后删除下载的源文件，仍能从详情离线使用副本。[联验样本](app/src/androidTest/assets/m01)
 
 `moveItem` 按相邻位置移动一项，`removeItem` 和 `undoRemoval` 支持移除和恢复最近一项。草稿重开后可以通过 `canUndoRemoval` 查询是否还能撤销；移除后对其他项的修改会保留。
 

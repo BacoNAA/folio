@@ -232,6 +232,95 @@ class MixedEditorStateTest {
         bitmap.recycle()
         return file
     }
+    @Test
+    fun cancelledFilePickerRebuildsTheBlankChecklistAfterProcessLoss() {
+        lateinit var target: ExternalTarget
+        main {
+            val original = FolioViewModel(store, store, store, store)
+            original.newChecklist()
+            original.prepareExternal(original.state.editor!!.activeItemId) { target = it }
+        }
+        assertNull(target.draftId)
+        assertNull(target.afterId)
+        lateinit var reopened: FolioViewModel
+        main {
+            reopened = FolioViewModel(store, store, store, store)
+            reopened.receiveDocument(null, ImportType.PDF, target)
+        }
+        await { !reopened.state.busy && reopened.state.page == Page.Editor }
+        val editor = reopened.state.editor!!
+        assertTrue(editor.items.single() is ContentItem.Checklist)
+        assertEquals(target.eventTime, editor.eventTime)
+        assertNull(editor.draftId)
+    }
+
+    @Test
+    fun retryAfterCommittedPdfOnlyReloadsItsOriginalDraft() {
+        val source = File.createTempFile("m01", ".pdf", context.cacheDir)
+        instrumentation.context.assets.open("m01/窗框凭证.pdf").use { input ->
+            source.outputStream().use { input.copyTo(it) }
+        }
+        var failRead = true
+        val unreliable = object : MixedContentDrafts by store {
+            override suspend fun openMixedDraft(id: DraftId): MixedDraft? {
+                if (failRead) throw IOException("test read failure")
+                return store.openMixedDraft(id)
+            }
+        }
+        lateinit var model: FolioViewModel
+        try {
+            main {
+                model = FolioViewModel(store, store, unreliable, store)
+                model.receiveDocument(Uri.fromFile(source), ImportType.PDF, ExternalTarget(null, null, null, Page.Capture, Page.Records))
+            }
+            await { !model.state.busy && model.state.editor?.needsReload == true }
+            val id = requireNotNull(model.state.editor?.draftId)
+            val saved = runBlocking { store.openMixedDraft(id) }!!.items.single() as ContentItem.Pdf
+            assertTrue(source.delete())
+            main { failRead = false; model.reload() }
+            await { !model.state.busy && model.state.editor?.needsReload == false }
+            assertEquals(id, model.state.editor!!.draftId)
+            assertEquals(listOf(saved), model.state.editor!!.items)
+        } finally {
+            source.delete()
+            model.state.editor?.draftId?.let { runBlocking { store.discardDraft(it) } }
+        }
+    }
+
+    @Test
+    fun firstFilePickedFromPlaceBookKeepsTheSelectedPlaceAfterProcessLoss() {
+        val seed = runBlocking { requireNotNull(store.saveDraft(null, TextEdit("地点样本", 0))) }
+        val placeId = runBlocking { store.createDraftPlace(seed, PlaceInfo("安装现场${System.nanoTime()}")) }
+        val record = runBlocking { store.completeMixedDraft(seed) }
+        val place = runBlocking { requireNotNull(store.openPlace(placeId)) }
+        val source = File.createTempFile("m01-place", ".pdf", context.cacheDir)
+        lateinit var target: ExternalTarget
+        lateinit var reopened: FolioViewModel
+        try {
+            instrumentation.context.assets.open("m01/窗框凭证.pdf").use { input -> source.outputStream().use { input.copyTo(it) } }
+            main {
+                val model = FolioViewModel(store, store, store, store)
+                model.openPlace(place)
+                model.newTextAtPlace()
+                model.prepareExternal(null) { target = it }
+            }
+            main {
+                reopened = FolioViewModel(store, store, store, store)
+                reopened.receiveDocument(Uri.fromFile(source), ImportType.PDF, target)
+            }
+            await { !reopened.state.busy && reopened.state.editor?.draftId != null }
+            assertEquals(placeId, runBlocking { store.openDraftPlace(reopened.state.editor!!.draftId!!) }?.id)
+            assertEquals(placeId, reopened.state.placeBook?.id)
+        } finally {
+            source.delete()
+            runBlocking {
+                reopened.state.editor?.draftId?.let { store.discardDraft(it) }
+                store.moveToTrash(record)
+                store.deletePermanently(record)
+            }
+        }
+    }
+
     private fun main(block: () -> Unit) = instrumentation.runOnMainSync(block)
     private fun await(predicate: () -> Boolean) {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15)

@@ -1,6 +1,7 @@
 package com.baconaa.folio
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -12,6 +13,7 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.baconaa.folio.records.ItemId
+import com.baconaa.folio.records.ImportType
 import com.baconaa.folio.records.LocalTextStore
 import com.baconaa.folio.records.EventTime
 import com.baconaa.folio.records.DatePrecision
@@ -49,6 +51,14 @@ class MainActivity : ComponentActivity() {
         pendingTarget = null
         if (granted && target != null) model.startRecording(target) else model.permissionDenied()
     }
+    private val pdfPicker = documentPicker(ImportType.PDF)
+    private val audioPicker = documentPicker(ImportType.AUDIO)
+
+    private fun documentPicker(type: ImportType) = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val target = pendingTarget
+        pendingTarget = null
+        if (target != null) model.receiveDocument(uri, type, target)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,7 +66,8 @@ class MainActivity : ComponentActivity() {
         savedInstanceState?.getBundle("media-target")?.let {
             pendingTarget = ExternalTarget(it.getString("draft"), it.getString("record"), it.getString("after"),
                 Page.valueOf(it.getString("return") ?: "Capture"), Page.valueOf(it.getString("origin") ?: "Records"),
-                it.readEventTime())
+                it.readEventTime(), emptyInput = it.getString("empty-input")?.let(EmptyInput::valueOf),
+                placeBookId = it.getString("place-book"))
             cameraPath = it.getString("camera")
         }
         model = ViewModelProvider(this, object : ViewModelProvider.Factory {
@@ -66,7 +77,25 @@ class MainActivity : ComponentActivity() {
                 return FolioViewModel(store, store, store, store, LocalEditorMedia(applicationContext)) as T
             }
         })[FolioViewModel::class.java]
-        setContent { FolioApp(model, ::launchMedia) }
+        setContent { FolioApp(model, ::launchMedia, ::chooseDocument) }
+    }
+
+    private fun chooseDocument(type: ImportType, after: ItemId?) {
+        model.prepareExternal(after) { target ->
+            pendingTarget = target
+            try {
+                when (type) {
+                    ImportType.PDF -> pdfPicker.launch(arrayOf("application/pdf"))
+                    ImportType.AUDIO -> audioPicker.launch(arrayOf("audio/*"))
+                }
+            } catch (_: ActivityNotFoundException) {
+                pendingTarget = null
+                model.mediaUnavailable("无法打开系统文件选择器，请检查文件应用后重试。")
+            } catch (_: SecurityException) {
+                pendingTarget = null
+                model.mediaUnavailable("系统文件选择器无法访问，请检查文件应用的访问权限。")
+            }
+        }
     }
 
     private fun launchMedia(kind: String, after: ItemId?) {
@@ -96,6 +125,8 @@ class MainActivity : ComponentActivity() {
         pendingTarget?.let { target -> outState.putBundle("media-target", Bundle().apply {
             putString("draft", target.draftId); putString("record", target.recordId); putString("after", target.afterId)
             putString("return", target.returnPage.name); putString("origin", target.detailOrigin.name); putString("camera", cameraPath)
+            putString("empty-input", target.emptyInput?.name)
+            putString("place-book", target.placeBookId)
             target.eventTime?.let { writeEventTime(it) }
         }) }
         super.onSaveInstanceState(outState)

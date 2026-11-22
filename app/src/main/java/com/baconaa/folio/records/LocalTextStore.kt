@@ -150,7 +150,7 @@ class LocalTextStore internal constructor(
     }
 
     override suspend fun importMedia(
-        source: Uri, type: ImportType, draftId: DraftId?, after: ItemId?, initialEventTime: EventTime?,
+        source: Uri, type: ImportType, draftId: DraftId?, after: ItemId?, initialEventTime: EventTime?, initialPlaceId: PlaceId?,
     ): ImportedItem = withContext(Dispatchers.IO) {
         require(draftId != null || after == null) { "新草稿没有可供插入的内容项" }
         try {
@@ -159,19 +159,29 @@ class LocalTextStore internal constructor(
                 val item = importedOriginals.copy(source, type, assetId)
                 database.withTransaction {
                     val id = draftId ?: createDraft(initialEventTime)
+                    if (draftId == null && initialPlaceId != null) selectDraftPlace(id, initialPlaceId)
                     insertItems(id, after, listOf(item), 0)
                     importQueue.remove(assetId.toString())
                     ImportedItem(id, item)
                 }
             }
         } catch (failure: SQLiteFullException) {
-            throw IOException("本机空间不足，请释放空间后重试", failure)
+            throw importFailure(source, type, "本机空间不足，请释放空间后重试", failure)
         } catch (failure: IOException) {
-            if (generateSequence<Throwable>(failure) { it.cause }.any { it is ErrnoException && it.errno == OsConstants.ENOSPC }) {
-                throw IOException("本机空间不足，请释放空间后重试", failure)
+            val reason = when {
+                generateSequence<Throwable>(failure) { it.cause }.any { it is ErrnoException && it.errno == OsConstants.ENOSPC } ->
+                    "本机空间不足，请释放空间后重试"
+                failure is MediaImportException -> requireNotNull(failure.message)
+                else -> "文件读取或保存失败，请重新选择"
             }
-            throw failure
+            throw importFailure(source, type, reason, failure)
         }
+    }
+
+    private fun importFailure(source: Uri, type: ImportType, reason: String, cause: Exception): MediaImportException {
+        val file = importedOriginals.displayName(source)?.let { "「$it」" }
+            ?: if (type == ImportType.PDF) "所选 PDF" else "所选录音"
+        return MediaImportException("未能导入$file。$reason。", cause)
     }
 
     override fun openPdf(id: PdfId) = importedOriginals.openPdf(id)

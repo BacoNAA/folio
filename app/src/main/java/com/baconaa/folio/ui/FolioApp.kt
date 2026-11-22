@@ -63,7 +63,8 @@ private val Ink = Color(0xFF423A32)
 private val Accent = Color(0xFF956B50)
 
 @Composable
-fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _, _ -> }) {
+fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _, _ -> },
+    chooseDocument: (ImportType, ItemId?) -> Unit = { _, _ -> }) {
     val state = model.state
     val recordsScroll = rememberLazyListState()
     val searchScroll = rememberLazyListState()
@@ -150,7 +151,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                 }
                             }
                         }
-                        Page.Editor -> MixedEditorScreen(model, launchMedia) { discardDialog = true }
+                        Page.Editor -> MixedEditorScreen(model, launchMedia, chooseDocument) { discardDialog = true }
                         Page.Records -> Column {
                             Row {
                                 TextButton(onClick = model::openSearch) { Text("搜索全部记录") }
