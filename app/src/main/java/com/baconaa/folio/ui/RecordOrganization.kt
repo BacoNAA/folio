@@ -96,7 +96,7 @@ internal fun TagDialog(model: FolioViewModel, editing: Boolean, close: () -> Uni
             state.tagsError?.let { ErrorMessage(it, model::loadTags) }
             if (editing) state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             if (state.editor?.needsReload == true) ErrorMessage("标签已保存，请重试读取。", model::reload)
-            LazyColumn(Modifier.weight(1f, fill = false).heightIn(max = 280.dp)) {
+            LazyColumn(Modifier.weight(1f, fill = false).heightIn(max = 280.dp).testTag("tag-choices")) {
                 items(choices, key = { it.id.value }) { tag ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(tag.id in selected, { checked ->
@@ -164,7 +164,11 @@ internal fun SearchFilters(model: FolioViewModel) {
                 showPlace = true
             }) { Text("筛选地点") }
         }
-        if (selectedPlace != null || state.filterTags.isNotEmpty() || state.filterPeople.isNotEmpty() || state.filterThings.isNotEmpty() || state.mediaTypes.isNotEmpty() || state.eventDateFilter != null) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+        if (selectedPlace != null || state.filterTags.isNotEmpty() || state.filterPeople.isNotEmpty() || state.filterThings.isNotEmpty() || state.mediaTypes.isNotEmpty() || state.eventDateFilter != null) Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             selectedPlace?.info?.let { info ->
                 val label = listOf(info.name, info.city, info.address, info.note).filter { it.isNotBlank() }.joinToString(" · ")
                 InputChip(selected = true, onClick = { model.filterByPlace(null) }, modifier = Modifier.testTag("remove-place-filter"),
@@ -177,22 +181,23 @@ internal fun SearchFilters(model: FolioViewModel) {
                 }
                 InputChip(selected = true, onClick = { model.filterEventDate(null) }, label = { Text("$label ×") })
             }
-            state.mediaTypes.sortedBy { it.ordinal }.forEachIndexed { index, type ->
-                if (index > 0) Text("或", Modifier.align(Alignment.CenterVertically))
+            SearchFilterGroup("内容类型", state.mediaTypes.sortedBy { it.ordinal }) { type ->
                 InputChip(selected = true, onClick = { model.filterMedia(state.mediaTypes - type) },
                     label = { Text("${type.label} ×") })
             }
-            state.filterTags.forEach { id ->
+            SearchFilterGroup("标签", state.filterTags) { id ->
                 InputChip(selected = true, onClick = { model.filterByTags(state.filterTags - id) },
                     label = { Text("${state.sharedTags.firstOrNull { it.id == id }?.name ?: "已选标签"} ×") })
             }
             ObjectKind.entries.forEach { kind ->
                 val ids = if (kind == ObjectKind.PERSON) state.filterPeople else state.filterThings
-                ids.forEach { id ->
+                SearchFilterGroup(kind.label, ids) { id ->
                     val value = state.sharedObjects.firstOrNull { it.id == id }
+                    val name = value?.info?.name ?: "已选对象"
+                    val note = value?.info?.note?.takeIf { it.isNotBlank() }?.let { "（$it）" }.orEmpty()
                     InputChip(selected = true, onClick = { model.filterObjects(kind, ids - id) },
                         modifier = Modifier.testTag("remove-object-${id.value}"),
-                        label = { Text("${kind.label}：${value?.info?.name ?: "已选对象"}${value?.info?.note?.takeIf { it.isNotBlank() }?.let { "（$it）" }.orEmpty()} ×") })
+                        label = { Text("$name$note ×") })
                 }
             }
         }
@@ -212,6 +217,18 @@ internal fun SearchFilters(model: FolioViewModel) {
         } } }, confirmButton = { TextButton(onClick = { showMedia = false }) { Text("完成选择") } })
     if (showTags) TagDialog(model, editing = false) { showTags = false }
     objectKind?.let { ObjectPicker(model, it, editing = false) { objectKind = null } }
+}
+
+@Composable
+private fun <T> SearchFilterGroup(category: String, options: Collection<T>, chip: @Composable (T) -> Unit) {
+    if (options.isEmpty()) return
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("$category：", style = MaterialTheme.typography.labelMedium)
+        options.forEachIndexed { index, option ->
+            if (index > 0) Text("或", style = MaterialTheme.typography.labelMedium)
+            chip(option)
+        }
+    }
 }
 
 @Composable

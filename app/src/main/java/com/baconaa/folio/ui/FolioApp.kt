@@ -39,6 +39,7 @@ import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.IntOffset
@@ -52,6 +53,7 @@ import com.baconaa.folio.records.*
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -117,10 +119,15 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                 }
                 if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 state.error?.let { error ->
-                    ErrorMessage(error, if (state.page == Page.Detail) model::retryDetail
-                        else if (state.page == Page.TrashDetail) model::retryTrashDetail
-                        else if (state.page == Page.Records || state.page == Page.Search || state.page == Page.Trash) model::refresh
-                        else if (state.editor?.needsReload == true) model::reload else null)
+                    val retry = when {
+                        state.draftReadRetry != null -> model::retryDraftRead
+                        state.page == Page.Detail -> model::retryDetail
+                        state.page == Page.TrashDetail -> model::retryTrashDetail
+                        state.page == Page.Records || state.page == Page.Search || state.page == Page.Trash -> model::refresh
+                        state.editor?.needsReload == true -> model::reload
+                        else -> null
+                    }
+                    ErrorMessage(error, retry)
                 }
 
                 Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -181,16 +188,14 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                             if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
                             if (!state.loading && state.error == null) {
                                 SearchResultSummary(state.results.size + state.possibleResults.size, state.filterPlace?.info?.name)
-                            }
-                            LazyColumn(state = searchScroll, contentPadding = PaddingValues(vertical = 12.dp),
-                                verticalArrangement = Arrangement.spacedBy(20.dp), modifier = Modifier.testTag("search-results")) {
-                                if (state.error == null) {
-                                    if (!state.loading && state.undatedMatchCount > 0) item {
+                                LazyColumn(state = searchScroll, contentPadding = PaddingValues(vertical = 12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(20.dp), modifier = Modifier.testTag("search-results")) {
+                                    if (state.undatedMatchCount > 0) item {
                                         TextButton(onClick = { model.filterEventDate(EventDateFilter.Undated) }) {
                                             Text("查看时间未定记录（${state.undatedMatchCount} 条）")
                                         }
                                     }
-                                    if (!state.loading && state.results.isEmpty() && state.possibleResults.isEmpty()) item {
+                                    if (state.results.isEmpty() && state.possibleResults.isEmpty()) item {
                                         Column {
                                             EmptyMessage("没有同时符合这些条件的记录\n可移除筛选条件，或修改搜索词。")
                                             if (state.eventDateFilter != null) TextButton(onClick = { model.filterEventDate(null) }) {
@@ -208,10 +213,8 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                         item { Text("可能符合 ${state.possibleResults.size} 条") }
                                         items(state.possibleResults, key = { it.id.value }) { record ->
                                             Column {
-                                                if (!state.loading) {
-                                                    val dates = requireNotNull(record.eventTime?.dateRange)
-                                                    Text("记录范围 ${dates.start} 至 ${dates.endInclusive}，与所查时段（${timeFilter.inputLabel}）部分重合。", fontSize = 12.sp)
-                                                }
+                                                val dates = requireNotNull(record.eventTime?.dateRange)
+                                                Text("记录范围 ${dates.start} 至 ${dates.endInclusive}，与所查时段（${timeFilter.inputLabel}）部分重合。", fontSize = 12.sp)
                                                 RecordPreview(record, model)
                                             }
                                         }
@@ -424,11 +427,12 @@ private fun RecordPreview(record: RecordCard, model: FolioViewModel) {
 }
 
 @Composable
-internal fun Photo(id: PhotoId, thumbnail: Boolean = false) {
+internal fun Photo(id: PhotoId, thumbnail: Boolean = false) = key(id, thumbnail) {
     val context = LocalContext.current
-    var failed by remember(id) { mutableStateOf(false) }
-    var expanded by remember(id) { mutableStateOf(false) }
-    val bitmap by produceState<ImageBitmap?>(null, id, thumbnail) {
+    var failed by remember { mutableStateOf(false) }
+    var expanded by remember { mutableStateOf(false) }
+    var attempt by remember { mutableIntStateOf(0) }
+    val bitmap by produceState<ImageBitmap?>(null, attempt) {
         try {
             value = withContext(Dispatchers.IO) {
                 val originals = LocalPhotoOriginals.get(context)
@@ -441,24 +445,61 @@ internal fun Photo(id: PhotoId, thumbnail: Boolean = false) {
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { failed = true }
     }
-    bitmap?.let {
-        if (thumbnail) Image(it, "草稿照片缩略图", Modifier.size(64.dp), contentScale = ContentScale.Crop)
-        else Image(it, "记录中的照片，点击放大", Modifier.fillMaxWidth().heightIn(max = 320.dp).clickable { expanded = true })
-    }
-        ?: Text(if (failed) "照片读取失败，请重新打开记录。" else "正在读取照片…")
-    if (expanded) Dialog(onDismissRequest = { expanded = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        var scale by remember { mutableFloatStateOf(1f) }
-        var offset by remember { mutableStateOf(Offset.Zero) }
-        val transform = rememberTransformableState { zoom, pan, _ ->
-            scale = (scale * zoom).coerceIn(1f, 5f)
-            offset = if (scale == 1f) Offset.Zero else offset + pan
+    val image = bitmap
+    when {
+        image != null && thumbnail -> Image(image, "草稿照片缩略图", Modifier.size(64.dp), contentScale = ContentScale.Crop)
+        image != null -> Image(image, "记录中的照片，点击放大",
+            Modifier.fillMaxWidth().heightIn(max = 320.dp).clickable { expanded = true })
+        failed -> Column {
+            Text("照片读取失败。")
+            if (!thumbnail) TextButton(onClick = {
+                failed = false
+                attempt++
+            }) { Text("重试读取照片") }
         }
+        else -> Text("正在读取照片…")
+    }
+    if (expanded && image != null) PhotoViewer(image) { expanded = false }
+}
+
+@Composable
+private fun PhotoViewer(bitmap: ImageBitmap, close: () -> Unit) {
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+    val maxScale = 5f
+    val zoomStep = 1.5f
+    val transform = rememberTransformableState { _, zoom, pan, _ ->
+        scale = (scale * zoom).coerceIn(1f, maxScale)
+        offset = if (scale == 1f) Offset.Zero else offset + pan
+    }
+    val controlBackground = Color.Black.copy(alpha = 0.8f)
+    val controlColors = ButtonDefaults.textButtonColors(
+        contentColor = Color.White, disabledContentColor = Color.White.copy(alpha = 0.45f),
+    )
+    Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize(), color = Color.Black) {
             Box(Modifier.fillMaxSize().safeDrawingPadding()) {
-                bitmap?.let { Image(it, "照片", Modifier.fillMaxSize().transformable(transform).graphicsLayer {
-                    scaleX = scale; scaleY = scale; translationX = offset.x; translationY = offset.y
-                }) }
-                TextButton(onClick = { expanded = false }, modifier = Modifier.align(Alignment.TopEnd)) { Text("关闭照片", color = Color.White) }
+                Image(bitmap, "照片", Modifier.fillMaxSize().transformable(transform).graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    translationX = offset.x
+                    translationY = offset.y
+                }.semantics { stateDescription = "缩放 ${(scale * 100).roundToInt()}%" })
+                TextButton(onClick = close, colors = controlColors,
+                    modifier = Modifier.align(Alignment.TopEnd).background(controlBackground)) { Text("关闭照片") }
+                Row(Modifier.align(Alignment.BottomCenter).background(controlBackground)) {
+                    TextButton(onClick = {
+                        scale = (scale / zoomStep).coerceAtLeast(1f)
+                        if (scale == 1f) offset = Offset.Zero
+                    }, enabled = scale > 1f, colors = controlColors) { Text("缩小") }
+                    TextButton(onClick = {
+                        scale = (scale * zoomStep).coerceAtMost(maxScale)
+                    }, enabled = scale < maxScale, colors = controlColors) { Text("放大") }
+                    TextButton(onClick = {
+                        scale = 1f
+                        offset = Offset.Zero
+                    }, enabled = scale > 1f, colors = controlColors) { Text("还原") }
+                }
             }
         }
     }
