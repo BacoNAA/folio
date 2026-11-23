@@ -761,6 +761,33 @@ class TextDatabaseMigrationTest {
         } finally { file.delete() }
     }
 
+    @Test
+    fun versionNineteenGroupsKeepTheirOrderAndTrashedMembershipWhenEnablingGuides() = runBlocking {
+        createDatabase(19) { sql ->
+            sql.execSQL("""INSERT INTO text_records(id,sourceDraftId,body,firstRecordedAt,modifiedAt,deletedAt)
+                VALUES ('buy','b','购买凭证',1,1,NULL),('repair','r','维修单',2,2,3)""")
+            sql.execSQL("INSERT INTO record_items(recordId,position,itemId,text) SELECT id,0,id,body FROM text_records")
+            sql.execSQL("INSERT INTO record_groups VALUES ('machine','购机资料')")
+            sql.execSQL("""INSERT INTO record_group_members(groupId,recordId,position,previousRecordId)
+                VALUES ('machine','buy',0,NULL),('machine','repair',NULL,'buy')""")
+        }
+        val db = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(db, context)
+            val group = RecordGroupId("machine")
+            val buy = RecordId("buy")
+            val repair = RecordId("repair")
+            val guide = requireNotNull(store.openGuide(group))
+            assertEquals("购机资料", guide.content.group.name)
+            assertEquals(GuideLayout("", emptyList(), listOf(GuideMember(buy))), guide.layout)
+            val section = GuideSection(GuideSectionId("purchase"), "购买")
+            store.saveGuide(group, guide.layout, guide.layout.copy(sections = listOf(section), members = listOf(GuideMember(buy, section.id))))
+            assertTrue(store.restoreRecord(repair))
+            assertEquals(listOf(GuideMember(buy, section.id), GuideMember(repair)), store.openGuide(group)!!.layout.members)
+            assertEquals("维修单", store.openRecord(repair))
+        } finally { db.close() }
+    }
+
     private fun createDatabase(version: Int, seed: (SQLiteDatabase) -> Unit) {
         val schemaFile = "${FolioDatabase::class.java.name}/$version.json"
         val schema = instrumentation.context.assets.open(schemaFile).bufferedReader().use {

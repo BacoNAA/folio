@@ -25,7 +25,8 @@ class LocalTextStore internal constructor(
     context: Context,
     private val now: () -> Long = System::currentTimeMillis,
 ) : TextDrafts, PublishedTextRecords, MixedContentDrafts, MediaImports, RecordTrash, RecordTimeEditing, SeasonSettings, RecordMarking,
-    RecordBrowsing by LocalRecordBrowsing(database), RecordGroups by LocalRecordGroups(database), RecordTags by LocalRecordTags(database, now),
+    RecordBrowsing by LocalRecordBrowsing(database), RecordGroups by LocalRecordGroups(database),
+    RecordGroupGuides by LocalRecordGroupGuides(database), RecordTags by LocalRecordTags(database, now),
     RecordPlaces by LocalRecordPlaces(database, now), RecordObjects by LocalRecordObjects(database, now) {
     private val dao = database.textDao()
     private val itemDao = database.itemDao()

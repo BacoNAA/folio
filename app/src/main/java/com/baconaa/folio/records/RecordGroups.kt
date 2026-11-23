@@ -40,8 +40,12 @@ internal class LocalRecordGroups(private val database: FolioDatabase) : RecordGr
     }
 
     override suspend fun openGroup(id: RecordGroupId): RecordGroupContent? = database.withTransaction {
-        val name = dao.group(id.value)?.name ?: return@withTransaction null
-        RecordGroupContent(RecordGroup(id, name), browsing.readCards(dao.memberCards(id.value)))
+        dao.group(id.value)?.let { readContent(it) }
+    }
+
+    internal suspend fun readContent(row: GroupRow): RecordGroupContent? {
+        val name = row.name ?: return null
+        return RecordGroupContent(RecordGroup(RecordGroupId(row.id), name), browsing.readCards(dao.memberCards(row.id)))
     }
 
     override suspend fun createGroup(id: RecordGroupId, name: String, members: List<RecordId>): GroupUpdate =
@@ -95,6 +99,7 @@ internal class LocalRecordGroups(private val database: FolioDatabase) : RecordGr
 
     override suspend fun deleteGroup(id: RecordGroupId): Boolean = database.withTransaction {
         if (dao.retireGroup(id.value) == 0) return@withTransaction false
+        database.guideDao().deleteGuideSections(id.value)
         dao.removeAllMembers(id.value)
         true
     }

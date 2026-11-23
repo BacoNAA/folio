@@ -1,6 +1,7 @@
 package com.baconaa.folio.records
 
 import androidx.room.Dao
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -13,7 +14,8 @@ import androidx.room.Update
 
 /** 删除后仅保留创建标识，迟到的创建重试也不能重建该组。 */
 @Entity(tableName = "record_groups")
-internal data class GroupRow(@PrimaryKey val id: String, val name: String?)
+internal data class GroupRow(@PrimaryKey val id: String, val name: String?,
+    @ColumnInfo(defaultValue = "''") val guideDescription: String = "")
 
 @Entity(
     tableName = "record_group_members", primaryKeys = ["groupId", "recordId"],
@@ -39,7 +41,7 @@ internal abstract class GroupDao {
     @Insert
     abstract suspend fun insertGroup(group: GroupRow)
 
-    @Query("UPDATE record_groups SET name = NULL WHERE id = :id AND name IS NOT NULL")
+    @Query("UPDATE record_groups SET name = NULL, guideDescription = '' WHERE id = :id AND name IS NOT NULL")
     abstract suspend fun retireGroup(id: String): Int
 
     @Query("SELECT id FROM text_records WHERE id IN (:ids) AND deletedAt IS NULL")
