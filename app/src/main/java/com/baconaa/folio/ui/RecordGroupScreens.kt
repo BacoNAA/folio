@@ -21,7 +21,8 @@ import com.baconaa.folio.records.MoveDirection
 import com.baconaa.folio.records.RecordGroupContent
 
 @Composable
-internal fun RecordGroupScreens(model: FolioViewModel, groupsScroll: LazyListState, membersScroll: LazyListState, pickerScroll: LazyListState) {
+internal fun RecordGroupScreens(model: FolioViewModel, groupsScroll: LazyListState, membersScroll: LazyListState,
+    pickerScroll: LazyListState, guideScroll: LazyListState) {
     val state = model.state
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
         state.groupFeedback?.let { Text(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
@@ -42,18 +43,19 @@ internal fun RecordGroupScreens(model: FolioViewModel, groupsScroll: LazyListSta
                         modifier = Modifier.fillMaxWidth().testTag("open-group-${group.id.value}")) { Text(group.name) }
                 }
             }
-            Page.GroupDetail -> {
-                val group = state.groupContent
-                if (group == null) {
-                    Text("这个记录组已删除。")
-                    TextButton(onClick = { model.home(Page.Groups) }) { Text("返回组列表") }
-                } else GroupMembers(model, group, membersScroll)
-            }
+            Page.GroupDetail -> state.groupContent?.let { GroupMembers(model, it, membersScroll) } ?: DeletedGroup(model)
+            Page.GroupGuide -> state.groupGuide?.let { GroupGuideScreen(model, it, guideScroll) } ?: DeletedGroup(model)
             Page.GroupPicker -> GroupPicker(model, pickerScroll)
             Page.GroupDestination -> GroupDestination(model)
             else -> Unit
         }
     }
+}
+
+@Composable
+private fun DeletedGroup(model: FolioViewModel) {
+    Text("这个记录组已删除。")
+    TextButton(onClick = { model.home(Page.Groups) }) { Text("返回组列表") }
 }
 
 @Composable
@@ -65,6 +67,7 @@ private fun GroupMembers(model: FolioViewModel, content: RecordGroupContent, scr
         item {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = model::pickGroupMembers, enabled = enabled) { Text("收录记录") }
+                TextButton(onClick = model::openGroupGuide, enabled = enabled) { Text("专题导览") }
                 TextButton(onClick = { deleteDialog = true }, enabled = enabled) { Text("删除组") }
             }
         }

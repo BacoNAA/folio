@@ -72,11 +72,13 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
     val placesScroll = rememberLazyListState()
     val groupsScroll = rememberLazyListState()
     val membersScroll = key(state.groupId) { rememberLazyListState() }
+    val guideScroll = key(state.groupId) { rememberLazyListState() }
     val pickerScroll = key(state.groupSelection?.creationId) { rememberLazyListState() }
     var draftPicker by rememberSaveable { mutableStateOf(false) }
     var discardDialog by rememberSaveable { mutableStateOf(false) }
     var deleteDialog by rememberSaveable { mutableStateOf(false) }
     var eraseDialog by rememberSaveable { mutableStateOf(false) }
+    var discardGuide by rememberSaveable { mutableStateOf(false) }
     var deletedScrollIndex by rememberSaveable { mutableIntStateOf(0) }
     var deletedScrollOffset by rememberSaveable { mutableIntStateOf(0) }
     var restoredScrollVersion by rememberSaveable { mutableIntStateOf(0) }
@@ -86,6 +88,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
         if (listReady && state.scrollRestoreVersion > restoredScrollVersion) {
             val scroll = when (state.page) {
                 Page.GroupDetail -> membersScroll.takeIf { state.groupContent != null }
+                Page.GroupGuide -> guideScroll.takeIf { state.groupGuide != null }
                 Page.Search -> searchScroll
                 Page.Records -> recordsScroll
                 else -> null
@@ -94,7 +97,12 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
             restoredScrollVersion = state.scrollRestoreVersion
         }
     }
-    BackHandler(state.page != Page.Capture) { model.back() }
+    val goBack = {
+        if (!state.busy && state.page == Page.GroupGuide && state.guideEdit != null && state.guideEdit.layout != state.groupGuide?.layout)
+            discardGuide = true
+        else model.back()
+    }
+    BackHandler(state.page != Page.Capture, onBack = goBack)
 
     MaterialTheme(colorScheme = lightColorScheme(
         primary = Accent, onPrimary = Color.White, background = Paper, surface = Paper,
@@ -110,7 +118,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         if (state.page != Page.Records) {
-                            TextButton(onClick = model::back, enabled = !state.busy) { Text("返回") }
+                            TextButton(onClick = goBack, enabled = !state.busy) { Text("返回") }
                         }
                         Text(when (state.page) {
                             Page.Editor -> "记录这一刻"
@@ -118,6 +126,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                             Page.Places -> "按地点"
                             Page.Groups -> "记录组"
                             Page.GroupDetail -> state.groupContent?.group?.name ?: "记录组"
+                            Page.GroupGuide -> if (state.guideEdit != null) "编辑导览" else "专题导览"
                             Page.GroupPicker -> "选择记录"
                             Page.GroupDestination -> "收录到记录组"
                             Page.Trash, Page.TrashDetail -> "回收站"
@@ -132,6 +141,9 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                         if (state.page == Page.Detail && FolioViewModel.canEdit(state.detail)) {
                             TextButton(onClick = model::editRecord, enabled = !state.busy) { Text("编辑") }
                         }
+                        if (state.page == Page.GroupGuide && state.guideEdit != null) {
+                            Button(onClick = model::saveGuide, enabled = !state.busy && state.guideEdit.conflicting == null) { Text("保存导览") }
+                        }
                     }
                 }
                 if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -140,6 +152,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                         state.draftReadRetry != null -> model::retryDraftRead
                         state.page == Page.Detail -> model::retryDetail
                         state.page == Page.TrashDetail -> model::retryTrashDetail
+                        state.page == Page.GroupGuide && state.guideEdit != null -> model::saveGuide
                         state.page == Page.Records || state.page == Page.Search || state.page == Page.Trash -> model::refresh
                         state.editor?.needsReload == true -> model::reload
                         else -> null
@@ -261,8 +274,8 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                             }
                         }
                         Page.Places -> PlacesScreen(model, placesScroll)
-                        Page.Groups, Page.GroupDetail, Page.GroupPicker, Page.GroupDestination ->
-                            RecordGroupScreens(model, groupsScroll, membersScroll, pickerScroll)
+                        Page.Groups, Page.GroupDetail, Page.GroupPicker, Page.GroupDestination, Page.GroupGuide ->
+                            RecordGroupScreens(model, groupsScroll, membersScroll, pickerScroll, guideScroll)
                         Page.Trash -> TrashScreen(model)
                         Page.TrashDetail -> state.trashDetail?.let { record ->
                             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -278,7 +291,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                     }
                 }
                 if (state.cleanupPending) ErrorMessage("记录已删除，部分媒体文件待清理。", model::retryCleanup)
-                if (state.notice != null && state.page != Page.Editor) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (state.notice != null && state.page != Page.Editor && state.guideEdit == null) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(state.notice, Modifier.weight(1f), fontSize = 12.sp)
                     if (state.deleted != null) TextButton(onClick = model::undoDelete, enabled = !state.busy) { Text("撤销删除") }
                     state.restoredId?.let { id -> TextButton(onClick = { model.openRecord(id) }, enabled = !state.busy) { Text("查看恢复记录") } }
@@ -306,6 +319,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
             confirmButton = { TextButton(onClick = {
                 val scroll = when (state.detailOrigin) {
                     Page.GroupDetail -> membersScroll
+                    Page.GroupGuide -> guideScroll
                     Page.Search -> searchScroll
                     else -> recordsScroll
                 }
@@ -316,6 +330,9 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
             text = { Text("正式内容及其未完成草稿会一并删除，无法从回收站找回。") },
             confirmButton = { TextButton(onClick = { eraseDialog = false; state.trashId?.let(model::deletePermanently) }) { Text("确认彻底删除") } },
             dismissButton = { TextButton(onClick = { eraseDialog = false }) { Text("取消") } })
+        if (discardGuide) AlertDialog(onDismissRequest = { discardGuide = false }, title = { Text("放弃未保存的导览修改？") },
+            confirmButton = { TextButton(onClick = { discardGuide = false; model.back() }) { Text("放弃修改") } },
+            dismissButton = { TextButton(onClick = { discardGuide = false }) { Text("继续编辑") } })
         if (draftPicker) AlertDialog(onDismissRequest = { draftPicker = false }, title = { Text("继续草稿") },
             text = { LazyColumn {
                 item { Text("最近编辑的排在前面", fontSize = 12.sp) }

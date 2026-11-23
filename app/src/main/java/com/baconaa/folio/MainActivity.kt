@@ -144,11 +144,14 @@ class MainActivity : ComponentActivity() {
 }
 
 internal fun FolioState.groupNavigation(): Bundle? {
-    if (!page.isGroupPage && !(page == Page.Detail && detailOrigin == Page.GroupDetail)) return null
+    if (!page.isGroupPage && !(page == Page.Detail && detailOrigin.isGroupReadingPage)) return null
     return Bundle().apply {
         putString("page", page.name)
         putString("group", groupId?.value)
-        if (page == Page.Detail) putString("member", detailId?.value)
+        if (page == Page.Detail) {
+            putString("member", detailId?.value)
+            putString("member-origin", detailOrigin.name)
+        }
         groupSelection?.let { selection ->
             putString("origin", selection.origin.name)
             putString("creation", selection.creationId.value)
@@ -164,7 +167,8 @@ internal fun FolioViewModel.readGroupNavigation(route: Bundle) {
         GroupSelection(Page.valueOf(requireNotNull(route.getString("origin"))), RecordGroupId(id),
             route.getStringArrayList("members").orEmpty().map(::RecordId), route.getString("name").orEmpty())
     }
-    restoreGroupNavigation(page, route.getString("group")?.let(::RecordGroupId), selection, route.getString("member")?.let(::RecordId))
+    restoreGroupNavigation(page, route.getString("group")?.let(::RecordGroupId), selection, route.getString("member")?.let(::RecordId),
+        route.getString("member-origin")?.let(Page::valueOf) ?: Page.GroupDetail)
 }
 
 private fun Bundle.writeEventTime(value: EventTime) {

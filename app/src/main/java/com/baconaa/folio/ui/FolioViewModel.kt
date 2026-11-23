@@ -20,9 +20,12 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-enum class Page { Capture, Records, Search, Detail, Editor, Trash, TrashDetail, Places, Groups, GroupDetail, GroupPicker, GroupDestination }
+enum class Page { Capture, Records, Search, Detail, Editor, Trash, TrashDetail, Places, Groups, GroupDetail, GroupPicker, GroupDestination, GroupGuide }
 
-internal val Page.isGroupPage get() = this == Page.Groups || this == Page.GroupDetail || this == Page.GroupPicker || this == Page.GroupDestination
+internal val Page.isGroupReadingPage get() = this == Page.GroupDetail || this == Page.GroupGuide
+internal val Page.isGroupPage get() = isGroupReadingPage || this == Page.Groups || this == Page.GroupPicker || this == Page.GroupDestination
+
+data class GuideEditing(val layout: GuideLayout, val conflicting: GroupGuideContent? = null)
 
 data class GroupSelection(
     val origin: Page, val creationId: RecordGroupId,
@@ -81,6 +84,8 @@ data class FolioState(
     val groups: List<RecordGroup> = emptyList(),
     val groupId: RecordGroupId? = null,
     val groupContent: RecordGroupContent? = null,
+    val groupGuide: GroupGuideContent? = null,
+    val guideEdit: GuideEditing? = null,
     val groupSelection: GroupSelection? = null,
     val groupFeedback: String? = null,
     val groupReadError: String? = null,
@@ -156,6 +161,7 @@ class FolioViewModel(
     private val objects: RecordObjects? = published as? RecordObjects ?: mixed as? RecordObjects,
     private val imports: MediaImports? = mixed as? MediaImports ?: published as? MediaImports,
     private val recordGroups: RecordGroups? = published as? RecordGroups ?: mixed as? RecordGroups,
+    private val groupGuides: RecordGroupGuides? = published as? RecordGroupGuides ?: mixed as? RecordGroupGuides,
 ) : ViewModel() {
     var state by mutableStateOf(FolioState())
         private set
@@ -420,7 +426,7 @@ class FolioViewModel(
                 launch(ExternalTarget(editor.draftId?.value, editor.recordId?.value,
                     editor.draftId?.let { editor.position(after)?.value }, editor.returnPage, state.detailOrigin,
                     editor.eventTime, emptyInput = emptyInput, placeBookId = state.placeBook?.id?.value,
-                    groupId = state.groupId?.value.takeIf { state.detailOrigin == Page.GroupDetail }))
+                    groupId = state.groupId?.value.takeIf { state.detailOrigin.isGroupReadingPage }))
             }
         }
     }
@@ -708,6 +714,10 @@ class FolioViewModel(
             Page.Detail -> home(state.detailOrigin)
             Page.Groups -> home(Page.Records)
             Page.GroupDetail -> home(Page.Groups)
+            Page.GroupGuide -> if (state.guideEdit == null) home(Page.GroupDetail) else {
+                state = state.copy(guideEdit = null, groupFeedback = null)
+                refresh()
+            }
             Page.GroupPicker -> {
                 val origin = state.groupSelection?.origin ?: Page.Groups
                 state = state.copy(groupSelection = null)
@@ -781,6 +791,11 @@ class FolioViewModel(
 
     private suspend fun readGroupPage(page: Page, version: Int) {
         when (page) {
+            Page.GroupGuide -> {
+                val id = requireNotNull(state.groupId)
+                val content = withContext(Dispatchers.IO) { requireNotNull(groupGuides).openGuide(id) }
+                if (version == loadVersion) state = state.copy(groupGuide = content, loading = false)
+            }
             Page.GroupDetail -> {
                 val id = requireNotNull(state.groupId)
                 val content = withContext(Dispatchers.IO) { requireNotNull(recordGroups).openGroup(id) }
@@ -805,8 +820,71 @@ class FolioViewModel(
 
     fun openGroup(id: RecordGroupId) {
         if (state.busy) return
-        state = state.copy(groupId = id, groupContent = null)
+        state = state.copy(groupId = id, groupContent = null, groupGuide = null, guideEdit = null)
         navigate(Page.GroupDetail)
+    }
+
+    fun openGroupGuide() {
+        if (state.busy || state.groupId == null) return
+        state = state.copy(groupGuide = null, guideEdit = null)
+        navigate(Page.GroupGuide)
+    }
+
+    fun beginGuideEdit() {
+        val guide = state.groupGuide ?: return
+        if (!state.busy) state = state.copy(guideEdit = GuideEditing(guide.layout), groupFeedback = null)
+    }
+
+    fun changeGuide(change: (GuideLayout) -> GuideLayout) {
+        val editor = state.guideEdit ?: return
+        if (!state.busy) state = state.copy(guideEdit = editor.copy(layout = change(editor.layout)), error = null)
+    }
+
+    fun saveGuide() {
+        val guide = state.groupGuide ?: return
+        val editor = state.guideEdit ?: return
+        if (editor.conflicting != null) return
+        runAction("导览保存失败，当前输入已保留。") {
+            when (val result = withContext(Dispatchers.IO) {
+                requireNotNull(groupGuides).saveGuide(guide.content.group.id, guide.layout, editor.layout)
+            }) {
+                GuideUpdate.Saved -> {
+                    state = state.copy(guideEdit = null, groupFeedback = "导览已保存。")
+                    refresh()
+                }
+                GuideUpdate.MissingGroup -> state = state.copy(groupFeedback = "原记录组已删除，当前输入仍可查看。")
+                is GuideUpdate.Changed -> showGuideConflict(guide, editor, result.current)
+            }
+        }
+    }
+
+    private fun showGuideConflict(original: GroupGuideContent, editor: GuideEditing, latest: GroupGuideContent) {
+        val base = original.layout
+        val current = latest.layout
+        val byId = current.members.associateBy { it.recordId }
+        val removed = original.content.members.filter { it.id !in byId }
+        val removedText = when (removed.size) {
+            0 -> ""
+            1 -> "「${removed.first().guideLabel()}」已移出。"
+            else -> "「${removed.first().guideLabel()}」等 ${removed.size} 条记录已移出。"
+        }
+        val changedAssignment = base.members.any { before -> byId[before.recordId]?.let { it.sectionId != before.sectionId } == true }
+        if (base.description != current.description || base.sections != current.sections || changedAssignment) {
+            state = state.copy(guideEdit = editor.copy(conflicting = latest),
+                groupFeedback = removedText + "导览已在别处修改，当前输入已保留。")
+            return
+        }
+        // 只有收录或成员顺序变化时，保留尚在组内的分段选择、段序与输入的说明。
+        val edited = editor.layout.members.associateBy { it.recordId }
+        val sections = editor.layout.sections.mapTo(hashSetOf()) { it.id }
+        val members = current.members.map { member -> edited[member.recordId] ?: member.copy(sectionId = member.sectionId?.takeIf { it in sections }) }
+        state = state.copy(groupGuide = latest, guideEdit = GuideEditing(editor.layout.copy(members = members)),
+            groupFeedback = removedText + "已按最新成员顺序更新，请核对后保存。")
+    }
+
+    fun useLatestGuide() {
+        val latest = state.guideEdit?.conflicting ?: return
+        state = state.copy(groupGuide = latest, guideEdit = GuideEditing(latest.layout), groupFeedback = null)
     }
 
     fun pickGroupMembers() {
@@ -896,11 +974,11 @@ class FolioViewModel(
         }
     }
 
-    internal fun restoreGroupNavigation(page: Page, id: RecordGroupId?, selection: GroupSelection?, detail: RecordId?) {
+    internal fun restoreGroupNavigation(page: Page, id: RecordGroupId?, selection: GroupSelection?, detail: RecordId?, origin: Page = Page.GroupDetail) {
         if (state.page != Page.Capture || state.busy) return
         state = state.copy(groupId = id, groupSelection = selection)
         if (page == Page.Detail && detail != null) {
-            runAction("记录读取失败，请重试。") { showDetail(detail, Page.GroupDetail) }
+            runAction("记录读取失败，请重试。") { showDetail(detail, origin) }
         } else if (page.isGroupPage) navigate(page)
     }
 
@@ -963,7 +1041,7 @@ class FolioViewModel(
     fun openSearch() { state = state.copy(searchOrigin = Page.Records, placeScope = null, linkingPlace = null); home(Page.Search) }
     fun openStarred() { state = state.copy(filterTags = emptySet(), starredOnly = true, query = "", placeScope = null, searchOrigin = Page.Records, linkingPlace = null,
         filterPeople = emptySet(), filterThings = emptySet(), mediaTypes = emptySet(), eventDateFilter = null); home(Page.Search) }
-    private val cardSearchOrigin get() = if (state.page == Page.GroupDetail) Page.GroupDetail else Page.Records
+    private val cardSearchOrigin get() = if (state.page.isGroupReadingPage) state.page else Page.Records
     fun openTag(tag: Tag) { state = state.copy(filterTags = setOf(tag.id), starredOnly = false, query = "", placeScope = null, searchOrigin = cardSearchOrigin, linkingPlace = null,
         filterPeople = emptySet(), filterThings = emptySet(), mediaTypes = emptySet(), eventDateFilter = null); home(Page.Search) }
 
