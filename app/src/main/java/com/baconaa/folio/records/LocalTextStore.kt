@@ -25,7 +25,8 @@ class LocalTextStore internal constructor(
     context: Context,
     private val now: () -> Long = System::currentTimeMillis,
 ) : TextDrafts, PublishedTextRecords, MixedContentDrafts, MediaImports, RecordTrash, RecordTimeEditing, SeasonSettings, RecordMarking,
-    RecordBrowsing by LocalRecordBrowsing(database), RecordTags by LocalRecordTags(database, now),
+    RecordBrowsing by LocalRecordBrowsing(database), RecordGroups by LocalRecordGroups(database),
+    RecordGroupGuides by LocalRecordGroupGuides(database), RecordTags by LocalRecordTags(database, now),
     RecordPlaces by LocalRecordPlaces(database, now), RecordObjects by LocalRecordObjects(database, now) {
     private val dao = database.textDao()
     private val itemDao = database.itemDao()
@@ -462,9 +463,17 @@ class LocalTextStore internal constructor(
 
     override suspend fun openRecord(id: RecordId): String? = dao.recordBody(id.value)
 
-    override suspend fun moveToTrash(id: RecordId): Boolean = trashDao.moveToTrash(id.value, now()) == 1
+    override suspend fun moveToTrash(id: RecordId): Boolean = database.withTransaction {
+        if (trashDao.moveToTrash(id.value, now()) == 0) return@withTransaction false
+        database.groupDao().hideMemberships(id.value)
+        true
+    }
 
-    override suspend fun restoreRecord(id: RecordId): Boolean = trashDao.restore(id.value) == 1
+    override suspend fun restoreRecord(id: RecordId): Boolean = database.withTransaction {
+        if (trashDao.restore(id.value) == 0) return@withTransaction false
+        database.groupDao().restoreMemberships(id.value)
+        true
+    }
 
     override suspend fun listTrash(): List<TrashPreview> = trashDao.listTrash().map {
         TrashPreview(RecordId(it.id), it.excerpt, it.firstPhotoId?.asPhotoId(), it.deletedAt, it.hasDraft, it.marks, it.title)

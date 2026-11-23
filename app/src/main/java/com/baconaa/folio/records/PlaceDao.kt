@@ -41,8 +41,8 @@ internal abstract class PlaceDao {
     @Query("SELECT p.* FROM places p JOIN record_places r ON r.placeId = p.id WHERE r.recordId = :id")
     abstract suspend fun recordPlace(id: String): PlaceRow?
     @Query("""SELECT rp.recordId, p.* FROM record_places rp JOIN places p ON rp.placeId = p.id
-        JOIN text_records r ON r.id = rp.recordId WHERE r.deletedAt IS NULL""")
-    abstract suspend fun activeRecordPlaces(): List<RecordPlacePreviewRow>
+        JOIN text_records r ON r.id = rp.recordId WHERE r.deletedAt IS NULL AND rp.recordId IN (:ids)""")
+    abstract suspend fun activeRecordPlaces(ids: List<String>): List<RecordPlacePreviewRow>
     @Query("""UPDATE places SET ownerDraftId = NULL WHERE ownerDraftId = :draftId
         AND id IN (SELECT placeId FROM draft_places WHERE draftId = :draftId)""")
     abstract suspend fun promoteSelected(draftId: String)

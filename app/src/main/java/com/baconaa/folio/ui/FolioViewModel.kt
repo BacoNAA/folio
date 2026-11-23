@@ -20,7 +20,17 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-enum class Page { Capture, Records, Search, Detail, Editor, Trash, TrashDetail, Places }
+enum class Page { Capture, Records, Search, Detail, Editor, Trash, TrashDetail, Places, Groups, GroupDetail, GroupPicker, GroupDestination, GroupGuide }
+
+internal val Page.isGroupReadingPage get() = this == Page.GroupDetail || this == Page.GroupGuide
+internal val Page.isGroupPage get() = isGroupReadingPage || this == Page.Groups || this == Page.GroupPicker || this == Page.GroupDestination
+
+data class GuideEditing(val layout: GuideLayout, val conflicting: GroupGuideContent? = null)
+
+data class GroupSelection(
+    val origin: Page, val creationId: RecordGroupId,
+    val members: List<RecordId> = emptyList(), val name: String = "",
+)
 
 data class FileImportFailure(val type: ImportType, val after: ItemId?, val message: String)
 
@@ -71,6 +81,14 @@ data class FolioState(
     val drafts: List<DraftPreview> = emptyList(),
     val draftReadRetry: DraftPreview? = null,
     val records: List<RecordCard> = emptyList(),
+    val groups: List<RecordGroup> = emptyList(),
+    val groupId: RecordGroupId? = null,
+    val groupContent: RecordGroupContent? = null,
+    val groupGuide: GroupGuideContent? = null,
+    val guideEdit: GuideEditing? = null,
+    val groupSelection: GroupSelection? = null,
+    val groupFeedback: String? = null,
+    val groupReadError: String? = null,
     val timeline: EventTimeline = EventTimeline(emptyList(), emptyList()),
     val recent: Boolean = false,
     val query: String = "",
@@ -126,7 +144,7 @@ data class DeletedRecord(val id: RecordId, val origin: Page, val query: String,
     val filterTags: Set<TagId>, val starredOnly: Boolean, val recent: Boolean,
     val placeScope: PlaceScope?, val searchOrigin: Page, val placeRecent: Boolean,
     val filterPeople: Set<ObjectId>, val filterThings: Set<ObjectId>, val mediaTypes: Set<MediaFilter>,
-    val eventDateFilter: EventDateFilter?)
+    val eventDateFilter: EventDateFilter?, val groupId: RecordGroupId? = null)
 
 /** UI 状态由主线程持有；草稿写入串行，完成和离开等待最后一次输入落盘。 */
 class FolioViewModel(
@@ -142,6 +160,8 @@ class FolioViewModel(
     private val places: RecordPlaces? = published as? RecordPlaces ?: mixed as? RecordPlaces,
     private val objects: RecordObjects? = published as? RecordObjects ?: mixed as? RecordObjects,
     private val imports: MediaImports? = mixed as? MediaImports ?: published as? MediaImports,
+    private val recordGroups: RecordGroups? = published as? RecordGroups ?: mixed as? RecordGroups,
+    private val groupGuides: RecordGroupGuides? = published as? RecordGroupGuides ?: mixed as? RecordGroupGuides,
 ) : ViewModel() {
     var state by mutableStateOf(FolioState())
         private set
@@ -151,11 +171,16 @@ class FolioViewModel(
 
     fun home(page: Page) {
         if (state.busy || state.editor != null) return
+        navigate(page)
+    }
+
+    private fun navigate(page: Page) {
         media?.stopPlayback()
         loadVersion++
         state = state.copy(page = page, error = null, loading = false, draftReadRetry = null,
+            groupReadError = null, groupFeedback = null,
             linkingPlace = if (page == Page.Search) state.linkingPlace else null)
-        if (page == Page.Records || page == Page.Search || page == Page.Trash) refresh()
+        if (page == Page.Records || page == Page.Search || page == Page.Trash || page.isGroupPage) refresh()
         if (page == Page.Search) { loadTags(); loadObjects() }
         if (page == Page.Places) loadPlaces(directoryPlaceQuery)
     }
@@ -400,7 +425,8 @@ class FolioViewModel(
                 } else null
                 launch(ExternalTarget(editor.draftId?.value, editor.recordId?.value,
                     editor.draftId?.let { editor.position(after)?.value }, editor.returnPage, state.detailOrigin,
-                    editor.eventTime, emptyInput = emptyInput, placeBookId = state.placeBook?.id?.value))
+                    editor.eventTime, emptyInput = emptyInput, placeBookId = state.placeBook?.id?.value,
+                    groupId = state.groupId?.value.takeIf { state.detailOrigin.isGroupReadingPage }))
             }
         }
     }
@@ -415,7 +441,7 @@ class FolioViewModel(
                     activeItemId = item?.id, returnPage = target.returnPage, eventTime = target.eventTime,
                     place = book.takeIf { target.returnPage == Page.Search }))
             }
-            state = state.copy(detailOrigin = target.detailOrigin,
+            state = state.copy(detailOrigin = target.detailOrigin, groupId = target.groupId?.let(::RecordGroupId) ?: state.groupId,
                 placeScope = book?.let { PlaceScope(it, isBook = true) } ?: state.placeScope)
         }
         check(state.editor != null && state.editor?.draftId?.value == target.draftId) { "原草稿已不可编辑" }
@@ -686,6 +712,18 @@ class FolioViewModel(
         when (state.page) {
             Page.Editor -> leaveEditor()
             Page.Detail -> home(state.detailOrigin)
+            Page.Groups -> home(Page.Records)
+            Page.GroupDetail -> home(Page.Groups)
+            Page.GroupGuide -> if (state.guideEdit == null) home(Page.GroupDetail) else {
+                state = state.copy(guideEdit = null, groupFeedback = null)
+                refresh()
+            }
+            Page.GroupPicker -> {
+                val origin = state.groupSelection?.origin ?: Page.Groups
+                state = state.copy(groupSelection = null)
+                home(origin)
+            }
+            Page.GroupDestination -> home(Page.GroupPicker)
             Page.Search -> home(state.searchOrigin)
             Page.Places -> home(Page.Records)
             Page.Records -> home(Page.Capture)
@@ -713,10 +751,12 @@ class FolioViewModel(
         val things = state.filterThings
         val mediaTypes = state.mediaTypes
         val eventDateFilter = state.eventDateFilter
-        state = state.copy(loading = true, error = null, draftReadRetry = null)
+        state = state.copy(loading = true, error = null, draftReadRetry = null, groupReadError = null)
         viewModelScope.launch {
             try {
-                if (page == Page.Search) {
+                if (page.isGroupPage) {
+                    readGroupPage(page, version)
+                } else if (page == Page.Search) {
                     val (result, currentScope) = withContext(Dispatchers.IO) {
                         browsing.queryRecords(RecordQuery(query, filterTags, starredOnly, placeScope?.place?.id, people, things, mediaTypes,
                             eventDateFilter.forQuery())) to
@@ -743,9 +783,203 @@ class FolioViewModel(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                if (version == loadVersion) state = state.copy(loading = false, error = "读取失败，请重试。")
+                if (version == loadVersion) state = if (page.isGroupPage) state.copy(loading = false, groupReadError = "读取失败，请重试。")
+                    else state.copy(loading = false, error = "读取失败，请重试。")
             }
         }
+    }
+
+    private suspend fun readGroupPage(page: Page, version: Int) {
+        when (page) {
+            Page.GroupGuide -> {
+                val id = requireNotNull(state.groupId)
+                val content = withContext(Dispatchers.IO) { requireNotNull(groupGuides).openGuide(id) }
+                if (version == loadVersion) state = state.copy(groupGuide = content, loading = false)
+            }
+            Page.GroupDetail -> {
+                val id = requireNotNull(state.groupId)
+                val content = withContext(Dispatchers.IO) { requireNotNull(recordGroups).openGroup(id) }
+                if (version == loadVersion) state = state.copy(groupContent = content, loading = false)
+            }
+            Page.GroupPicker -> {
+                val records = withContext(Dispatchers.IO) { browsing.listRecentRecords() }
+                if (version != loadVersion) return
+                val selection = requireNotNull(state.groupSelection)
+                val active = records.mapTo(hashSetOf()) { it.id }
+                val valid = selection.members.filter { it in active }
+                state = state.copy(records = records, groupSelection = selection.copy(members = valid), loading = false,
+                    groupFeedback = if (valid.size == selection.members.size) state.groupFeedback else "部分记录已失效，请确认剩余选择。")
+            }
+            Page.Groups, Page.GroupDestination -> {
+                val groups = withContext(Dispatchers.IO) { requireNotNull(recordGroups).listGroups() }
+                if (version == loadVersion) state = state.copy(groups = groups, loading = false)
+            }
+            else -> error("无效的记录组页面")
+        }
+    }
+
+    fun openGroup(id: RecordGroupId) {
+        if (state.busy) return
+        state = state.copy(groupId = id, groupContent = null, groupGuide = null, guideEdit = null)
+        navigate(Page.GroupDetail)
+    }
+
+    fun openGroupGuide() {
+        if (state.busy || state.groupId == null) return
+        state = state.copy(groupGuide = null, guideEdit = null)
+        navigate(Page.GroupGuide)
+    }
+
+    fun beginGuideEdit() {
+        val guide = state.groupGuide ?: return
+        if (!state.busy) state = state.copy(guideEdit = GuideEditing(guide.layout), groupFeedback = null)
+    }
+
+    fun changeGuide(change: (GuideLayout) -> GuideLayout) {
+        val editor = state.guideEdit ?: return
+        if (!state.busy) state = state.copy(guideEdit = editor.copy(layout = change(editor.layout)), error = null)
+    }
+
+    fun saveGuide() {
+        val guide = state.groupGuide ?: return
+        val editor = state.guideEdit ?: return
+        if (editor.conflicting != null) return
+        runAction("导览保存失败，当前输入已保留。") {
+            when (val result = withContext(Dispatchers.IO) {
+                requireNotNull(groupGuides).saveGuide(guide.content.group.id, guide.layout, editor.layout)
+            }) {
+                GuideUpdate.Saved -> {
+                    state = state.copy(guideEdit = null, groupFeedback = "导览已保存。")
+                    refresh()
+                }
+                GuideUpdate.MissingGroup -> state = state.copy(groupFeedback = "原记录组已删除，当前输入仍可查看。")
+                is GuideUpdate.Changed -> showGuideConflict(guide, editor, result.current)
+            }
+        }
+    }
+
+    private fun showGuideConflict(original: GroupGuideContent, editor: GuideEditing, latest: GroupGuideContent) {
+        val base = original.layout
+        val current = latest.layout
+        val byId = current.members.associateBy { it.recordId }
+        val removed = original.content.members.filter { it.id !in byId }
+        val removedText = when (removed.size) {
+            0 -> ""
+            1 -> "「${removed.first().guideLabel()}」已移出。"
+            else -> "「${removed.first().guideLabel()}」等 ${removed.size} 条记录已移出。"
+        }
+        val changedAssignment = base.members.any { before -> byId[before.recordId]?.let { it.sectionId != before.sectionId } == true }
+        if (base.description != current.description || base.sections != current.sections || changedAssignment) {
+            state = state.copy(guideEdit = editor.copy(conflicting = latest),
+                groupFeedback = removedText + "导览已在别处修改，当前输入已保留。")
+            return
+        }
+        // 只有收录或成员顺序变化时，保留尚在组内的分段选择、段序与输入的说明。
+        val edited = editor.layout.members.associateBy { it.recordId }
+        val sections = editor.layout.sections.mapTo(hashSetOf()) { it.id }
+        val members = current.members.map { member -> edited[member.recordId] ?: member.copy(sectionId = member.sectionId?.takeIf { it in sections }) }
+        state = state.copy(groupGuide = latest, guideEdit = GuideEditing(editor.layout.copy(members = members)),
+            groupFeedback = removedText + "已按最新成员顺序更新，请核对后保存。")
+    }
+
+    fun useLatestGuide() {
+        val latest = state.guideEdit?.conflicting ?: return
+        state = state.copy(groupGuide = latest, guideEdit = GuideEditing(latest.layout), groupFeedback = null)
+    }
+
+    fun pickGroupMembers() {
+        if (state.busy) return
+        val selection = GroupSelection(state.page, RecordGroupId(UUID.randomUUID().toString()))
+        state = state.copy(groupSelection = selection)
+        navigate(Page.GroupPicker)
+    }
+
+    fun toggleGroupMember(id: RecordId) {
+        val selection = state.groupSelection ?: return
+        if (state.busy || state.loading) return
+        val members = if (id in selection.members) selection.members - id else selection.members + id
+        state = state.copy(groupSelection = selection.copy(members = members), groupFeedback = null)
+    }
+
+    fun nameNewGroup(name: String) {
+        if (state.busy) return
+        state.groupSelection?.let { state = state.copy(groupSelection = it.copy(name = name)) }
+    }
+
+    fun saveGroupSelection(target: RecordGroupId?) {
+        val selection = state.groupSelection ?: return
+        if (state.loading || state.groupReadError != null || selection.members.isEmpty() || (target == null && selection.name.isBlank())) return
+        runAction("收录结果未能确认，请再次确认收录。") {
+            val groups = requireNotNull(recordGroups)
+            val result = withContext(Dispatchers.IO) {
+                if (target == null) groups.createGroup(selection.creationId, selection.name, selection.members)
+                else groups.appendToGroup(target, selection.members)
+            }
+            when (result) {
+                is GroupUpdate.Saved -> {
+                    state = state.copy(groupId = result.id, groupSelection = null, groupContent = null)
+                    navigate(Page.GroupDetail)
+                }
+                is GroupUpdate.UnavailableRecords -> {
+                    state = state.copy(groupSelection = selection.copy(members = selection.members - result.ids.toSet()))
+                    navigate(Page.GroupPicker)
+                    state = state.copy(groupFeedback = "${result.ids.size} 条所选记录已失效，请确认剩余选择。")
+                }
+                GroupUpdate.MissingGroup -> {
+                    state = state.copy(groupSelection = selection.copy(origin = Page.Groups,
+                        creationId = if (target == null) RecordGroupId(UUID.randomUUID().toString()) else selection.creationId))
+                    navigate(Page.GroupDestination)
+                    state = state.copy(groupFeedback = "原记录组已删除，请重新选择记录组。")
+                }
+                is GroupUpdate.OrderChanged -> error("收录操作返回了调序结果")
+            }
+        }
+    }
+
+    fun moveGroupMember(member: RecordId, direction: MoveDirection) {
+        val group = state.groupContent ?: return
+        if (state.loading || state.groupReadError != null) return
+        val expected = group.members.map { it.id }
+        val index = expected.indexOf(member)
+        val to = index + if (direction == MoveDirection.UP) -1 else 1
+        if (index < 0 || to !in expected.indices) return
+        val order = expected.toMutableList().apply { add(to, removeAt(index)) }
+        runAction("调序失败，请重试。") {
+            val result = withContext(Dispatchers.IO) { requireNotNull(recordGroups).reorderGroup(group.group.id, expected, order) }
+            state = state.copy(groupFeedback = when (result) {
+                is GroupUpdate.OrderChanged -> "成员顺序已变化，请按最新顺序再调整。"
+                GroupUpdate.MissingGroup -> "记录组已删除。"
+                is GroupUpdate.Saved -> null
+                is GroupUpdate.UnavailableRecords -> error("调序操作返回了收录结果")
+            })
+            refresh()
+        }
+    }
+
+    fun removeGroupMember(member: RecordId) {
+        val id = state.groupId ?: return
+        runAction("移出失败，请重试。") {
+            val removed = withContext(Dispatchers.IO) { requireNotNull(recordGroups).removeFromGroup(id, member) }
+            state = state.copy(groupFeedback = if (removed) "已移出记录组。" else "成员已不在组内。")
+            refresh()
+        }
+    }
+
+    fun deleteGroup() {
+        val id = state.groupId ?: return
+        runAction("删除记录组失败，请重试。") {
+            withContext(Dispatchers.IO) { requireNotNull(recordGroups).deleteGroup(id) }
+            state = state.copy(groupId = null, groupContent = null)
+            navigate(Page.Groups)
+        }
+    }
+
+    internal fun restoreGroupNavigation(page: Page, id: RecordGroupId?, selection: GroupSelection?, detail: RecordId?, origin: Page = Page.GroupDetail) {
+        if (state.page != Page.Capture || state.busy) return
+        state = state.copy(groupId = id, groupSelection = selection)
+        if (page == Page.Detail && detail != null) {
+            runAction("记录读取失败，请重试。") { showDetail(detail, origin) }
+        } else if (page.isGroupPage) navigate(page)
     }
 
     private val seasonSettings get() = requireNotNull(times as? SeasonSettings)
@@ -807,7 +1041,8 @@ class FolioViewModel(
     fun openSearch() { state = state.copy(searchOrigin = Page.Records, placeScope = null, linkingPlace = null); home(Page.Search) }
     fun openStarred() { state = state.copy(filterTags = emptySet(), starredOnly = true, query = "", placeScope = null, searchOrigin = Page.Records, linkingPlace = null,
         filterPeople = emptySet(), filterThings = emptySet(), mediaTypes = emptySet(), eventDateFilter = null); home(Page.Search) }
-    fun openTag(tag: Tag) { state = state.copy(filterTags = setOf(tag.id), starredOnly = false, query = "", placeScope = null, searchOrigin = Page.Records, linkingPlace = null,
+    private val cardSearchOrigin get() = if (state.page.isGroupReadingPage) state.page else Page.Records
+    fun openTag(tag: Tag) { state = state.copy(filterTags = setOf(tag.id), starredOnly = false, query = "", placeScope = null, searchOrigin = cardSearchOrigin, linkingPlace = null,
         filterPeople = emptySet(), filterThings = emptySet(), mediaTypes = emptySet(), eventDateFilter = null); home(Page.Search) }
 
     private var objectsVersion = 0
@@ -852,7 +1087,7 @@ class FolioViewModel(
     fun openObject(value: RecordObject) {
         state = state.copy(query = "", filterTags = emptySet(), starredOnly = false, placeScope = null,
             mediaTypes = emptySet(), eventDateFilter = null, filterPeople = if (value.kind == ObjectKind.PERSON) setOf(value.id) else emptySet(),
-            filterThings = if (value.kind == ObjectKind.THING) setOf(value.id) else emptySet(), searchOrigin = Page.Records, linkingPlace = null)
+            filterThings = if (value.kind == ObjectKind.THING) setOf(value.id) else emptySet(), searchOrigin = cardSearchOrigin, linkingPlace = null)
         home(Page.Search)
     }
 
@@ -923,7 +1158,7 @@ class FolioViewModel(
         val id = state.detailId ?: return
         val origin = state.detailOrigin
         val context = DeletedRecord(id, origin, state.query, state.filterTags, state.starredOnly, state.recent, state.placeScope, state.searchOrigin, state.placeRecent,
-            state.filterPeople, state.filterThings, state.mediaTypes, state.eventDateFilter)
+            state.filterPeople, state.filterThings, state.mediaTypes, state.eventDateFilter, state.groupId)
         val hasDraft = state.drafts.any { it.recordId == id }
         media?.stopPlayback()
         runAction("移入回收站失败，请重试。") {
@@ -942,11 +1177,12 @@ class FolioViewModel(
         runAction("恢复失败，请重试。") {
             val restored = withContext(Dispatchers.IO) { requireNotNull(trash).restoreRecord(deleted.id) }
             check(restored)
-            state = state.copy(page = deleted.origin, deleted = null, notice = "已撤销删除",
+            state = state.copy(page = deleted.origin, deleted = null, notice = "已撤销删除", groupFeedback = null,
                 query = deleted.query, filterTags = deleted.filterTags, starredOnly = deleted.starredOnly, recent = deleted.recent,
                 placeScope = deleted.placeScope, searchOrigin = deleted.searchOrigin, placeRecent = deleted.placeRecent,
                 filterPeople = deleted.filterPeople, filterThings = deleted.filterThings, mediaTypes = deleted.mediaTypes,
-                eventDateFilter = deleted.eventDateFilter,
+                eventDateFilter = deleted.eventDateFilter, groupId = deleted.groupId,
+                groupContent = if (deleted.origin == Page.GroupDetail) null else state.groupContent,
                 scrollRestoreVersion = state.scrollRestoreVersion + 1)
             refresh()
         }

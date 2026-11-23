@@ -693,6 +693,10 @@ class TextDatabaseMigrationTest {
             try {
                 val store = LocalTextStore(db, context)
                 val trip = store.openRecordContent(RecordId("trip"))!!
+                assertTrue(store.listGroups().isEmpty())
+                val group = RecordGroupId("legacy-trips")
+                assertEquals(GroupUpdate.Saved(group, listOf(RecordId("trip"))),
+                    store.createGroup(group, "秋天", listOf(RecordId("trip"))))
                 assertTrue(trip.marks.isStarred)
                 assertEquals(RecordTimes(100, 200, null), trip.times)
                 assertEquals(listOf(ItemId("t"), ItemId("p"), ItemId("a")), trip.items.map { it.id })
@@ -710,12 +714,78 @@ class TextDatabaseMigrationTest {
                 assertNull(store.openMixedDraft(DraftId("hidden")))
                 assertTrue(store.restoreRecord(ticket))
                 assertEquals("票面铅笔字", store.openDraft(DraftId("hidden"))!!.text)
+                assertEquals(listOf(RecordId("trip")), store.openGroup(group)!!.members.map { it.id })
                 assertEquals(0, store.retryImportCleanup())
             } finally { db.close() }
         } finally {
             photoFile.delete()
             originals.deleteOriginal(audio.id)
         }
+    }
+
+    @Test
+    fun versionEighteenPdfCanJoinAGroupAndStillOpensAfterRecovery() = runBlocking {
+        val pdfId = UUID.randomUUID()
+        val file = File(context.filesDir, "pdf-originals/$pdfId.pdf")
+        file.parentFile!!.mkdirs()
+        val nameInRecord = "窗框凭证.pdf"
+        val bytes = instrumentation.context.assets.open("m01/$nameInRecord").use { it.readBytes() }
+        file.writeBytes(bytes)
+        try {
+            createDatabase(18) { sql ->
+                sql.execSQL("""INSERT INTO text_records(id,sourceDraftId,body,firstRecordedAt,modifiedAt)
+                    VALUES ('receipt','source','',100,200)""")
+                sql.execSQL("""INSERT INTO record_items(recordId,position,itemId,pdfId,pdfName,pdfSizeBytes)
+                    VALUES ('receipt',0,'pdf',?,?,?)""", arrayOf<Any>(pdfId.toString(), nameInRecord, bytes.size))
+            }
+            val db = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+            try {
+                val store = LocalTextStore(db, context)
+                val receipt = RecordId("receipt")
+                val group = RecordGroupId("receipts")
+                assertTrue(store.listGroups().isEmpty())
+                assertEquals(GroupUpdate.Saved(group, listOf(receipt)), store.createGroup(group, "凭证", listOf(receipt)))
+                assertTrue(store.moveToTrash(receipt))
+                assertTrue(store.openGroup(group)!!.members.isEmpty())
+                assertTrue(store.restoreRecord(receipt))
+                val card = store.openGroup(group)!!.members.single()
+                assertEquals(receipt, card.id)
+                assertEquals(PreviewContentItem.Pdf(ItemId("pdf"), nameInRecord), card.preview.items.single())
+                val content = store.openRecordContent(receipt)!!
+                assertEquals(RecordTimes(100, 200, null), content.times)
+                val pdf = content.items.single() as ContentItem.Pdf
+                assertEquals(pdfId, pdf.pdfId.value)
+                assertEquals(bytes.size.toLong(), pdf.sizeBytes)
+                assertArrayEquals(bytes, store.openPdf(pdf.pdfId).use { it.readBytes() })
+            } finally { db.close() }
+        } finally { file.delete() }
+    }
+
+    @Test
+    fun versionNineteenGroupsKeepTheirOrderAndTrashedMembershipWhenEnablingGuides() = runBlocking {
+        createDatabase(19) { sql ->
+            sql.execSQL("""INSERT INTO text_records(id,sourceDraftId,body,firstRecordedAt,modifiedAt,deletedAt)
+                VALUES ('buy','b','购买凭证',1,1,NULL),('repair','r','维修单',2,2,3)""")
+            sql.execSQL("INSERT INTO record_items(recordId,position,itemId,text) SELECT id,0,id,body FROM text_records")
+            sql.execSQL("INSERT INTO record_groups VALUES ('machine','购机资料')")
+            sql.execSQL("""INSERT INTO record_group_members(groupId,recordId,position,previousRecordId)
+                VALUES ('machine','buy',0,NULL),('machine','repair',NULL,'buy')""")
+        }
+        val db = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(db, context)
+            val group = RecordGroupId("machine")
+            val buy = RecordId("buy")
+            val repair = RecordId("repair")
+            val guide = requireNotNull(store.openGuide(group))
+            assertEquals("购机资料", guide.content.group.name)
+            assertEquals(GuideLayout("", emptyList(), listOf(GuideMember(buy))), guide.layout)
+            val section = GuideSection(GuideSectionId("purchase"), "购买")
+            store.saveGuide(group, guide.layout, guide.layout.copy(sections = listOf(section), members = listOf(GuideMember(buy, section.id))))
+            assertTrue(store.restoreRecord(repair))
+            assertEquals(listOf(GuideMember(buy, section.id), GuideMember(repair)), store.openGuide(group)!!.layout.members)
+            assertEquals("维修单", store.openRecord(repair))
+        } finally { db.close() }
     }
 
     private fun createDatabase(version: Int, seed: (SQLiteDatabase) -> Unit) {
