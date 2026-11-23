@@ -3,8 +3,6 @@ package com.baconaa.folio.records
 import android.graphics.Color
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.baconaa.folio.media.LocalAudioOriginals
-import com.baconaa.folio.media.LocalPhotoOriginals
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -122,7 +120,7 @@ internal class RecordTrashTest : PhotoStoreFixture() {
     fun trashListsNewestDeletionFirstAndRestoringOneKeepsTheOther() = runBlocking {
         var timestamp = 1_000L
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context), now = { timestamp })
+        store = LocalTextStore(database, context) { timestamp }
         val firstDraft = requireNotNull(store.saveDraft(null, TextEdit("第一条", 3)))
         val first = store.completeMixedDraft(firstDraft)
         timestamp = 2_000L

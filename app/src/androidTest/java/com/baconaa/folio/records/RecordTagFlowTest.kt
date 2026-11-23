@@ -2,8 +2,6 @@ package com.baconaa.folio.records
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.baconaa.folio.media.LocalAudioOriginals
-import com.baconaa.folio.media.LocalPhotoOriginals
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -177,6 +175,6 @@ internal class RecordTagFlowTest : PhotoStoreFixture() {
 
     private fun useClock(now: () -> Long) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        store = LocalTextStore(database, LocalPhotoOriginals.get(context), now, LocalAudioOriginals.get(context))
+        store = LocalTextStore(database, context, now)
     }
 }

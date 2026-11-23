@@ -63,7 +63,8 @@ private val Ink = Color(0xFF423A32)
 private val Accent = Color(0xFF956B50)
 
 @Composable
-fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _, _ -> }) {
+fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _, _ -> },
+    chooseDocument: (ImportType, ItemId?) -> Unit = { _, _ -> }) {
     val state = model.state
     val recordsScroll = rememberLazyListState()
     val searchScroll = rememberLazyListState()
@@ -150,7 +151,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                 }
                             }
                         }
-                        Page.Editor -> MixedEditorScreen(model, launchMedia) { discardDialog = true }
+                        Page.Editor -> MixedEditorScreen(model, launchMedia, chooseDocument) { discardDialog = true }
                         Page.Records -> Column {
                             Row {
                                 TextButton(onClick = model::openSearch) { Text("搜索全部记录") }
@@ -397,6 +398,7 @@ private fun RecordPreview(record: RecordCard, model: FolioViewModel) {
         record.title?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
         record.preview.items.forEach { item -> when (item) {
             is PreviewContentItem.Text -> Text(item.text, maxLines = 4, lineHeight = 26.sp)
+            is PreviewContentItem.Pdf -> Text(item.displayName)
             is PreviewContentItem.Photo -> { Photo(item.photoId); if (item.caption.isNotEmpty()) Text(item.caption) }
             is PreviewContentItem.Audio -> { AudioControl(item.audioId, item.durationMillis, model); if (item.caption.isNotEmpty()) Text(item.caption) }
             is PreviewContentItem.Checklist -> {

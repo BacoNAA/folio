@@ -4,7 +4,6 @@ import android.graphics.Bitmap
 import android.net.Uri
 import androidx.room.Room
 import androidx.test.platform.app.InstrumentationRegistry
-import com.baconaa.folio.media.LocalAudioOriginals
 import com.baconaa.folio.media.LocalPhotoOriginals
 import com.baconaa.folio.media.PhotoId
 import java.io.File
@@ -25,7 +24,7 @@ internal abstract class PhotoStoreFixture {
     @Before
     fun openDatabase() {
         database = Room.databaseBuilder(context, FolioDatabase::class.java, databaseName).build()
-        store = LocalTextStore(database, originals, audioOriginals = LocalAudioOriginals.get(context))
+        store = LocalTextStore(database, context)
     }
 
     protected fun reopenDatabase() {

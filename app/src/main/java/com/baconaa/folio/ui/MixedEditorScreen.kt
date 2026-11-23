@@ -1,6 +1,8 @@
 package com.baconaa.folio.ui
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -21,7 +23,8 @@ import com.baconaa.folio.media.AudioId
 import com.baconaa.folio.records.*
 
 @Composable
-internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit, discard: () -> Unit) {
+internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit,
+    chooseDocument: (ImportType, ItemId?) -> Unit, discard: () -> Unit) {
     val state = model.state
     val editor = state.editor ?: return
     val scroll = rememberLazyListState()
@@ -47,6 +50,7 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
                         Text(when (item) {
                             is ContentItem.Text -> "文字"
                             is ContentItem.Photo -> "照片"
+                            is ContentItem.Pdf -> "附件"
                             is ContentItem.Audio -> "录音"
                             is ContentItem.Checklist -> "清单"
                         }, Modifier.weight(1f), fontSize = 12.sp)
@@ -76,6 +80,7 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
                                 minLines = 4, maxLines = 12, placeholder = { Text("写下一句话，也可以慢慢写……") },
                                 textStyle = MaterialTheme.typography.bodyLarge.copy(lineHeight = 28.sp))
                         }
+                        is ContentItem.Pdf -> PdfAttachment(item, model)
                         is ContentItem.Photo -> {
                             Photo(item.photoId)
                             OutlinedTextField(item.caption, { model.changeCaption(item.id, it) }, enabled = enabled,
@@ -149,8 +154,17 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
             } }, confirmButton = { TextButton(onClick = { model.resolvePhotoTime(true) }, enabled = enabled) { Text("采用拍摄时间") } },
             dismissButton = { TextButton(onClick = { model.resolvePhotoTime(false) }, enabled = enabled) { Text("保留当前时间") } })
     }
+    editor.fileImportFailure?.let { failure ->
+        AlertDialog(onDismissRequest = model::dismissFileImportFailure, title = { Text("导入失败") },
+            text = { Text(failure.message, Modifier.verticalScroll(rememberScrollState())) },
+            confirmButton = { TextButton(onClick = {
+                model.dismissFileImportFailure()
+                chooseDocument(failure.type, failure.after)
+            }) { Text("重新选择") } },
+            dismissButton = { TextButton(onClick = model::dismissFileImportFailure) { Text("继续编辑") } })
+    }
     if (showAdd) AlertDialog(onDismissRequest = { showAdd = false }, title = { Text(if (addAfter == null) "添加内容" else "在此后添加") },
-        text = { Column {
+        text = { Column(Modifier.verticalScroll(rememberScrollState())) {
             listOf("text" to "文字", "camera" to "拍照", "photo" to "选图", "audio" to "录音", "checklist" to "清单").forEach { (kind, label) ->
                 TextButton(onClick = {
                     showAdd = false
@@ -160,6 +174,12 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
                         "checklist" -> model.addChecklist(after)
                         else -> launchMedia(kind, after)
                     }
+                }, modifier = Modifier.fillMaxWidth()) { Text(label) }
+            }
+            listOf(ImportType.PDF to "PDF 附件", ImportType.AUDIO to "导入已有录音").forEach { (type, label) ->
+                TextButton(onClick = {
+                    showAdd = false
+                    chooseDocument(type, addAfter?.let(::ItemId))
                 }, modifier = Modifier.fillMaxWidth()) { Text(label) }
             }
         } }, confirmButton = { TextButton(onClick = { showAdd = false }) { Text("取消") } })

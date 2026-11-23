@@ -37,6 +37,9 @@ class MixedEditorNavigationTest {
         compose.onNodeWithText("事项 2").performTextInput("带上相机")
         clickEditorItem("add-content")
         compose.onNodeWithText("文字").performClick()
+        compose.waitUntil(10_000) {
+            compose.onAllNodes(hasTestTag("editor") and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+        }
         compose.onNodeWithTag("editor").performTextInput("沿河散步")
         waitText("草稿已保存")
         clickEditorItem("item-menu-1")

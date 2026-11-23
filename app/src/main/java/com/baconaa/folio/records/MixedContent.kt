@@ -1,6 +1,7 @@
 package com.baconaa.folio.records
 
 import com.baconaa.folio.media.PhotoId
+import com.baconaa.folio.media.PdfId
 import com.baconaa.folio.media.AudioId
 import java.util.UUID
 
@@ -12,6 +13,9 @@ sealed interface ContentItem {
 
     data class Text(override val id: ItemId, val text: String) : ContentItem
     data class Photo(override val id: ItemId, val photoId: PhotoId, val caption: String = "") : ContentItem
+    data class Pdf(
+        override val id: ItemId, val pdfId: PdfId, val displayName: String, val sizeBytes: Long,
+    ) : ContentItem
     data class Audio(
         override val id: ItemId, val audioId: AudioId, val durationMillis: Long, val caption: String = "",
     ) : ContentItem {
@@ -57,15 +61,18 @@ internal fun newItemId() = ItemId(UUID.randomUUID().toString())
 internal fun ContentItem.searchText(): String? = when (this) {
     is ContentItem.Text -> text
     is ContentItem.Checklist -> entries.joinToString("\n") { it.text }
-    is ContentItem.Photo, is ContentItem.Audio -> null
+    is ContentItem.Photo, is ContentItem.Audio, is ContentItem.Pdf -> null
 }
 internal fun List<ContentItem>.body() = mapNotNull { it.searchText() }.joinToString("\n")
 internal fun List<ContentItem>.photos() = filterIsInstance<ContentItem.Photo>().map { it.photoId }
 
 internal fun ContentSlot.asItem(): ContentItem {
-    check(listOf(text, photoId, checklistJson, audioId).count { it != null } == 1) { "内容项类型无效" }
+    check(listOf(text, photoId, checklistJson, audioId, pdfId).count { it != null } == 1) { "内容项类型无效" }
     check((audioId == null) == (audioDurationMillis == null)) { "录音时长缺失或类型无效" }
     return when {
+        pdfId != null -> ContentItem.Pdf(
+            ItemId(itemId), PdfId(UUID.fromString(pdfId)), checkNotNull(pdfName), checkNotNull(pdfSizeBytes),
+        )
         audioId != null -> ContentItem.Audio(
             ItemId(itemId), AudioId(UUID.fromString(audioId)), checkNotNull(audioDurationMillis), caption,
         )
@@ -78,6 +85,9 @@ internal fun ContentSlot.asItem(): ContentItem {
 internal fun ContentItem.asSlot(): ContentSlot = when (this) {
     is ContentItem.Text -> ContentSlot(id.value, text, null)
     is ContentItem.Photo -> ContentSlot(id.value, null, photoId.value.toString(), caption)
+    is ContentItem.Pdf -> ContentSlot(
+        id.value, null, null, pdfId = pdfId.value.toString(), pdfName = displayName, pdfSizeBytes = sizeBytes,
+    )
     is ContentItem.Checklist -> ContentSlot(id.value, null, null, checklistJson = encodeChecklist(entries))
     is ContentItem.Audio -> ContentSlot(
         id.value, null, null, caption, audioId = audioId.value.toString(), audioDurationMillis = durationMillis,
@@ -125,4 +135,4 @@ internal suspend fun FolioDatabase.writeMixedDraft(id: DraftId, draft: MixedDraf
 }
 
 internal fun List<ContentItem>.hasActualContent(body: String): Boolean =
-    body.isNotBlank() || any { it is ContentItem.Photo || it is ContentItem.Audio }
+    body.isNotBlank() || any { it is ContentItem.Photo || it is ContentItem.Audio || it is ContentItem.Pdf }

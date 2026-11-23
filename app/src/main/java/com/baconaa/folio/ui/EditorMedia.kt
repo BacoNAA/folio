@@ -62,7 +62,10 @@ class LocalEditorMedia(context: Context) : EditorMedia {
 }
 
 data class ExternalTarget(val draftId: String?, val recordId: String?, val afterId: String?,
-    val returnPage: Page, val detailOrigin: Page, val eventTime: com.baconaa.folio.records.EventTime? = null, val suggestPhotoTime: Boolean = false)
+    val returnPage: Page, val detailOrigin: Page, val eventTime: com.baconaa.folio.records.EventTime? = null,
+    val suggestPhotoTime: Boolean = false, val emptyInput: EmptyInput? = null, val placeBookId: String? = null)
+
+enum class EmptyInput { Text, Checklist }
 
 data class PhotoTimeOffer(val time: com.baconaa.folio.records.EventTime.Exact, val usesDeviceZone: Boolean)
 

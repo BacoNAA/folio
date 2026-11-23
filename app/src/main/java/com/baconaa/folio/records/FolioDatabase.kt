@@ -165,10 +165,10 @@ internal interface TextDao {
         AudioCleanupEntry::class, TagRow::class, DraftTagRow::class, RecordTagRow::class,
         PlaceRow::class, DraftPlaceRow::class, RecordPlaceRow::class,
         ObjectRow::class, ObjectAliasRow::class, DraftObjectRow::class, PublishedObjectRow::class,
-        SeasonSettingRow::class,
+        SeasonSettingRow::class, ImportCleanupEntry::class,
     ],
     views = [EditableDraftRow::class],
-    version = 17,
+    version = 18,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -186,6 +186,7 @@ internal interface TextDao {
         AutoMigration(from = 14, to = 15),
         AutoMigration(from = 15, to = 16, spec = DraftTitleMigration::class),
         AutoMigration(from = 16, to = 17),
+        AutoMigration(from = 17, to = 18),
     ],
 )
 internal abstract class FolioDatabase : RoomDatabase() {
@@ -195,6 +196,7 @@ internal abstract class FolioDatabase : RoomDatabase() {
     abstract fun trashDao(): TrashDao
     abstract fun photoCleanupDao(): PhotoCleanupDao
     abstract fun audioCleanupDao(): AudioCleanupDao
+    abstract fun importCleanupDao(): ImportCleanupDao
     abstract fun recordBrowsingDao(): RecordBrowsingDao
     abstract fun tagDao(): TagDao
     abstract fun placeDao(): PlaceDao

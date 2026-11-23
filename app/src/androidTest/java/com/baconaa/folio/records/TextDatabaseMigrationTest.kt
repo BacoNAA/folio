@@ -2,6 +2,7 @@ package com.baconaa.folio.records
 
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
+import android.graphics.Bitmap
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -9,6 +10,7 @@ import com.baconaa.folio.media.LocalAudioOriginals
 import com.baconaa.folio.media.LocalPhotoOriginals
 import com.baconaa.folio.media.PhotoId
 import com.baconaa.folio.media.createAudioTestClip
+import java.io.File
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
@@ -16,6 +18,7 @@ import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -43,7 +46,7 @@ class TextDatabaseMigrationTest {
 
         val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
         try {
-            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context))
+            val store = LocalTextStore(database, context)
             val record = RecordId("published")
             val oldDraft = DraftId("unfinished")
             assertEquals(TextEdit("等雨停", 1), store.openDraft(oldDraft))
@@ -74,7 +77,7 @@ class TextDatabaseMigrationTest {
 
         val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
         try {
-            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context))
+            val store = LocalTextStore(database, context)
             val record = RecordId("record")
             val draft = DraftId("edit")
             assertEquals(draft, store.editRecord(record))
@@ -106,7 +109,7 @@ class TextDatabaseMigrationTest {
 
         val db = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
         try {
-            val store = LocalTextStore(db, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context))
+            val store = LocalTextStore(db, context)
             val record = RecordId("record")
             val content = requireNotNull(store.openRecordContent(record))
             val textId = content.items.first().id
@@ -151,7 +154,7 @@ class TextDatabaseMigrationTest {
 
         val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
         try {
-            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context))
+            val store = LocalTextStore(database, context)
             val record = RecordId("record")
             val draft = DraftId("edit")
             val publishedItems = listOf(ContentItem.Text(text, "旧桥"), ContentItem.Photo(first, oldPhoto, "原图说明"))
@@ -201,7 +204,7 @@ class TextDatabaseMigrationTest {
 
         val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
         try {
-            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context), now = { 600L })
+            val store = LocalTextStore(database, context) { 600L }
             val record = RecordId("record")
             val draft = DraftId("edit")
             val unfinished = DraftId("unfinished")
@@ -253,7 +256,7 @@ class TextDatabaseMigrationTest {
         }
         val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
         try {
-            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context), now = { 600L })
+            val store = LocalTextStore(database, context) { 600L }
             val record = RecordId("record")
             val draft = DraftId("edit")
             assertEquals(RecordTimes(100L, 200L, event), store.openRecordContent(record)!!.times)
@@ -310,7 +313,7 @@ class TextDatabaseMigrationTest {
         val originals = LocalAudioOriginals.get(context)
         val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
         try {
-            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = originals)
+            val store = LocalTextStore(database, context)
             val record = RecordId("record")
             val draft = DraftId("edit")
             val published = listOf(ContentItem.Checklist(ItemId("checklist"), oldEntries))
@@ -376,7 +379,7 @@ class TextDatabaseMigrationTest {
         }
         val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
         try {
-            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = originals, now = { 600L })
+            val store = LocalTextStore(database, context) { 600L }
             val record = RecordId("record")
             val draft = DraftId("edit")
             val content = store.openRecordContent(record)!!
@@ -441,7 +444,7 @@ class TextDatabaseMigrationTest {
         }
         val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
         try {
-            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = originals, now = { 600L })
+            val store = LocalTextStore(database, context) { 600L }
             val record = RecordId("record")
             val draft = DraftId("edit")
             val content = store.openTrashRecord(record)!!.content
@@ -480,7 +483,7 @@ class TextDatabaseMigrationTest {
         }
         val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
         try {
-            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context))
+            val store = LocalTextStore(database, context)
             val draft = DraftId("draft")
             assertEquals(TextEdit("旧草稿", 2), store.openDraft(draft))
             assertEquals("旧标签", store.openDraftTags(draft)!!.single().name)
@@ -502,7 +505,7 @@ class TextDatabaseMigrationTest {
         }
         val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
         try {
-            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context))
+            val store = LocalTextStore(database, context)
             val draft = DraftId("draft")
             val place = store.openDraftPlace(draft)!!
             assertEquals(PlaceId("private"), place.id)
@@ -527,7 +530,7 @@ class TextDatabaseMigrationTest {
         }
         val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
         try {
-            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context))
+            val store = LocalTextStore(database, context)
             val draft = DraftId("draft")
             assertTrue(store.listObjects().isEmpty())
             assertEquals(emptyList<RecordObject>(), store.openDraftObjects(draft))
@@ -562,7 +565,7 @@ class TextDatabaseMigrationTest {
         }
         val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
         try {
-            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context))
+            val store = LocalTextStore(database, context)
             val record = RecordId("record")
             val edit = DraftId("edit")
             val published = RecordTimes(100L, 200L, EventTime(date, clock, zone))
@@ -595,13 +598,13 @@ class TextDatabaseMigrationTest {
         val college = EventTime.Description("大学时", start..end, zone, precision)
         val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
         val edit = try {
-            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context))
+            val store = LocalTextStore(database, context)
             assertEquals(EventTime.Range(start, end, zone), store.openRecordContent(id)!!.times.eventTime)
             store.editRecord(id).also { store.saveDraftEventTime(it, college) }
         } finally { database.close() }
         val reopened = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
         try {
-            val store = LocalTextStore(reopened, LocalPhotoOriginals.get(context), audioOriginals = LocalAudioOriginals.get(context))
+            val store = LocalTextStore(reopened, context)
             assertEquals(college, store.openDraftTimes(edit)!!.eventTime)
             store.completeMixedDraft(edit)
             assertEquals(college, store.queryRecords("大学时").single().eventTime)
@@ -626,8 +629,7 @@ class TextDatabaseMigrationTest {
         }
         val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
         try {
-            val store = LocalTextStore(database, LocalPhotoOriginals.get(context), now = { 400L },
-                audioOriginals = LocalAudioOriginals.get(context))
+            val store = LocalTextStore(database, context) { 400L }
             val id = RecordId("record")
             val edit = DraftId("edit")
             val time = EventTime.Description("大学时", zone = ZoneId.of("Asia/Tokyo"))
@@ -652,6 +654,68 @@ class TextDatabaseMigrationTest {
             assertEquals("校门口的书店", published.text)
             assertEquals(RecordTimes(100L, 400L, time), published.times)
         } finally { database.close() }
+    }
+
+    @Test
+    fun versionSeventeenKeepsOriginalsDraftsUndoAndTrashWhenAddingPdf() = runBlocking {
+        val photo = PhotoId(UUID.randomUUID())
+        val photoFile = File(context.filesDir, "photo-originals/${photo.value}")
+        photoFile.parentFile!!.mkdirs()
+        val bitmap = Bitmap.createBitmap(4, 3, Bitmap.Config.ARGB_8888)
+        photoFile.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+        bitmap.recycle()
+        val photoBytes = photoFile.readBytes()
+        val audio = createAudioTestClip(context)
+        val originals = LocalAudioOriginals.get(context)
+        val audioBytes = originals.openOriginal(audio.id).use { it.readBytes() }
+        try {
+            createDatabase(17) { sql ->
+                sql.execSQL("""INSERT INTO text_records(id,sourceDraftId,body,firstRecordedAt,modifiedAt,isStarred,deletedAt)
+                    VALUES ('trip','s1','秋游',100,200,1,NULL), ('ticket','s2','旧车票',110,210,0,300)""")
+                sql.execSQL("""INSERT INTO record_items(recordId,position,itemId,text)
+                    VALUES ('trip',0,'t','秋游'), ('ticket',0,'ticket-text','旧车票')""")
+                sql.execSQL("INSERT INTO record_items(recordId,position,itemId,photoId) VALUES ('trip',1,'p',?)",
+                    arrayOf(photo.value.toString()))
+                sql.execSQL("INSERT INTO record_items(recordId,position,itemId,audioId,audioDurationMillis) VALUES ('trip',2,'a',?,?)",
+                    arrayOf<Any>(audio.id.value.toString(), audio.durationMillis))
+                sql.execSQL("""INSERT INTO text_drafts(id,body,cursor,firstRecordedAt,lastEditedAt,firstContentAt,activeItemId)
+                    VALUES ('edit','秋游' || char(10) || '补记山路',7,100,240,100,'more'),
+                    ('rain','明天带伞',4,220,220,220,'rain-text'), ('hidden','票面铅笔字',5,110,230,110,'ticket-text')""")
+                sql.execSQL("INSERT INTO text_record_edits VALUES ('edit','trip',1), ('hidden','ticket',1)")
+                sql.execSQL("""INSERT INTO draft_items(draftId,position,itemId,text,photoId,audioId,audioDurationMillis)
+                    SELECT 'edit',position,itemId,text,photoId,audioId,audioDurationMillis FROM record_items WHERE recordId='trip'""")
+                sql.execSQL("""INSERT INTO draft_items(draftId,position,itemId,text) VALUES
+                    ('edit',3,'more','补记山路'), ('rain',0,'rain-text','明天带伞'), ('hidden',0,'ticket-text','票面铅笔字')""")
+                sql.execSQL("""INSERT INTO removed_draft_items(draftId,position,cursor,itemId,text)
+                    VALUES ('rain',1,0,'undo','带地图')""")
+            }
+            val db = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+            try {
+                val store = LocalTextStore(db, context)
+                val trip = store.openRecordContent(RecordId("trip"))!!
+                assertTrue(trip.marks.isStarred)
+                assertEquals(RecordTimes(100, 200, null), trip.times)
+                assertEquals(listOf(ItemId("t"), ItemId("p"), ItemId("a")), trip.items.map { it.id })
+                assertArrayEquals(photoBytes, LocalPhotoOriginals.get(context).openOriginal(trip.photos.single()).use { it.readBytes() })
+                val sound = trip.items.last() as ContentItem.Audio
+                assertEquals(audio.durationMillis, sound.durationMillis)
+                assertArrayEquals(audioBytes, originals.openOriginal(sound.audioId).use { it.readBytes() })
+                assertEquals(setOf(DraftId("edit"), DraftId("rain")), store.listDrafts().map { it.id }.toSet())
+                assertEquals(ItemId("more"), store.openMixedDraft(DraftId("edit"))!!.activeItemId)
+                assertTrue(store.search("补记山路").isEmpty())
+                assertTrue(store.undoRemoval(DraftId("rain")))
+                assertEquals("明天带伞\n带地图", store.openDraft(DraftId("rain"))!!.text)
+                val ticket = RecordId("ticket")
+                assertTrue(store.openTrashRecord(ticket)!!.hasDraft)
+                assertNull(store.openMixedDraft(DraftId("hidden")))
+                assertTrue(store.restoreRecord(ticket))
+                assertEquals("票面铅笔字", store.openDraft(DraftId("hidden"))!!.text)
+                assertEquals(0, store.retryImportCleanup())
+            } finally { db.close() }
+        } finally {
+            photoFile.delete()
+            originals.deleteOriginal(audio.id)
+        }
     }
 
     private fun createDatabase(version: Int, seed: (SQLiteDatabase) -> Unit) {
