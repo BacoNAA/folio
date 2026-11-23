@@ -42,6 +42,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -69,6 +70,9 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
     val recordsScroll = rememberLazyListState()
     val searchScroll = rememberLazyListState()
     val placesScroll = rememberLazyListState()
+    val groupsScroll = rememberLazyListState()
+    val membersScroll = key(state.groupId) { rememberLazyListState() }
+    val pickerScroll = key(state.groupSelection?.creationId) { rememberLazyListState() }
     var draftPicker by rememberSaveable { mutableStateOf(false) }
     var discardDialog by rememberSaveable { mutableStateOf(false) }
     var deleteDialog by rememberSaveable { mutableStateOf(false) }
@@ -76,10 +80,17 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
     var deletedScrollIndex by rememberSaveable { mutableIntStateOf(0) }
     var deletedScrollOffset by rememberSaveable { mutableIntStateOf(0) }
     var restoredScrollVersion by rememberSaveable { mutableIntStateOf(0) }
-    LaunchedEffect(state.scrollRestoreVersion, state.loading) {
-        if (!state.loading && state.scrollRestoreVersion > restoredScrollVersion) {
-            val scroll = if (state.page == Page.Search) searchScroll else recordsScroll
-            scroll.scrollToItem(deletedScrollIndex, deletedScrollOffset)
+    // 快速重试可能在两帧之间完成，应在列表从失败变为可读时恢复位置。
+    val listReady = !state.loading && state.groupReadError == null && state.error == null
+    LaunchedEffect(state.scrollRestoreVersion, state.page, listReady) {
+        if (listReady && state.scrollRestoreVersion > restoredScrollVersion) {
+            val scroll = when (state.page) {
+                Page.GroupDetail -> membersScroll.takeIf { state.groupContent != null }
+                Page.Search -> searchScroll
+                Page.Records -> recordsScroll
+                else -> null
+            }
+            scroll?.scrollToItem(deletedScrollIndex, deletedScrollOffset)
             restoredScrollVersion = state.scrollRestoreVersion
         }
     }
@@ -105,9 +116,14 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                             Page.Editor -> "记录这一刻"
                             Page.Search -> if (state.placeBook != null) "地点小册" else "搜索全部记录"
                             Page.Places -> "按地点"
+                            Page.Groups -> "记录组"
+                            Page.GroupDetail -> state.groupContent?.group?.name ?: "记录组"
+                            Page.GroupPicker -> "选择记录"
+                            Page.GroupDestination -> "收录到记录组"
                             Page.Trash, Page.TrashDetail -> "回收站"
                             else -> "记录"
-                        }, Modifier.weight(1f), fontSize = 22.sp, fontFamily = FontFamily.Serif)
+                        }, Modifier.weight(1f), fontSize = 22.sp, fontFamily = FontFamily.Serif,
+                            maxLines = 2, overflow = TextOverflow.Ellipsis)
                         if (state.page == Page.Editor) {
                             Button(onClick = model::complete, enabled = !state.busy && state.editor?.hasContent == true && !state.recording && state.pendingAttachment == null && !state.importFailed && state.editor.needsReload == false) {
                                 Text("完成")
@@ -153,10 +169,11 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                         }
                         Page.Editor -> MixedEditorScreen(model, launchMedia, chooseDocument) { discardDialog = true }
                         Page.Records -> Column {
-                            Row {
+                            FlowRow {
                                 TextButton(onClick = model::openSearch) { Text("搜索全部记录") }
                                 TextButton(onClick = model::openStarred) { Text("星标") }
                                 TextButton(onClick = { model.home(Page.Trash) }) { Text("回收站") }
+                                TextButton(onClick = { model.home(Page.Groups) }) { Text("记录组") }
                             }
                             if (state.drafts.isNotEmpty()) {
                                 FilledTonalButton(onClick = {
@@ -165,10 +182,11 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                     Text(if (state.drafts.size == 1) "继续草稿" else "继续草稿 · ${state.drafts.size} 份")
                                 }
                             }
-                            Row(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            FlowRow(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 FilterChip(selected = !state.recent, onClick = { model.selectRecent(false) }, label = { Text("事件时间") })
                                 FilterChip(selected = state.recent, onClick = { model.selectRecent(true) }, label = { Text("最近记录") })
                                 TextButton(onClick = { model.home(Page.Places) }) { Text("按地点") }
+                                TextButton(onClick = model::pickGroupMembers) { Text("多选成组") }
                             }
                             if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
                             if (!state.loading && state.error == null && state.records.isEmpty()) EmptyMessage("还没有记录\n从「写一句」开始，完成后会出现在这里。")
@@ -243,6 +261,8 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                             }
                         }
                         Page.Places -> PlacesScreen(model, placesScroll)
+                        Page.Groups, Page.GroupDetail, Page.GroupPicker, Page.GroupDestination ->
+                            RecordGroupScreens(model, groupsScroll, membersScroll, pickerScroll)
                         Page.Trash -> TrashScreen(model)
                         Page.TrashDetail -> state.trashDetail?.let { record ->
                             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -284,7 +304,11 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
         if (deleteDialog) AlertDialog(onDismissRequest = { deleteDialog = false }, title = { Text("移入回收站？") },
             text = { Text("正式内容和这条记录的未完成修改会一起保留，可在回收站恢复。") },
             confirmButton = { TextButton(onClick = {
-                val scroll = if (state.detailOrigin == Page.Search) searchScroll else recordsScroll
+                val scroll = when (state.detailOrigin) {
+                    Page.GroupDetail -> membersScroll
+                    Page.Search -> searchScroll
+                    else -> recordsScroll
+                }
                 deletedScrollIndex = scroll.firstVisibleItemIndex; deletedScrollOffset = scroll.firstVisibleItemScrollOffset
                 deleteDialog = false; model.deleteRecord()
             }) { Text("确认删除") } }, dismissButton = { TextButton(onClick = { deleteDialog = false }) { Text("取消") } })
@@ -387,49 +411,64 @@ private fun LazyListScope.eventTimelineItems(timeline: EventTimeline, model: Fol
 }
 
 @Composable
-private fun RecordPreview(record: RecordCard, model: FolioViewModel) {
-    Column(Modifier.fillMaxWidth().clickable { model.openRecord(record.id) }.padding(vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        val eventTime = record.eventTime
-        val dateLabel = if (eventTime is EventTime.Exact) eventTime.date.toString() else eventTime?.label
-        val metadata = listOfNotNull(dateLabel, record.place?.info?.name,
-            "置顶".takeIf { record.marks.isPinned }, "★".takeIf { record.marks.isStarred })
-        if (metadata.isNotEmpty()) Text(metadata.joinToString(" · "), fontSize = 12.sp, color = Accent)
-        record.title?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
-        record.preview.items.forEach { item -> when (item) {
-            is PreviewContentItem.Text -> Text(item.text, maxLines = 4, lineHeight = 26.sp)
-            is PreviewContentItem.Pdf -> Text(item.displayName)
-            is PreviewContentItem.Photo -> { Photo(item.photoId); if (item.caption.isNotEmpty()) Text(item.caption) }
-            is PreviewContentItem.Audio -> { AudioControl(item.audioId, item.durationMillis, model); if (item.caption.isNotEmpty()) Text(item.caption) }
-            is PreviewContentItem.Checklist -> {
-                Text("清单 · 已完成 ${item.checkedEntryCount}/${item.totalEntryCount} 项", fontSize = 12.sp)
-                item.entries.forEach { Text("${if (it.checked) "☑" else "☐"} ${it.text}") }
+internal fun RecordPreview(record: RecordCard, model: FolioViewModel, actions: (@Composable () -> Unit)? = null) {
+    Column(Modifier.fillMaxWidth()) {
+        Column(Modifier.fillMaxWidth().clickable { model.openRecord(record.id) }.heightIn(min = 48.dp).padding(vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            RecordCardSummary(record, model)
+            if (record.tags.isNotEmpty()) Row {
+                record.tags.take(2).forEach { tag -> TextButton(onClick = { model.openTag(tag) }) { Text(tag.name) } }
+                if (record.tags.size > 2) Text("另有 ${record.tags.size - 2} 个标签", fontSize = 12.sp)
             }
-        } }
-        val preview = record.preview
-        if (preview.remainingItemCount > 0) {
-            val remaining = buildList {
-                add("还有 ${preview.remainingItemCount} 项内容")
-                if (preview.remainingPhotoCount > 0) add("${preview.remainingPhotoCount} 张照片")
-                if (preview.remainingAudioCount > 0) add("${preview.remainingAudioCount} 段录音")
+            if (record.objects.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                record.objects.forEach { value -> TextButton(onClick = { model.openObject(value) }) {
+                    Text("${value.kind.label}：${value.info.name}${value.info.note.takeIf { it.isNotBlank() }?.let { "（$it）" }.orEmpty()}")
+                } }
             }
-            Text(remaining.joinToString(" · "), fontSize = 12.sp)
         }
-        if (record.tags.isNotEmpty()) Row {
-            record.tags.take(2).forEach { tag -> TextButton(onClick = { model.openTag(tag) }) { Text(tag.name) } }
-            if (record.tags.size > 2) Text("另有 ${record.tags.size - 2} 个标签", fontSize = 12.sp)
-        }
-        if (record.objects.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-            record.objects.forEach { value -> TextButton(onClick = { model.openObject(value) }) {
-                Text("${value.kind.label}：${value.info.name}${value.info.note.takeIf { it.isNotBlank() }?.let { "（$it）" }.orEmpty()}")
-            } }
-        }
+        actions?.invoke()
         HorizontalDivider()
     }
 }
 
 @Composable
-internal fun Photo(id: PhotoId, thumbnail: Boolean = false) = key(id, thumbnail) {
+internal fun RecordCardSummary(record: RecordCard, model: FolioViewModel? = null) {
+    val eventTime = record.eventTime
+    val dateLabel = if (eventTime is EventTime.Exact) eventTime.date.toString() else eventTime?.label
+    val metadata = listOfNotNull(dateLabel, record.place?.info?.name,
+        "置顶".takeIf { record.marks.isPinned }, "★".takeIf { record.marks.isStarred })
+    if (metadata.isNotEmpty()) Text(metadata.joinToString(" · "), fontSize = 12.sp, color = Accent)
+    record.title?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
+    record.preview.items.forEach { item -> when (item) {
+        is PreviewContentItem.Text -> Text(item.text, maxLines = 4, lineHeight = 26.sp)
+        is PreviewContentItem.Pdf -> Text(item.displayName)
+        is PreviewContentItem.Photo -> {
+            Photo(item.photoId, thumbnail = model == null, thumbnailDescription = "记录照片缩略图")
+            if (item.caption.isNotEmpty()) Text(item.caption)
+        }
+        is PreviewContentItem.Audio -> {
+            if (model != null) AudioControl(item.audioId, item.durationMillis, model)
+            else Text("录音 · ${formatAudioDuration(item.durationMillis)}")
+            if (item.caption.isNotEmpty()) Text(item.caption)
+        }
+        is PreviewContentItem.Checklist -> {
+            Text("清单 · 已完成 ${item.checkedEntryCount}/${item.totalEntryCount} 项", fontSize = 12.sp)
+            item.entries.forEach { Text("${if (it.checked) "☑" else "☐"} ${it.text}") }
+        }
+    } }
+    val preview = record.preview
+    if (preview.remainingItemCount > 0) {
+        val remaining = buildList {
+            add("还有 ${preview.remainingItemCount} 项内容")
+            if (preview.remainingPhotoCount > 0) add("${preview.remainingPhotoCount} 张照片")
+            if (preview.remainingAudioCount > 0) add("${preview.remainingAudioCount} 段录音")
+        }
+        Text(remaining.joinToString(" · "), fontSize = 12.sp)
+    }
+}
+
+@Composable
+internal fun Photo(id: PhotoId, thumbnail: Boolean = false, thumbnailDescription: String = "草稿照片缩略图") = key(id, thumbnail) {
     val context = LocalContext.current
     var failed by remember { mutableStateOf(false) }
     var expanded by remember { mutableStateOf(false) }
@@ -449,7 +488,7 @@ internal fun Photo(id: PhotoId, thumbnail: Boolean = false) = key(id, thumbnail)
     }
     val image = bitmap
     when {
-        image != null && thumbnail -> Image(image, "草稿照片缩略图", Modifier.size(64.dp), contentScale = ContentScale.Crop)
+        image != null && thumbnail -> Image(image, thumbnailDescription, Modifier.size(64.dp), contentScale = ContentScale.Crop)
         image != null -> Image(image, "记录中的照片，点击放大",
             Modifier.fillMaxWidth().heightIn(max = 320.dp).clickable { expanded = true })
         failed -> Column {

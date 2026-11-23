@@ -13,6 +13,8 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.baconaa.folio.records.ItemId
+import com.baconaa.folio.records.RecordGroupId
+import com.baconaa.folio.records.RecordId
 import com.baconaa.folio.records.ImportType
 import com.baconaa.folio.records.LocalTextStore
 import com.baconaa.folio.records.EventTime
@@ -67,7 +69,7 @@ class MainActivity : ComponentActivity() {
             pendingTarget = ExternalTarget(it.getString("draft"), it.getString("record"), it.getString("after"),
                 Page.valueOf(it.getString("return") ?: "Capture"), Page.valueOf(it.getString("origin") ?: "Records"),
                 it.readEventTime(), emptyInput = it.getString("empty-input")?.let(EmptyInput::valueOf),
-                placeBookId = it.getString("place-book"))
+                placeBookId = it.getString("place-book"), groupId = it.getString("group"))
             cameraPath = it.getString("camera")
         }
         model = ViewModelProvider(this, object : ViewModelProvider.Factory {
@@ -77,6 +79,7 @@ class MainActivity : ComponentActivity() {
                 return FolioViewModel(store, store, store, store, LocalEditorMedia(applicationContext)) as T
             }
         })[FolioViewModel::class.java]
+        savedInstanceState?.getBundle("group-navigation")?.let(model::readGroupNavigation)
         setContent { FolioApp(model, ::launchMedia, ::chooseDocument) }
     }
 
@@ -122,11 +125,13 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        model.state.groupNavigation()?.let { outState.putBundle("group-navigation", it) }
         pendingTarget?.let { target -> outState.putBundle("media-target", Bundle().apply {
             putString("draft", target.draftId); putString("record", target.recordId); putString("after", target.afterId)
             putString("return", target.returnPage.name); putString("origin", target.detailOrigin.name); putString("camera", cameraPath)
             putString("empty-input", target.emptyInput?.name)
             putString("place-book", target.placeBookId)
+            putString("group", target.groupId)
             target.eventTime?.let { writeEventTime(it) }
         }) }
         super.onSaveInstanceState(outState)
@@ -136,6 +141,30 @@ class MainActivity : ComponentActivity() {
         model.background()
         super.onStop()
     }
+}
+
+internal fun FolioState.groupNavigation(): Bundle? {
+    if (!page.isGroupPage && !(page == Page.Detail && detailOrigin == Page.GroupDetail)) return null
+    return Bundle().apply {
+        putString("page", page.name)
+        putString("group", groupId?.value)
+        if (page == Page.Detail) putString("member", detailId?.value)
+        groupSelection?.let { selection ->
+            putString("origin", selection.origin.name)
+            putString("creation", selection.creationId.value)
+            putString("name", selection.name)
+            putStringArrayList("members", ArrayList(selection.members.map { it.value }))
+        }
+    }
+}
+
+internal fun FolioViewModel.readGroupNavigation(route: Bundle) {
+    val page = route.getString("page")?.let(Page::valueOf) ?: return
+    val selection = route.getString("creation")?.let { id ->
+        GroupSelection(Page.valueOf(requireNotNull(route.getString("origin"))), RecordGroupId(id),
+            route.getStringArrayList("members").orEmpty().map(::RecordId), route.getString("name").orEmpty())
+    }
+    restoreGroupNavigation(page, route.getString("group")?.let(::RecordGroupId), selection, route.getString("member")?.let(::RecordId))
 }
 
 private fun Bundle.writeEventTime(value: EventTime) {
