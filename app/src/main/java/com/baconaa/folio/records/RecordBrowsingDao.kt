@@ -41,14 +41,14 @@ internal interface RecordBrowsingDao {
               i.photoId, substr(i.caption, 1, 80) AS caption, i.checklistJson, i.audioId, i.audioDurationMillis,
               i.pdfId, i.pdfName, i.pdfSizeBytes
               FROM record_items i JOIN text_records r ON r.id = i.recordId
-              WHERE r.deletedAt IS NULL AND i.position IN
+              WHERE r.deletedAt IS NULL AND i.recordId IN (:ids) AND i.position IN
                 (SELECT position FROM record_items WHERE recordId = i.recordId AND """ + VISIBLE_PREVIEW_ITEM + """
                  ORDER BY position LIMIT 3)
               ORDER BY i.recordId, i.position""")
-    suspend fun previewItems(blankChars: String): List<PreviewItemRow>
+    suspend fun previewItems(ids: List<String>, blankChars: String): List<PreviewItemRow>
 
     @Query("""SELECT recordId, count(*) AS itemCount, count(photoId) AS photoCount, count(audioId) AS audioCount
               FROM record_items JOIN text_records r ON r.id = recordId
-              WHERE r.deletedAt IS NULL AND """ + VISIBLE_PREVIEW_ITEM + " GROUP BY recordId")
-    suspend fun previewCounts(blankChars: String): List<PreviewCountRow>
+              WHERE r.deletedAt IS NULL AND recordId IN (:ids) AND """ + VISIBLE_PREVIEW_ITEM + " GROUP BY recordId")
+    suspend fun previewCounts(ids: List<String>, blankChars: String): List<PreviewCountRow>
 }

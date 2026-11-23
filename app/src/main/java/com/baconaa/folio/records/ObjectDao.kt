@@ -40,8 +40,9 @@ internal abstract class ObjectDao {
     @Transaction @Query("SELECT o.* FROM published_objects p JOIN record_objects o ON o.id = p.objectId WHERE p.recordId = :id ORDER BY p.position")
     abstract suspend fun recordObjects(id: String): List<ObjectDetails>
     @Transaction @Query("""SELECT p.recordId, o.* FROM published_objects p JOIN record_objects o ON o.id = p.objectId
-        JOIN text_records r ON r.id = p.recordId WHERE r.deletedAt IS NULL ORDER BY p.recordId, p.position""")
-    abstract suspend fun activeRecordObjects(): List<RecordObjectPreviewRow>
+        JOIN text_records r ON r.id = p.recordId WHERE r.deletedAt IS NULL AND p.recordId IN (:ids)
+        ORDER BY p.recordId, p.position""")
+    abstract suspend fun activeRecordObjects(ids: List<String>): List<RecordObjectPreviewRow>
     @Query("""UPDATE record_objects SET ownerDraftId = NULL WHERE ownerDraftId = :id
         AND id IN (SELECT objectId FROM draft_objects WHERE draftId = :id)""")
     abstract suspend fun promoteSelected(id: String)

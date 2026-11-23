@@ -77,6 +77,9 @@ private const val PREVIEW_BLANK_CHARACTERS =
     "\t\n\u000b\u000c\r\u001c\u001d\u001e\u001f \u00a0\u1680" +
         "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
 
+// 给预览等附加参数留出余量，兼容旧版 SQLite 每条语句的绑定参数上限。
+internal const val RECORD_ID_BATCH_SIZE = 900
+
 internal class LocalRecordBrowsing(private val database: FolioDatabase) : RecordBrowsing {
     private val dao = database.recordBrowsingDao()
 
@@ -114,13 +117,16 @@ internal class LocalRecordBrowsing(private val database: FolioDatabase) : Record
         RecordSearchResult(cards.subList(0, certain.size), cards.subList(certain.size, cards.size), undatedCount)
     }
 
-    private suspend fun readCards(records: List<BrowseRecordRow>): List<RecordCard> {
-        if (records.isEmpty()) return emptyList()
-        val items = dao.previewItems(PREVIEW_BLANK_CHARACTERS).groupBy { it.recordId }
-        val counts = dao.previewCounts(PREVIEW_BLANK_CHARACTERS).associateBy { it.recordId }
-        val tags = database.tagDao().activeRecordTags().groupBy { it.recordId }
-        val places = database.placeDao().activeRecordPlaces().associate { it.recordId to it.place.asPlace() }
-        val objects = database.objectDao().activeRecordObjects().groupBy { it.recordId }
+    suspend fun readCards(records: List<BrowseRecordRow>): List<RecordCard> =
+        records.chunked(RECORD_ID_BATCH_SIZE).flatMap { readCardBatch(it) }
+
+    private suspend fun readCardBatch(records: List<BrowseRecordRow>): List<RecordCard> {
+        val ids = records.map { it.id }
+        val items = dao.previewItems(ids, PREVIEW_BLANK_CHARACTERS).groupBy { it.recordId }
+        val counts = dao.previewCounts(ids, PREVIEW_BLANK_CHARACTERS).associateBy { it.recordId }
+        val tags = database.tagDao().activeRecordTags(ids).groupBy { it.recordId }
+        val places = database.placeDao().activeRecordPlaces(ids).associate { it.recordId to it.place.asPlace() }
+        val objects = database.objectDao().activeRecordObjects(ids).groupBy { it.recordId }
         return records.map { record ->
             val previewItems = items[record.id].orEmpty().map { it.slot.asPreview() }
             val count = counts[record.id]

@@ -693,6 +693,10 @@ class TextDatabaseMigrationTest {
             try {
                 val store = LocalTextStore(db, context)
                 val trip = store.openRecordContent(RecordId("trip"))!!
+                assertTrue(store.listGroups().isEmpty())
+                val group = RecordGroupId("legacy-trips")
+                assertEquals(GroupUpdate.Saved(group, listOf(RecordId("trip"))),
+                    store.createGroup(group, "秋天", listOf(RecordId("trip"))))
                 assertTrue(trip.marks.isStarred)
                 assertEquals(RecordTimes(100, 200, null), trip.times)
                 assertEquals(listOf(ItemId("t"), ItemId("p"), ItemId("a")), trip.items.map { it.id })
@@ -710,12 +714,51 @@ class TextDatabaseMigrationTest {
                 assertNull(store.openMixedDraft(DraftId("hidden")))
                 assertTrue(store.restoreRecord(ticket))
                 assertEquals("票面铅笔字", store.openDraft(DraftId("hidden"))!!.text)
+                assertEquals(listOf(RecordId("trip")), store.openGroup(group)!!.members.map { it.id })
                 assertEquals(0, store.retryImportCleanup())
             } finally { db.close() }
         } finally {
             photoFile.delete()
             originals.deleteOriginal(audio.id)
         }
+    }
+
+    @Test
+    fun versionEighteenPdfCanJoinAGroupAndStillOpensAfterRecovery() = runBlocking {
+        val pdfId = UUID.randomUUID()
+        val file = File(context.filesDir, "pdf-originals/$pdfId.pdf")
+        file.parentFile!!.mkdirs()
+        val nameInRecord = "窗框凭证.pdf"
+        val bytes = instrumentation.context.assets.open("m01/$nameInRecord").use { it.readBytes() }
+        file.writeBytes(bytes)
+        try {
+            createDatabase(18) { sql ->
+                sql.execSQL("""INSERT INTO text_records(id,sourceDraftId,body,firstRecordedAt,modifiedAt)
+                    VALUES ('receipt','source','',100,200)""")
+                sql.execSQL("""INSERT INTO record_items(recordId,position,itemId,pdfId,pdfName,pdfSizeBytes)
+                    VALUES ('receipt',0,'pdf',?,?,?)""", arrayOf<Any>(pdfId.toString(), nameInRecord, bytes.size))
+            }
+            val db = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+            try {
+                val store = LocalTextStore(db, context)
+                val receipt = RecordId("receipt")
+                val group = RecordGroupId("receipts")
+                assertTrue(store.listGroups().isEmpty())
+                assertEquals(GroupUpdate.Saved(group, listOf(receipt)), store.createGroup(group, "凭证", listOf(receipt)))
+                assertTrue(store.moveToTrash(receipt))
+                assertTrue(store.openGroup(group)!!.members.isEmpty())
+                assertTrue(store.restoreRecord(receipt))
+                val card = store.openGroup(group)!!.members.single()
+                assertEquals(receipt, card.id)
+                assertEquals(PreviewContentItem.Pdf(ItemId("pdf"), nameInRecord), card.preview.items.single())
+                val content = store.openRecordContent(receipt)!!
+                assertEquals(RecordTimes(100, 200, null), content.times)
+                val pdf = content.items.single() as ContentItem.Pdf
+                assertEquals(pdfId, pdf.pdfId.value)
+                assertEquals(bytes.size.toLong(), pdf.sizeBytes)
+                assertArrayEquals(bytes, store.openPdf(pdf.pdfId).use { it.readBytes() })
+            } finally { db.close() }
+        } finally { file.delete() }
     }
 
     private fun createDatabase(version: Int, seed: (SQLiteDatabase) -> Unit) {

@@ -76,8 +76,9 @@ internal abstract class TagDao {
     abstract suspend fun recordTags(id: String): List<TagRow>
 
     @Query("""SELECT rt.recordId, t.* FROM record_tags rt JOIN tags t ON t.id = rt.tagId
-              JOIN text_records r ON r.id = rt.recordId WHERE r.deletedAt IS NULL ORDER BY rt.recordId, rt.position""")
-    abstract suspend fun activeRecordTags(): List<RecordTagPreviewRow>
+              JOIN text_records r ON r.id = rt.recordId WHERE r.deletedAt IS NULL AND rt.recordId IN (:ids)
+              ORDER BY rt.recordId, rt.position""")
+    abstract suspend fun activeRecordTags(ids: List<String>): List<RecordTagPreviewRow>
 
     @Query("""UPDATE tags SET ownerDraftId = NULL WHERE ownerDraftId = :draftId
               AND id IN (SELECT tagId FROM draft_tags WHERE draftId = :draftId)""")

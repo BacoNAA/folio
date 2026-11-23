@@ -80,6 +80,8 @@ Room v13 为地点增加可空经纬度，v12 旧地点保留原身份和资料�
 
 记录流和搜索结果的卡片显示已填地点，按原顺序预览最多三个内容项。清单展示前三条事项和整张清单的完成数，例如「已完成 2/4 项」。还有内容时显示剩余项数，其中有照片或录音时分别显示数量。每项文字及媒体说明截取前 80 个 Unicode 码点，录音可直接试听。`PreviewContentItem` 与可保存的 `ContentItem` 分开，避免截断预览被回存为完整内容。`remainingItemCount`、`remainingPhotoCount` 和 `remainingAudioCount` 表示未展示的内容项及其中照片、录音项数量，空白文字不占预览，重复使用的媒体仍按各自内容项计数。详情通过同一 `RecordId` 调用 `openRecordContent`，读取完整内容及时间信息。当前列表为全量读取。
 
+本机记录组通过 `RecordGroups` 接入。`createGroup` 首次确认和重试使用同一 `RecordGroupId`，成功返回实际成员顺序。`appendToGroup` 遇到失效选择时返回对应记录 ID。`reorderGroup` 比对打开时的顺序，有冲突则返回当前顺序。`openGroup` 提供有序的正式记录卡片，空组可继续收录，组已删除时返回 `null`，存储故障会抛出异常。[记录组接口](app/src/main/java/com/baconaa/folio/records/RecordGroups.kt)
+
 删除与恢复使用 [RecordTrash](app/src/main/java/com/baconaa/folio/records/RecordTrash.kt)：`moveToTrash` 将正式记录和编辑草稿一起隐藏，`listTrash` 与 `openTrashRecord` 只展示上次完成的内容并通过 `hasDraft` 提示未完成修改；`restoreRecord` 用于立即撤销或从回收站恢复，两份内容保持独立。重复删除或恢复返回 `false`。详情与回收站页面已接入删除确认、撤销提示和恢复，编辑中的记录可先返回详情再删除。
 
 用户确认后调用 `deletePermanently`，在同一事务中彻底删除回收站记录、编辑草稿和撤销项。完成、放弃、覆盖最近移除及彻底删除都会收集释放的媒体候选，提交后仅清理已无引用的 Folio 原件。共享引用、回收站、隐藏草稿及可撤销项继续保护原件。`pendingPhotoCount`、`pendingAudioCount` 分别统计待清理的照片和已绑定过的录音，`pendingImportCount` 统计待清理的 PDF 及未完成的文件导入。计数为 `null` 表示该类清理暂不可用。可分别通过 `retryPhotoCleanup`、`retryAudioCleanup`、`retryImportCleanup` 重试。文件导入先登记清理候选，再复制和校验原件，绑定草稿项时在同一事务移除候选。进程中断留下的文件可在下次导入或重试清理时回收。
