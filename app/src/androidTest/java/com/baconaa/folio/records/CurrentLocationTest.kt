@@ -29,6 +29,12 @@ class CurrentLocationTest {
         try {
             manager.addTestProvider(provider, false, false, false, false, true, true, true, 1, 1)
             manager.setTestProviderEnabled(provider, true)
+            // Android 10 异步更新可用来源，先等模拟 GPS 对应用可见。
+            val gpsReady = withTimeoutOrNull(5_000) {
+                while (provider !in manager.getProviders(true)) delay(25)
+                true
+            }
+            assertTrue("等待模拟 GPS 进入可用定位来源超时", gpsReady == true)
             val source = AndroidCurrentLocation(context)
             withContext(Dispatchers.Main) {
                 val cancelled = async(start = CoroutineStart.UNDISPATCHED) { source.locate() }
