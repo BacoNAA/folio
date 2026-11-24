@@ -327,7 +327,11 @@ class DocumentImportNavigationTest {
         compose.waitUntil(10_000) { viewIntent.get()?.dataString == address }
         assertTrue(viewIntent.get().hasCategory(Intent.CATEGORY_BROWSABLE))
         arguments.getString("m03BrowserPackage")?.let { browser ->
-            compose.waitUntil(12_000) { instrumentation.uiAutomation.rootInActiveWindow?.packageName == browser }
+            val marker = arguments.getString("m03PageMarker")
+            compose.waitUntil("浏览器打开保存的网址", 12_000) {
+                val root = instrumentation.uiAutomation.rootInActiveWindow
+                root?.packageName == browser && (marker == null || root.displaysPageText(marker))
+            }
             instrumentation.uiAutomation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
             compose.waitUntil(12_000) { instrumentation.uiAutomation.rootInActiveWindow?.packageName == context.packageName }
         }
@@ -362,6 +366,12 @@ class DocumentImportNavigationTest {
         compose.onNodeWithTag(tag).performClick()
         if (after != null) compose.onNodeWithText("在此后添加").performClick()
         compose.onNodeWithText(label).performScrollTo().performClick()
+    }
+
+    // Android 10 WebView 的正文是虚拟子节点，要从窗口树读取。
+    private fun AccessibilityNodeInfo.displaysPageText(expected: String): Boolean {
+        if (isVisibleToUser && text?.toString() == expected) return true
+        return (0 until childCount).any { getChild(it)?.displaysPageText(expected) == true }
     }
 
     private fun pickerRoot(): AccessibilityNodeInfo? = instrumentation.uiAutomation.rootInActiveWindow?.takeIf {
