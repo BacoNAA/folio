@@ -43,7 +43,10 @@ internal data class RecordTagPreviewRow(val recordId: String, @Embedded val tag:
 internal const val RECORD_TEXT_MATCH = """(instr(lower(r.body), lower(:keyword)) > 0
     OR instr(lower(r.title), lower(:keyword)) > 0
     OR (r.eventKind = 'description' AND instr(lower(r.eventText), lower(:keyword)) > 0)
-    OR EXISTS(SELECT 1 FROM record_items i WHERE i.recordId = r.id AND instr(lower(i.caption), lower(:keyword)) > 0)
+    OR EXISTS(SELECT 1 FROM record_items i WHERE i.recordId = r.id AND (
+        instr(lower(i.caption), lower(:keyword)) > 0 OR instr(lower(i.pdfName), lower(:keyword)) > 0
+        OR instr(lower(i.videoName), lower(:keyword)) > 0 OR instr(lower(i.linkAddress), lower(:keyword)) > 0
+        OR instr(lower(i.linkTitle), lower(:keyword)) > 0 OR instr(lower(i.linkNote), lower(:keyword)) > 0))
     OR EXISTS(SELECT 1 FROM record_tags rt JOIN tags t ON t.id = rt.tagId
               WHERE rt.recordId = r.id AND t.ownerDraftId IS NULL AND instr(lower(t.name), lower(:keyword)) > 0)
     OR EXISTS(SELECT 1 FROM record_places rp JOIN places p ON p.id = rp.placeId

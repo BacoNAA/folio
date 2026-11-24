@@ -134,7 +134,10 @@ internal fun TagDialog(model: FolioViewModel, editing: Boolean, close: () -> Uni
 
 private val MediaFilter.label get() = when (this) {
     MediaFilter.PHOTO -> "有照片"
-    MediaFilter.AUDIO -> "有录音"
+    MediaFilter.AUDIO -> "声音"
+    MediaFilter.VIDEO -> "视频"
+    MediaFilter.ATTACHMENT -> "附件"
+    MediaFilter.LINK -> "链接"
     MediaFilter.CHECKLIST -> "有清单"
     MediaFilter.TEXT_ONLY -> "纯文字"
 }
@@ -206,7 +209,7 @@ internal fun SearchFilters(model: FolioViewModel) {
     if (showTime) EventDateFilterDialog(model, state.eventDateFilter, onApply = { model.filterEventDate(it); showTime = false },
         onDismiss = { showTime = false })
     if (showMedia) AlertDialog(onDismissRequest = { showMedia = false }, title = { Text("内容类型 · 满足任一种") },
-        text = { Column { MediaFilter.entries.forEach { type ->
+        text = { Column(Modifier.verticalScroll(rememberScrollState())) { MediaFilter.entries.forEach { type ->
             val selected = type in state.mediaTypes
             Row(Modifier.fillMaxWidth().toggleable(value = selected, role = androidx.compose.ui.semantics.Role.Checkbox) {
                 model.filterMedia(if (it) state.mediaTypes + type else state.mediaTypes - type)
@@ -259,13 +262,19 @@ internal fun RecordContents(content: RecordContent, model: FolioViewModel) {
     Text("事件时间：${content.times.eventTime.label()}", fontSize = 12.sp)
     content.place?.let { Text("地点", fontSize = 12.sp); PlaceDescription(it) }
     content.objects.forEach { Text(it.kind.label, fontSize = 12.sp); ObjectDescription(it) }
-    content.items.forEach { item -> when (item) {
-        is ContentItem.Text -> Text(item.text, fontSize = 18.sp, lineHeight = 32.sp)
-        is ContentItem.Pdf -> PdfAttachment(item, model)
-        is ContentItem.Photo -> { Photo(item.photoId); if (item.caption.isNotEmpty()) Text(item.caption) }
-        is ContentItem.Audio -> { AudioControl(item.audioId, item.durationMillis, model); if (item.caption.isNotEmpty()) Text(item.caption) }
-        is ContentItem.Checklist -> item.entries.forEach { Text("${if (it.checked) "☑" else "☐"} ${it.text}") }
-    } }
+    ReadingBody { enlarged ->
+        val bodySize = if (enlarged) 24.sp else 18.sp
+        val lineHeight = if (enlarged) 40.sp else 32.sp
+        content.items.forEach { item -> when (item) {
+            is ContentItem.Text -> Text(item.text, fontSize = bodySize, lineHeight = lineHeight)
+            is ContentItem.Pdf -> PdfAttachment(item, model)
+            is ContentItem.Link -> SavedLink(item, bodySize, lineHeight)
+            is ContentItem.Video -> VideoAttachment(item, model)
+            is ContentItem.Photo -> { Photo(item.photoId); if (item.caption.isNotEmpty()) Text(item.caption) }
+            is ContentItem.Audio -> { AudioControl(item.audioId, item.durationMillis, model); if (item.caption.isNotEmpty()) Text(item.caption) }
+            is ContentItem.Checklist -> item.entries.forEach { Text("${if (it.checked) "☑" else "☐"} ${it.text}") }
+        } }
+    }
     if (content.tags.isNotEmpty()) Text(content.tags.joinToString(" · ") { it.name })
     HorizontalDivider()
     Text("记录于 ${formatDate(content.times.firstRecordedAt)}", fontSize = 12.sp)

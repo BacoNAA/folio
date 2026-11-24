@@ -19,21 +19,24 @@ internal data class PhotoCleanupEntry(@PrimaryKey val photoId: String)
 @Dao
 internal interface PhotoCleanupDao {
     @Query("""INSERT OR IGNORE INTO photo_cleanup_queue(photoId)
-              SELECT photoId FROM draft_items WHERE draftId = :id AND photoId IS NOT NULL
-              UNION SELECT photoId FROM removed_draft_items WHERE draftId = :id AND photoId IS NOT NULL""")
+              SELECT coalesce(photoId, linkScreenshotId) FROM draft_items WHERE draftId = :id AND coalesce(photoId, linkScreenshotId) IS NOT NULL
+              UNION SELECT coalesce(photoId, linkScreenshotId) FROM removed_draft_items WHERE draftId = :id AND coalesce(photoId, linkScreenshotId) IS NOT NULL""")
     suspend fun enqueueDraft(id: String)
 
     @Query("""INSERT OR IGNORE INTO photo_cleanup_queue(photoId)
-              SELECT photoId FROM record_items WHERE recordId = :id AND photoId IS NOT NULL""")
+              SELECT coalesce(photoId, linkScreenshotId) FROM record_items WHERE recordId = :id AND coalesce(photoId, linkScreenshotId) IS NOT NULL""")
     suspend fun enqueueRecord(id: String)
+
+    @Query("INSERT OR IGNORE INTO photo_cleanup_queue(photoId) VALUES(:id)")
+    suspend fun enqueue(id: String)
 
     @Query("SELECT photoId FROM photo_cleanup_queue ORDER BY photoId")
     suspend fun candidates(): List<String>
 
     // 不过滤回收站或隐藏草稿；可撤销项也仍持有原图。
-    @Query("""SELECT EXISTS(SELECT 1 FROM record_items WHERE photoId = :id
-              UNION ALL SELECT 1 FROM draft_items WHERE photoId = :id
-              UNION ALL SELECT 1 FROM removed_draft_items WHERE photoId = :id)""")
+    @Query("""SELECT EXISTS(SELECT 1 FROM record_items WHERE photoId = :id OR linkScreenshotId = :id
+              UNION ALL SELECT 1 FROM draft_items WHERE photoId = :id OR linkScreenshotId = :id
+              UNION ALL SELECT 1 FROM removed_draft_items WHERE photoId = :id OR linkScreenshotId = :id)""")
     suspend fun isReferenced(id: String): Boolean
 
     @Query("DELETE FROM photo_cleanup_queue WHERE photoId = :id")

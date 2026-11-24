@@ -1,12 +1,13 @@
 package com.baconaa.folio.records
 
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import com.baconaa.folio.media.PdfId
 import java.io.IOException
 import java.io.InputStream
 
-enum class ImportType { PDF, AUDIO }
+enum class ImportType { PDF, AUDIO, VIDEO }
 
 /** 可直接展示给导入者的原因；底层系统异常保留在 cause 中。 */
 class MediaImportException(message: String, cause: Throwable? = null) : IOException(message, cause)
@@ -20,9 +21,20 @@ interface MediaImports {
         initialEventTime: EventTime? = null, initialPlaceId: PlaceId? = null,
     ): ImportedItem
 
+    /** linkId 为空表示给尚未落盘的网址项选第一张截图，已有项则只替换该项的截图。 */
+    suspend fun importLinkScreenshot(
+        source: Uri, draftId: DraftId?, linkId: ItemId?, initialEventTime: EventTime? = null, initialPlaceId: PlaceId? = null,
+    ): DraftId
+
     /** 从 Folio 副本读取，调用方在 I/O 线程使用并关闭流。 */
     fun openPdf(id: PdfId): InputStream
 
     /** 仅授予选中的查看器读取权限。调用方负责启动及处理缺少查看器的情况。 */
     fun pdfViewIntent(item: ContentItem.Pdf): Intent
+
+    /** Folio 私有原件的应用内播放来源，可从 ContentResolver 重新打开。 */
+    fun videoSource(item: ContentItem.Video): Uri
+
+    /** 在 I/O 线程生成小预览，原件没有可取画面时返回 null。 */
+    fun videoThumbnail(item: ContentItem.Video): Bitmap?
 }

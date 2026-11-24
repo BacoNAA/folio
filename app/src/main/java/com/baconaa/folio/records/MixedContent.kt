@@ -2,6 +2,7 @@ package com.baconaa.folio.records
 
 import com.baconaa.folio.media.PhotoId
 import com.baconaa.folio.media.PdfId
+import com.baconaa.folio.media.VideoId
 import com.baconaa.folio.media.AudioId
 import java.util.UUID
 
@@ -13,8 +14,16 @@ sealed interface ContentItem {
 
     data class Text(override val id: ItemId, val text: String) : ContentItem
     data class Photo(override val id: ItemId, val photoId: PhotoId, val caption: String = "") : ContentItem
+    data class Link(override val id: ItemId, val address: String = "", val title: String = "",
+        val note: String = "", val screenshotId: PhotoId? = null) : ContentItem {
+        val hasInput get() = address.isNotBlank() || title.isNotBlank() || note.isNotBlank() || screenshotId != null
+    }
     data class Pdf(
         override val id: ItemId, val pdfId: PdfId, val displayName: String, val sizeBytes: Long,
+    ) : ContentItem
+    data class Video(
+        override val id: ItemId, val videoId: VideoId, val displayName: String, val sizeBytes: Long,
+        val durationMillis: Long?,
     ) : ContentItem
     data class Audio(
         override val id: ItemId, val audioId: AudioId, val durationMillis: Long, val caption: String = "",
@@ -35,6 +44,9 @@ interface MixedContentDrafts {
     /** after 为 null 时追加到末尾，有值时紧接指定项插入。 */
     suspend fun insertText(id: DraftId, after: ItemId?, edit: TextEdit): ItemId
     suspend fun insertPhoto(id: DraftId, after: ItemId?, photo: PhotoId, caption: String = ""): ItemId
+    /** 允许保存未写完的网址；新建草稿时至少有一个已填写字段或截图。 */
+    suspend fun insertLink(id: DraftId?, after: ItemId?, link: ContentItem.Link, initialEventTime: EventTime? = null): DraftId
+    suspend fun editLink(id: DraftId, link: ContentItem.Link)
     /** 只接受已成功保存的录音；时长从原件核验，id 为 null 时开始纯录音草稿。 */
     suspend fun appendAudio(
         id: DraftId?, audio: AudioId, caption: String = "", initialEventTime: EventTime? = null,
@@ -61,15 +73,20 @@ internal fun newItemId() = ItemId(UUID.randomUUID().toString())
 internal fun ContentItem.searchText(): String? = when (this) {
     is ContentItem.Text -> text
     is ContentItem.Checklist -> entries.joinToString("\n") { it.text }
-    is ContentItem.Photo, is ContentItem.Audio, is ContentItem.Pdf -> null
+    is ContentItem.Photo, is ContentItem.Audio, is ContentItem.Pdf, is ContentItem.Video, is ContentItem.Link -> null
 }
 internal fun List<ContentItem>.body() = mapNotNull { it.searchText() }.joinToString("\n")
 internal fun List<ContentItem>.photos() = filterIsInstance<ContentItem.Photo>().map { it.photoId }
 
 internal fun ContentSlot.asItem(): ContentItem {
-    check(listOf(text, photoId, checklistJson, audioId, pdfId).count { it != null } == 1) { "内容项类型无效" }
+    check(listOf(text, photoId, checklistJson, audioId, pdfId, videoId, linkAddress).count { it != null } == 1) { "内容项类型无效" }
     check((audioId == null) == (audioDurationMillis == null)) { "录音时长缺失或类型无效" }
     return when {
+        linkAddress != null -> ContentItem.Link(ItemId(itemId), linkAddress, linkTitle.orEmpty(), linkNote.orEmpty(),
+            linkScreenshotId?.let { PhotoId(UUID.fromString(it)) })
+        videoId != null -> ContentItem.Video(
+            ItemId(itemId), VideoId(UUID.fromString(videoId)), checkNotNull(videoName), checkNotNull(videoSizeBytes), videoDurationMillis,
+        )
         pdfId != null -> ContentItem.Pdf(
             ItemId(itemId), PdfId(UUID.fromString(pdfId)), checkNotNull(pdfName), checkNotNull(pdfSizeBytes),
         )
@@ -85,8 +102,14 @@ internal fun ContentSlot.asItem(): ContentItem {
 internal fun ContentItem.asSlot(): ContentSlot = when (this) {
     is ContentItem.Text -> ContentSlot(id.value, text, null)
     is ContentItem.Photo -> ContentSlot(id.value, null, photoId.value.toString(), caption)
+    is ContentItem.Link -> ContentSlot(id.value, null, null, linkAddress = address, linkTitle = title,
+        linkNote = note, linkScreenshotId = screenshotId?.value?.toString())
     is ContentItem.Pdf -> ContentSlot(
         id.value, null, null, pdfId = pdfId.value.toString(), pdfName = displayName, pdfSizeBytes = sizeBytes,
+    )
+    is ContentItem.Video -> ContentSlot(
+        id.value, null, null, videoId = videoId.value.toString(), videoName = displayName,
+        videoSizeBytes = sizeBytes, videoDurationMillis = durationMillis,
     )
     is ContentItem.Checklist -> ContentSlot(id.value, null, null, checklistJson = encodeChecklist(entries))
     is ContentItem.Audio -> ContentSlot(
@@ -135,4 +158,5 @@ internal suspend fun FolioDatabase.writeMixedDraft(id: DraftId, draft: MixedDraf
 }
 
 internal fun List<ContentItem>.hasActualContent(body: String): Boolean =
-    body.isNotBlank() || any { it is ContentItem.Photo || it is ContentItem.Audio || it is ContentItem.Pdf }
+    body.isNotBlank() || any { it is ContentItem.Photo || it is ContentItem.Audio || it is ContentItem.Pdf ||
+        it is ContentItem.Video || (it is ContentItem.Link && it.hasInput) }

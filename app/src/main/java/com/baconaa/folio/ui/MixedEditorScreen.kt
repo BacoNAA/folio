@@ -32,9 +32,12 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
     var addAfter by rememberSaveable { mutableStateOf<String?>(null) }
     val enabled = !state.busy && !editor.needsReload
     val structureEnabled = enabled && !state.recording && state.pendingAttachment == null && !state.importFailed
-    LaunchedEffect(editor.activeItemId) {
+    LaunchedEffect(editor.activeItemId, editor.invalidLink) {
         val index = editor.items.indexOfFirst { it.id == editor.activeItemId }
-        if (index >= 0) scroll.animateScrollToItem(if (index == 0) 0 else index + 1)
+        if (index >= 0) {
+            if (editor.invalidLink?.itemId == editor.activeItemId) scroll.scrollToItem(index + 1)
+            else scroll.animateScrollToItem(if (index == 0) 0 else index + 1)
+        }
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
         LazyColumn(Modifier.weight(1f).testTag("mixed-editor"), state = scroll,
@@ -51,6 +54,8 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
                             is ContentItem.Text -> "文字"
                             is ContentItem.Photo -> "照片"
                             is ContentItem.Pdf -> "附件"
+                            is ContentItem.Link -> "网址"
+                            is ContentItem.Video -> "视频"
                             is ContentItem.Audio -> "录音"
                             is ContentItem.Checklist -> "清单"
                         }, Modifier.weight(1f), fontSize = 12.sp)
@@ -81,6 +86,10 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
                                 textStyle = MaterialTheme.typography.bodyLarge.copy(lineHeight = 28.sp))
                         }
                         is ContentItem.Pdf -> PdfAttachment(item, model)
+                        is ContentItem.Link -> LinkEditor(item, enabled, structureEnabled,
+                            editor.invalidLink?.takeIf { it.itemId == item.id && it.address == item.address },
+                            model::changeLink, onScreenshot = { launchMedia("link-screenshot", item.id) })
+                        is ContentItem.Video -> VideoAttachment(item, model)
                         is ContentItem.Photo -> {
                             Photo(item.photoId)
                             OutlinedTextField(item.caption, { model.changeCaption(item.id, it) }, enabled = enabled,
@@ -165,18 +174,19 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
     }
     if (showAdd) AlertDialog(onDismissRequest = { showAdd = false }, title = { Text(if (addAfter == null) "添加内容" else "在此后添加") },
         text = { Column(Modifier.verticalScroll(rememberScrollState())) {
-            listOf("text" to "文字", "camera" to "拍照", "photo" to "选图", "audio" to "录音", "checklist" to "清单").forEach { (kind, label) ->
+            listOf("text" to "文字", "camera" to "拍照", "photo" to "选图", "audio" to "录音", "checklist" to "清单", "link" to "网址").forEach { (kind, label) ->
                 TextButton(onClick = {
                     showAdd = false
                     val after = addAfter?.let(::ItemId)
                     when (kind) {
                         "text" -> model.addText(after)
                         "checklist" -> model.addChecklist(after)
+                        "link" -> model.addLink(after)
                         else -> launchMedia(kind, after)
                     }
                 }, modifier = Modifier.fillMaxWidth()) { Text(label) }
             }
-            listOf(ImportType.PDF to "PDF 附件", ImportType.AUDIO to "导入已有录音").forEach { (type, label) ->
+            listOf(ImportType.PDF to "PDF 附件", ImportType.AUDIO to "导入已有录音", ImportType.VIDEO to "导入视频").forEach { (type, label) ->
                 TextButton(onClick = {
                     showAdd = false
                     chooseDocument(type, addAfter?.let(::ItemId))

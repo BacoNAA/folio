@@ -169,7 +169,7 @@ internal interface TextDao {
         GuideSectionRow::class, GuideAssignmentRow::class,
     ],
     views = [EditableDraftRow::class],
-    version = 20,
+    version = 22,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -190,6 +190,8 @@ internal interface TextDao {
         AutoMigration(from = 17, to = 18),
         AutoMigration(from = 18, to = 19),
         AutoMigration(from = 19, to = 20),
+        AutoMigration(from = 20, to = 21),
+        AutoMigration(from = 21, to = 22),
     ],
 )
 internal abstract class FolioDatabase : RoomDatabase() {

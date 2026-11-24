@@ -4,10 +4,13 @@ import android.net.Uri
 import androidx.activity.compose.setContent
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.core.content.FileProvider
+import androidx.test.platform.app.InstrumentationRegistry
 import com.baconaa.folio.media.LocalPhotoOriginals
 import com.baconaa.folio.records.*
 import com.baconaa.folio.ui.FolioApp
 import com.baconaa.folio.ui.FolioViewModel
+import java.io.File
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -83,6 +86,67 @@ class GlobalPlaceSearchTest {
         tapFilter("清除筛选")
         waitCount(5)
         compose.onNodeWithTag("search").assertTextContains(keyword)
+    }
+
+    @Test fun returningFromAttachmentKeepsFileNamePlaceAndType() {
+        val suffix = System.nanoTime()
+        val keyword = "窗框凭证$suffix"
+        val placeName = "甲地点$suffix"
+        val place = runBlocking {
+            val first = importSearchSample("m01/窗框凭证.pdf", "$keyword.pdf", ImportType.PDF)
+            store.insertText(first.draftId, first.item.id, TextEdit("更换滤芯", 0))
+            val audio = importSearchSample("m01/tone-660.mp3", "敲击.mp3", ImportType.AUDIO, first.draftId)
+            store.editAudioCaption(first.draftId, audio.item.id, "第一次敲击")
+            val id = store.createDraftPlace(first.draftId, PlaceInfo(placeName))
+            records += store.completeMixedDraft(first.draftId)
+
+            val other = importSearchSample("m01/窗框凭证.pdf", "$keyword.pdf", ImportType.PDF)
+            store.createDraftPlace(other.draftId, PlaceInfo("乙地点$suffix"))
+            records += store.completeMixedDraft(other.draftId)
+            val video = importSearchSample("m02/short-avc-aac.mp4", "$keyword.mp4", ImportType.VIDEO)
+            store.selectDraftPlace(video.draftId, id)
+            records += store.completeMixedDraft(video.draftId)
+            id
+        }
+
+        search(keyword)
+        waitCount(3)
+        tapFilter("内容类型")
+        compose.onNodeWithText("附件").performScrollTo().performClick()
+        compose.onNodeWithText("完成选择").performClick()
+        waitCount(2)
+        choosePlace(place, placeName, placeName)
+        waitCount(1)
+        visitResultAndReturn("更换滤芯", 1)
+        compose.onNodeWithTag("search").assertTextContains(keyword)
+        compose.onNodeWithTag("remove-place-filter").assertExists()
+        compose.onNodeWithText("附件 ×").assertExists()
+
+        tapFilter("内容类型")
+        compose.onNodeWithText("视频").performScrollTo().performClick()
+        compose.onNodeWithText("完成选择").performClick()
+        waitCount(2)
+        compose.onNodeWithTag("search-results").performScrollToNode(hasText("$keyword.mp4", substring = true))
+        tapFilter("清除筛选")
+        waitCount(3)
+        compose.onNodeWithTag("search").performTextReplacement("LATCH-4827")
+        waitCount(0)
+    }
+
+    private suspend fun importSearchSample(asset: String, name: String, type: ImportType, draft: DraftId? = null): ImportedItem {
+        val context = compose.activity.applicationContext
+        val directory = File(context.cacheDir, "camera")
+        check(directory.isDirectory || directory.mkdirs())
+        val source = File.createTempFile("m09-", "." + name.substringAfterLast('.'), directory)
+        try {
+            InstrumentationRegistry.getInstrumentation().context.assets.open(asset).use { input ->
+                source.outputStream().use { input.copyTo(it) }
+            }
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.camera", source, name)
+            return store.importMedia(uri, type, draft)
+        } finally {
+            source.delete()
+        }
     }
 
     @Test fun returningFromDetailKeepsPlaceQueryAndScrolledResult() {

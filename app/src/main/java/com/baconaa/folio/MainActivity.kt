@@ -55,6 +55,12 @@ class MainActivity : ComponentActivity() {
     }
     private val pdfPicker = documentPicker(ImportType.PDF)
     private val audioPicker = documentPicker(ImportType.AUDIO)
+    private val videoPicker = documentPicker(ImportType.VIDEO)
+    private val screenshot = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val target = pendingTarget
+        pendingTarget = null
+        if (target != null) model.receiveLinkScreenshot(uri, target)
+    }
 
     private fun documentPicker(type: ImportType) = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val target = pendingTarget
@@ -69,7 +75,7 @@ class MainActivity : ComponentActivity() {
             pendingTarget = ExternalTarget(it.getString("draft"), it.getString("record"), it.getString("after"),
                 Page.valueOf(it.getString("return") ?: "Capture"), Page.valueOf(it.getString("origin") ?: "Records"),
                 it.readEventTime(), emptyInput = it.getString("empty-input")?.let(EmptyInput::valueOf),
-                placeBookId = it.getString("place-book"), groupId = it.getString("group"))
+                placeBookId = it.getString("place-book"), groupId = it.getString("group"), linkItemId = it.getString("link-item"))
             cameraPath = it.getString("camera")
         }
         model = ViewModelProvider(this, object : ViewModelProvider.Factory {
@@ -90,6 +96,7 @@ class MainActivity : ComponentActivity() {
                 when (type) {
                     ImportType.PDF -> pdfPicker.launch(arrayOf("application/pdf"))
                     ImportType.AUDIO -> audioPicker.launch(arrayOf("audio/*"))
+                    ImportType.VIDEO -> videoPicker.launch(arrayOf("video/mp4"))
                 }
             } catch (_: ActivityNotFoundException) {
                 pendingTarget = null
@@ -102,11 +109,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun launchMedia(kind: String, after: ItemId?) {
-        model.prepareExternal(after, currentTime = kind != "photo") { target ->
+        val isScreenshot = kind == "link-screenshot"
+        model.prepareExternal(after.takeUnless { isScreenshot }, currentTime = kind != "photo", screenshotFor = after.takeIf { isScreenshot }) { target ->
             pendingTarget = target
             try {
                 when (kind) {
                     "photo" -> gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    "link-screenshot" -> screenshot.launch(arrayOf("image/*"))
                     "camera" -> {
                         val folder = File(cacheDir, "camera").apply { mkdirs() }
                         val file = File.createTempFile("capture-", ".jpg", folder)
@@ -132,6 +141,7 @@ class MainActivity : ComponentActivity() {
             putString("empty-input", target.emptyInput?.name)
             putString("place-book", target.placeBookId)
             putString("group", target.groupId)
+            putString("link-item", target.linkItemId)
             target.eventTime?.let { writeEventTime(it) }
         }) }
         super.onSaveInstanceState(outState)

@@ -12,6 +12,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.baconaa.folio.media.AudioId
 import com.baconaa.folio.media.ImportedOriginals
 import com.baconaa.folio.media.LocalAudioPlayback
+import com.baconaa.folio.media.LocalPhotoOriginals
 import java.io.File
 import java.io.IOException
 import java.util.UUID
@@ -35,10 +36,10 @@ internal class MediaImportTest : AudioStoreFixture() {
     private val sources = File(context.cacheDir, "camera/m01-${UUID.randomUUID()}")
     private val imported = mutableListOf<ContentItem>()
 
-    private fun sample(name: String): File {
+    private fun sample(name: String, folder: String = "m01"): File {
         check(sources.isDirectory || sources.mkdirs())
         return File(sources, name).also { file ->
-            instrumentation.context.assets.open("m01/$name").use { input ->
+            instrumentation.context.assets.open("$folder/$name").use { input ->
                 file.outputStream().use { input.copyTo(it) }
             }
         }
@@ -56,6 +57,7 @@ internal class MediaImportTest : AudioStoreFixture() {
         imported.forEach {
             when (it) {
                 is ContentItem.Pdf -> File(context.filesDir, "pdf-originals/${it.pdfId.value}.pdf").delete()
+                is ContentItem.Video -> File(context.filesDir, "video-originals/${it.videoId.value}.mp4").delete()
                 is ContentItem.Audio -> audioOriginals.deleteOriginal(it.audioId)
                 else -> Unit
             }
@@ -115,6 +117,45 @@ internal class MediaImportTest : AudioStoreFixture() {
                 } finally { bitmap.recycle() }
             }
         }
+
+    @Test
+    fun searchingPublishedMediaUsesFullContentAndLastCompletedCaptions() = runBlocking {
+        val file = sample("窗框凭证.pdf")
+        val first = add(file, ImportType.PDF)
+        val draft = first.draftId
+        val text = store.insertText(draft, first.item.id, TextEdit("更换滤芯", 0))
+        val audio = add(sample("tone-660.mp3"), ImportType.AUDIO, draft, text).item as ContentItem.Audio
+        store.editAudioCaption(draft, audio.id, "第一次敲击")
+        val video = add(sample("short-avc-aac.mp4", "m02"), ImportType.VIDEO, draft).item
+        val record = store.completeMixedDraft(draft)
+        add(file, ImportType.PDF)
+
+        val card = store.queryRecords("窗框凭证", mediaTypes = setOf(MediaFilter.ATTACHMENT)).single()
+        assertEquals(record, card.id)
+        val detail = store.openRecordContent(record)!!.items
+        assertEquals(listOf(first.item.id, text, audio.id, video.id), detail.map { it.id })
+        assertEquals(detail.take(3).map { it.id }, card.preview.items.map { it.id })
+        assertEquals(1, card.preview.remainingItemCount)
+        assertEquals(card, store.listRecentRecords().single())
+        assertEquals(listOf(record), store.search("窗框凭证").map { it.id })
+        assertEquals(listOf(record), store.search("SHORT-AVC").map { it.id })
+        assertEquals(card, store.queryRecords("SHORT-AVC", mediaTypes = setOf(MediaFilter.VIDEO)).single())
+        assertTrue(store.queryRecords("LATCH-4827").isEmpty())
+
+        val edit = store.editRecord(record)
+        store.editAudioCaption(edit, audio.id, "修好后的声音")
+        assertEquals(record, store.queryRecords("第一次敲击").single().id)
+        assertTrue(store.search("修好后的声音").isEmpty())
+        store.completeMixedDraft(edit)
+        assertTrue(store.queryRecords("第一次敲击").isEmpty())
+        assertEquals(record, store.search("修好后的声音").single().id)
+        val recorded = publishAudio(audioClip().id)
+        val pdfOnly = store.completeMixedDraft(add(file, ImportType.PDF).draftId)
+        assertEquals(setOf(record, recorded), store.queryRecords(mediaTypes = setOf(MediaFilter.AUDIO)).map { it.id }.toSet())
+        store.moveToTrash(record)
+        assertEquals(listOf(pdfOnly), store.search("窗框凭证").map { it.id })
+        assertTrue(store.queryRecords(mediaTypes = setOf(MediaFilter.VIDEO)).isEmpty())
+    }
 
     @Test
     fun importedMp3KeepsItsPositionAndBothOriginalsSurviveTrashAndRestore() = runBlocking {
@@ -246,12 +287,68 @@ internal class MediaImportTest : AudioStoreFixture() {
         assertFalse(file.exists())
     }
 
-    private fun mediaFiles(): Set<File> = listOf("pdf-originals", "audio-originals", "media-imports")
+    @Test
+    fun videoOriginalSurvivesUndoAndTrashUntilLastReferenceIsDeleted() = runBlocking {
+        val file = sample("short-avc-aac.mp4", "m02")
+        val bytes = file.readBytes()
+        val result = add(file, ImportType.VIDEO)
+        val video = result.item as ContentItem.Video
+        assertEquals(bytes.size.toLong(), video.sizeBytes)
+        assertTrue(requireNotNull(video.durationMillis) in 4_900L..5_200L)
+        assertEquals(file.name, video.displayName)
+        checkNotNull(store.videoThumbnail(video)).recycle()
+        val uri = store.videoSource(video)
+        check(file.delete())
+        store.removeItem(result.draftId, video.id)
+        reopenDatabase()
+        assertTrue(store.undoRemoval(result.draftId))
+        val record = store.completeMixedDraft(result.draftId)
+        val edit = store.editRecord(record)
+        store.removeItem(edit, video.id)
+        store.discardDraft(edit)
+        assertTrue(store.moveToTrash(record))
+        assertEquals(video, store.openTrashRecord(record)!!.content.items.single())
+        assertTrue(store.restoreRecord(record))
+        reopenDatabase()
+        assertEquals(video, store.openRecordContent(record)!!.items.single())
+        assertArrayEquals(bytes, context.contentResolver.openInputStream(uri)!!.use { it.readBytes() })
+        assertTrue(store.moveToTrash(record))
+        assertTrue(store.deletePermanently(record).deleted)
+        assertFalse(File(requireNotNull(uri.path)).exists())
+    }
+
+    @Test
+    fun mp4WithNoDecodableSamplesLeavesTheDraftAndFilesUntouched() = runBlocking {
+        val file = sample("short-avc-aac.mp4", "m02")
+        val bytes = file.readBytes()
+        val dataBox = bytes.toString(Charsets.ISO_8859_1).indexOf("mdat")
+        check(dataBox >= 0)
+        file.writeBytes(bytes.copyOf(dataBox + 4))
+        val draft = requireNotNull(store.saveDraft(null, TextEdit("保留原文字", 4)))
+        val before = store.openMixedDraft(draft)
+        val files = mediaFiles()
+        val failure = runCatching { add(file, ImportType.VIDEO, draft) }.exceptionOrNull()
+        assertTrue(failure.toString(), failure is MediaImportException &&
+            listOf("格式", "解码").any { it in failure.message.orEmpty() })
+        assertEquals(before, store.openMixedDraft(draft))
+        assertEquals(files, mediaFiles())
+        assertTrue(database.importCleanupDao().candidates().isEmpty())
+    }
+
+    private fun mediaFiles(): Set<File> = listOf("pdf-originals", "audio-originals", "video-originals", "media-imports")
         .flatMap { File(context.filesDir, it).walk().filter(File::isFile).toList() }.toSet()
 
     @Test
     fun databaseFullDuringBindingPreservesTheDraftAndReleasesTheCopiedFile() = runBlocking {
-        val pdf = sample("窗框凭证.pdf")
+        retryAfterDatabaseFull(sample("窗框凭证.pdf"), ImportType.PDF)
+    }
+
+    @Test
+    fun videoDatabaseFullThenRetryPublishesExactlyOneVideo() = runBlocking {
+        retryAfterDatabaseFull(sample("short-avc-aac.mp4", "m02"), ImportType.VIDEO)
+    }
+
+    private suspend fun retryAfterDatabaseFull(file: File, type: ImportType) {
         val draft = requireNotNull(store.saveDraft(null, TextEdit("保留", 2)))
         val saved = store.openMixedDraft(draft)
         val before = mediaFiles()
@@ -268,7 +365,7 @@ internal class MediaImportTest : AudioStoreFixture() {
             old
         }
         try {
-            val failure = runCatching { add(pdf, ImportType.PDF, draft) }.exceptionOrNull()
+            val failure = runCatching { add(file, type, draft) }.exceptionOrNull()
             assertTrue(failure.toString(), failure is IOException && failure.message.orEmpty().contains("空间不足"))
         } finally {
             database.withTransaction { pragma("max_page_count=$oldLimit") }
@@ -277,15 +374,18 @@ internal class MediaImportTest : AudioStoreFixture() {
         assertEquals(saved, store.openMixedDraft(draft))
         assertEquals(before, mediaFiles())
         assertTrue(database.importCleanupDao().candidates().isEmpty())
-        assertEquals(draft, add(pdf, ImportType.PDF, draft).draftId)
+        val retry = add(file, type, draft)
+        assertEquals(draft, retry.draftId)
+        val record = store.completeMixedDraft(draft)
+        assertEquals(requireNotNull(saved).items + retry.item, store.openRecordContent(record)!!.items)
     }
 
     @Test
     fun cleanupSkipsAnActiveCopyAndCancellationRemovesItsPartialFile() = runBlocking {
-        val cleanup = ImportCleanup(database, ImportedOriginals(context, audioOriginals))
+        val cleanup = ImportCleanup(database, ImportedOriginals(context, audioOriginals), LocalPhotoOriginals.get(context))
         val ready = CompletableDeferred<File>()
         val copying = launch(Dispatchers.IO) {
-            cleanup.importing(ImportType.AUDIO) { id ->
+            cleanup.importing(ImportAsset.AUDIO) { id ->
                 val part = File(context.filesDir, "media-imports/$id.part")
                 part.parentFile!!.mkdirs()
                 part.writeBytes(byteArrayOf(1, 2))
@@ -312,9 +412,9 @@ internal class MediaImportTest : AudioStoreFixture() {
         val unfinished = UUID.randomUUID()
         val unbound = UUID.randomUUID()
         val queue = database.importCleanupDao()
-        queue.reserve(ImportCleanupEntry(unfinished.toString(), ImportType.PDF))
-        queue.reserve(ImportCleanupEntry(unbound.toString(), ImportType.AUDIO))
-        queue.reserve(ImportCleanupEntry(bound.pdfId.value.toString(), ImportType.PDF))
+        queue.reserve(ImportCleanupEntry(unfinished.toString(), ImportAsset.PDF))
+        queue.reserve(ImportCleanupEntry(unbound.toString(), ImportAsset.AUDIO))
+        queue.reserve(ImportCleanupEntry(bound.pdfId.value.toString(), ImportAsset.PDF))
         val part = File(context.filesDir, "media-imports/$unfinished.part").apply { writeText("partial") }
         val audio = audioOriginals.importedFile(AudioId(unbound))
         audio.parentFile!!.mkdirs()

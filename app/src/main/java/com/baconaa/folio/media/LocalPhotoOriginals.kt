@@ -41,7 +41,9 @@ class LocalPhotoOriginals private constructor(private val context: Context) {
     }
 
     /** 从拍照或选图返回的 URI 复制原图，确认本地副本可读后才返回可持久保存的 ID。 */
-    suspend fun importPhoto(source: Uri): PhotoId = withContext(Dispatchers.IO) {
+    suspend fun importPhoto(source: Uri): PhotoId = importPhoto(source, PhotoId(UUID.randomUUID()))
+
+    internal suspend fun importPhoto(source: Uri, id: PhotoId): PhotoId = withContext(Dispatchers.IO) {
         val staging = File.createTempFile("photo-", ".part", pending)
         try {
             val asset = context.contentResolver.openAssetFileDescriptor(source, "r")
@@ -64,7 +66,6 @@ class LocalPhotoOriginals private constructor(private val context: Context) {
                 decoder.setTargetSampleSize(maxOf(1, maxOf(info.size.width, info.size.height) / 128))
             }.recycle()
             ensureActive()
-            val id = PhotoId(UUID.randomUUID())
             Files.move(staging.toPath(), original(id).toPath(), ATOMIC_MOVE)
             id
         } finally {

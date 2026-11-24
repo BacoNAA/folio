@@ -6,6 +6,7 @@ import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Rect
 import android.net.Uri
+import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.provider.DocumentsContract
@@ -51,6 +52,11 @@ class DocumentImportNavigationTest {
             if (intent.action == Intent.ACTION_VIEW && intent.type == "application/pdf") {
                 viewIntent.set(Intent(intent))
                 return Instrumentation.ActivityResult(0, null)
+            }
+            if (intent.action == Intent.ACTION_VIEW && intent.data?.host == "127.0.0.1") {
+                viewIntent.set(Intent(intent))
+                if (InstrumentationRegistry.getArguments().getString("m03BrowserPackage") == null)
+                    return Instrumentation.ActivityResult(0, null)
             }
             return null
         }
@@ -172,7 +178,165 @@ class DocumentImportNavigationTest {
         play(audio)
     }
 
-    private fun sample(name: String, mime: String, asset: String = name): Uri {
+    @Test fun pickedVideoPlaysAndPausesFromTheSamePublishedRecord() {
+        val arguments = InstrumentationRegistry.getArguments()
+        val resume = arguments.getString("m02ResumeRecord")?.let(::RecordId)
+        val body: String
+        if (resume == null) {
+            body = "M02短片验收${System.nanoTime()}"
+            val draft = runBlocking { requireNotNull(store.saveDraft(null, TextEdit(body, 0))) }
+            draftId = draft
+            val valid = sample("短片.mp4", "video/mp4", "short-avc-aac.mp4", "m02")
+            sample("无画面.mp4", "video/mp4", "tone-440.m4a")
+            resumeDraft()
+            choose("导入视频", after = 0)
+            pickFile("无画面.mp4")
+            waitText("导入失败")
+            compose.onNodeWithText("格式", substring = true).assertIsDisplayed()
+            compose.onNodeWithText("重新选择").performClick()
+            pickFile("短片.mp4")
+            waitForEditorSave()
+            publish("播放视频")
+            val saved = runBlocking { store.openRecordContent(requireNotNull(recordId))!! }
+            assertEquals(body, (saved.items.first() as ContentItem.Text).text)
+            assertTrue(saved.items.size == 2 && saved.items.last() is ContentItem.Video)
+            assertEquals(1, context.contentResolver.delete(valid, null, null))
+            if (arguments.getString("m02PrepareColdStart") == "true") {
+                // 交给下一次进程从正常入口打开；常规运行在本方法内播放并清理样本。
+                instrumentation.sendStatus(0, Bundle().apply { putString("m02SavedId", requireNotNull(recordId).value) })
+                recordId = null
+                return
+            }
+        } else {
+            val saved = runBlocking { requireNotNull(store.openRecordContent(resume)) }
+            body = (saved.items.first() as ContentItem.Text).text
+            check(body.startsWith("M02短片验收") && (saved.items.last() as ContentItem.Video).displayName == "短片.mp4")
+            recordId = resume
+            compose.onNodeWithTag("nav-Records").performClick()
+            compose.onNodeWithText("最近记录").performClick()
+            waitText(body)
+            compose.onNodeWithTag("records-list").performScrollToNode(hasText(body))
+            compose.onNode(hasText(body) and hasAnyAncestor(hasTestTag("records-list")), useUnmergedTree = true)
+                .performTouchInput { click() }
+            waitText("播放视频")
+        }
+        compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("视频预览").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("播放视频").performScrollTo().performClick()
+        val pause = hasText("暂停视频") and isEnabled()
+        compose.waitUntil(10_000) { compose.onAllNodes(pause).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNode(pause).performClick()
+        compose.onNodeWithText("继续播放").assertIsEnabled().performClick()
+        compose.onNodeWithText("关闭视频").performClick()
+        compose.onNodeWithText("编辑").assertIsDisplayed()
+        compose.onNodeWithText(body).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun movedVideoAndContinuedTextSurviveLeavingTheEditor() {
+        val source = sample("续写.mp4", "video/mp4", "short-avc-aac.mp4", "m02")
+        val draft = runBlocking { requireNotNull(store.saveDraft(null, TextEdit("看短片", 3))) }
+        draftId = draft
+        val video = runBlocking { store.importMedia(source, ImportType.VIDEO, draft).item }
+        resumeDraft()
+        editorScroll(hasTestTag("item-menu-1"))
+        compose.onNodeWithTag("item-menu-1").performClick()
+        compose.onNodeWithText("上移一项").performClick()
+        editorScroll(hasTestTag("editor"))
+        compose.onNodeWithTag("editor").performTextReplacement("看短片后继续写")
+        compose.onNodeWithText("返回").performClick()
+        resumeDraft()
+        val items = runBlocking { requireNotNull(store.openMixedDraft(draft)).items }
+        assertEquals(video, items.first())
+        assertEquals("看短片后继续写", (items.last() as ContentItem.Text).text)
+        editorScroll(hasText("播放视频"))
+        compose.onNodeWithText("播放视频").assertIsEnabled().performClick()
+        compose.waitUntil(10_000) { compose.onAllNodes(hasText("暂停视频") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("关闭视频").performClick()
+        compose.onNodeWithText("记录这一刻").assertIsDisplayed()
+    }
+
+    @Test fun partialLinkResumesAndItsSavedMaterialsOpenFromSearch() {
+        val arguments = InstrumentationRegistry.getArguments()
+        val resume = arguments.getString("m03ResumeRecord")?.let(::RecordId)
+        val address = "http://127.0.0.1:8765/filter?part=42#guide"
+        val title: String
+        if (resume == null) {
+            title = "滤芯说明${System.nanoTime()}"
+            compose.onNodeWithTag("quick-checklist").performScrollTo().performClick()
+            compose.onNodeWithText("事项 1").performTextInput("购买滤芯")
+            waitForEditorSave()
+            draftId = compose.runOnIdle { ViewModelProvider(compose.activity)[FolioViewModel::class.java].state.editor!!.draftId }
+            choose("网址", after = 0)
+            waitText("网址地址")
+            compose.onNodeWithText("网址地址").performTextInput("https://")
+            waitForEditorSave()
+            compose.onNodeWithText("返回").performClick()
+            resumeDraft()
+            editorScroll(hasText("网址地址"))
+            compose.onNodeWithText("网址地址").assertTextContains("https://")
+            editorScroll(hasText("事项 1"))
+            compose.onNodeWithText("事项 1").assertTextContains("购买滤芯")
+            compose.onNodeWithText("完成").performClick()
+            waitText("请补全 HTTP 或 HTTPS 网址，或移除这一项。")
+            compose.onNodeWithText("网址地址").assertIsFocused()
+            editorScroll(hasText("事项 1"))
+            compose.onNodeWithText("事项 1").performTextReplacement("买两只滤芯")
+            editorScroll(hasText("网址地址"))
+            compose.onNodeWithText("网址地址").performTextReplacement(address)
+            compose.onNodeWithText("链接标题（选填）").performTextInput(title)
+            compose.onNodeWithText("链接备注（选填）").performScrollTo().performTextInput("保留蓝色标记")
+            val image = sample("滤芯截图.png", "image/png") { context.resources.openRawResource(R.drawable.home_art) }
+            compose.onNodeWithText("选择截图").performScrollTo().performClick()
+            pickFile("滤芯截图.png")
+            waitText("更换截图")
+            waitForEditorSave()
+            compose.onNodeWithText("完成").performClick()
+            waitText("已保存 · 查看")
+            recordId = compose.runOnIdle { requireNotNull(ViewModelProvider(compose.activity)[FolioViewModel::class.java].state.savedId) }
+            draftId = null
+            assertEquals(1, context.contentResolver.delete(image, null, null))
+        } else {
+            val saved = runBlocking { store.openRecordContent(resume)!! }
+            val item = saved.items.last() as ContentItem.Link
+            check(item.address == address && item.title.startsWith("滤芯说明"))
+            title = item.title
+            recordId = resume
+        }
+        compose.onNodeWithTag("nav-Records").performClick()
+        compose.onNodeWithText("搜索全部记录").performClick()
+        compose.onNodeWithTag("search").performTextInput(title)
+        compose.onNodeWithText("内容类型").performScrollTo().performClick()
+        compose.onNodeWithText("链接").performScrollTo().performClick()
+        compose.onNodeWithText("完成选择").performClick()
+        waitText("1 条记录")
+        val result = hasText(title) and hasAnyAncestor(hasTestTag("search-results"))
+        compose.onNodeWithTag("search-results").performScrollToNode(hasText(title))
+        compose.onNode(result).performClick()
+        waitText("打开网址")
+        compose.onNodeWithText("☐ 买两只滤芯").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(address).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("保留蓝色标记").performScrollTo().assertIsDisplayed()
+        val photo = "记录中的照片，点击放大"
+        compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription(photo).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithContentDescription(photo).performScrollTo().assertIsDisplayed()
+        if (arguments.getString("m03KeepRecord") == "true") {
+            instrumentation.sendStatus(0, Bundle().apply { putString("m03SavedId", requireNotNull(recordId).value) })
+            recordId = null
+            return
+        }
+        compose.onNodeWithText("打开网址").performScrollTo().performClick()
+        compose.waitUntil(10_000) { viewIntent.get()?.dataString == address }
+        assertTrue(viewIntent.get().hasCategory(Intent.CATEGORY_BROWSABLE))
+        arguments.getString("m03BrowserPackage")?.let { browser ->
+            compose.waitUntil(12_000) { instrumentation.uiAutomation.rootInActiveWindow?.packageName == browser }
+            instrumentation.uiAutomation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+            compose.waitUntil(12_000) { instrumentation.uiAutomation.rootInActiveWindow?.packageName == context.packageName }
+        }
+        compose.onNodeWithText(title).performScrollTo().assertIsDisplayed()
+        assertEquals(recordId, compose.runOnIdle { ViewModelProvider(compose.activity)[FolioViewModel::class.java].state.detailId })
+    }
+
+    private fun sample(name: String, mime: String, asset: String = name, assetFolder: String = "m01",
+        open: () -> java.io.InputStream = { instrumentation.context.assets.open("$assetFolder/$asset") }): Uri {
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
             put(MediaStore.MediaColumns.MIME_TYPE, mime)
@@ -182,7 +346,7 @@ class DocumentImportNavigationTest {
         val resolver = context.contentResolver
         val uri = requireNotNull(resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values))
         sources += uri
-        instrumentation.context.assets.open("m01/$asset").use { input ->
+        open().use { input ->
             resolver.openOutputStream(uri)!!.use { input.copyTo(it) }
         }
         values.clear()
@@ -206,8 +370,12 @@ class DocumentImportNavigationTest {
 
     private fun pickFile(name: String) {
         val timeout = SystemClock.uptimeMillis() + 12_000
+        var requestedList = false
         while (SystemClock.uptimeMillis() < timeout) {
-            val node = pickerRoot()?.findAccessibilityNodeInfosByText(name)?.firstOrNull { it.text?.toString() == name && it.isVisibleToUser }
+            val root = pickerRoot()
+            val node = root?.findAccessibilityNodeInfosByText(name)?.firstOrNull {
+                it.isVisibleToUser && (it.text?.toString() == name || it.contentDescription?.toString() == name)
+            }
             if (node != null) {
                 instrumentation.uiAutomation.waitForIdle(400, 5_000)
                 if (!node.refresh()) continue
@@ -218,10 +386,15 @@ class DocumentImportNavigationTest {
                 compose.waitUntil(12_000) { pickerRoot() == null }
                 return
             }
+            // 图片目录默认使用缩略图网格；列表模式会暴露完整文件名。
+            if (root != null && !requestedList) {
+                val list = root.findAccessibilityNodeInfosByViewId("${root.packageName}:id/sub_menu_list").firstOrNull()
+                if (list != null) requestedList = list.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            }
             SystemClock.sleep(80)
         }
         val root = pickerRoot()
-        val titles = root?.findAccessibilityNodeInfosByViewId("android:id/title")?.map { it.text?.toString() }
+        val titles = root?.findAccessibilityNodeInfosByText("")?.mapNotNull { it.text ?: it.contentDescription }?.take(25)
         fail("系统选择器未显示 $name，当前文件列表为 $titles")
     }
 
