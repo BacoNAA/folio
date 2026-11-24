@@ -92,6 +92,8 @@ Room v13 为地点增加可空经纬度，v12 旧地点保留原身份和资料�
 
 开发者和 AI 从[开发入口](AGENTS.md)定位本轮需求，按[开发流程](docs/engineering/开发流程.md)领卡、联调和验收。
 
+打开一条记录的详情，点「阅读设置 → 放大正文」即可调大正文字号，下次打开时仍用这个选择。选「跟随系统」可恢复默认，之后正文随设备的字号设置调整。[阅读字号验收](docs/engineering/开发流程.md#第二版-x01-阅读字号)
+
 ## 构建和试用调试版
 
 使用 JDK 17 和仓库的 Gradle Wrapper。Android SDK 需安装 `platforms;android-37.0`、`build-tools;36.0.0` 及 `platform-tools`。在 Android Studio 设置 SDK，或令 `ANDROID_HOME` 指向本机 SDK 目录。从仓库根目录在 PowerShell 执行以下命令。

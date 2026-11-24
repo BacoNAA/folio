@@ -259,13 +259,17 @@ internal fun RecordContents(content: RecordContent, model: FolioViewModel) {
     Text("事件时间：${content.times.eventTime.label()}", fontSize = 12.sp)
     content.place?.let { Text("地点", fontSize = 12.sp); PlaceDescription(it) }
     content.objects.forEach { Text(it.kind.label, fontSize = 12.sp); ObjectDescription(it) }
-    content.items.forEach { item -> when (item) {
-        is ContentItem.Text -> Text(item.text, fontSize = 18.sp, lineHeight = 32.sp)
-        is ContentItem.Pdf -> PdfAttachment(item, model)
-        is ContentItem.Photo -> { Photo(item.photoId); if (item.caption.isNotEmpty()) Text(item.caption) }
-        is ContentItem.Audio -> { AudioControl(item.audioId, item.durationMillis, model); if (item.caption.isNotEmpty()) Text(item.caption) }
-        is ContentItem.Checklist -> item.entries.forEach { Text("${if (it.checked) "☑" else "☐"} ${it.text}") }
-    } }
+    ReadingBody { enlarged ->
+        val bodySize = if (enlarged) 24.sp else 18.sp
+        val lineHeight = if (enlarged) 40.sp else 32.sp
+        content.items.forEach { item -> when (item) {
+            is ContentItem.Text -> Text(item.text, fontSize = bodySize, lineHeight = lineHeight)
+            is ContentItem.Pdf -> PdfAttachment(item, model)
+            is ContentItem.Photo -> { Photo(item.photoId); if (item.caption.isNotEmpty()) Text(item.caption) }
+            is ContentItem.Audio -> { AudioControl(item.audioId, item.durationMillis, model); if (item.caption.isNotEmpty()) Text(item.caption) }
+            is ContentItem.Checklist -> item.entries.forEach { Text("${if (it.checked) "☑" else "☐"} ${it.text}") }
+        } }
+    }
     if (content.tags.isNotEmpty()) Text(content.tags.joinToString(" · ") { it.name })
     HorizontalDivider()
     Text("记录于 ${formatDate(content.times.firstRecordedAt)}", fontSize = 12.sp)
