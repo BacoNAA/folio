@@ -21,6 +21,11 @@ interface MediaImports {
         initialEventTime: EventTime? = null, initialPlaceId: PlaceId? = null,
     ): ImportedItem
 
+    /** linkId 为空表示给尚未落盘的网址项选第一张截图，已有项则只替换该项的截图。 */
+    suspend fun importLinkScreenshot(
+        source: Uri, draftId: DraftId?, linkId: ItemId?, initialEventTime: EventTime? = null, initialPlaceId: PlaceId? = null,
+    ): DraftId
+
     /** 从 Folio 副本读取，调用方在 I/O 线程使用并关闭流。 */
     fun openPdf(id: PdfId): InputStream
 

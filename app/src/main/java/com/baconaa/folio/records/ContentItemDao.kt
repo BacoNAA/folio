@@ -31,6 +31,10 @@ internal data class ContentSlot(
     val videoName: String? = null,
     val videoSizeBytes: Long? = null,
     val videoDurationMillis: Long? = null,
+    val linkAddress: String? = null,
+    val linkTitle: String? = null,
+    val linkNote: String? = null,
+    val linkScreenshotId: String? = null,
 )
 
 @Entity(

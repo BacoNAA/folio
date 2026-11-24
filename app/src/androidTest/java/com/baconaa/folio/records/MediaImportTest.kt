@@ -12,6 +12,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.baconaa.folio.media.AudioId
 import com.baconaa.folio.media.ImportedOriginals
 import com.baconaa.folio.media.LocalAudioPlayback
+import com.baconaa.folio.media.LocalPhotoOriginals
 import java.io.File
 import java.io.IOException
 import java.util.UUID
@@ -381,10 +382,10 @@ internal class MediaImportTest : AudioStoreFixture() {
 
     @Test
     fun cleanupSkipsAnActiveCopyAndCancellationRemovesItsPartialFile() = runBlocking {
-        val cleanup = ImportCleanup(database, ImportedOriginals(context, audioOriginals))
+        val cleanup = ImportCleanup(database, ImportedOriginals(context, audioOriginals), LocalPhotoOriginals.get(context))
         val ready = CompletableDeferred<File>()
         val copying = launch(Dispatchers.IO) {
-            cleanup.importing(ImportType.AUDIO) { id ->
+            cleanup.importing(ImportAsset.AUDIO) { id ->
                 val part = File(context.filesDir, "media-imports/$id.part")
                 part.parentFile!!.mkdirs()
                 part.writeBytes(byteArrayOf(1, 2))
@@ -411,9 +412,9 @@ internal class MediaImportTest : AudioStoreFixture() {
         val unfinished = UUID.randomUUID()
         val unbound = UUID.randomUUID()
         val queue = database.importCleanupDao()
-        queue.reserve(ImportCleanupEntry(unfinished.toString(), ImportType.PDF))
-        queue.reserve(ImportCleanupEntry(unbound.toString(), ImportType.AUDIO))
-        queue.reserve(ImportCleanupEntry(bound.pdfId.value.toString(), ImportType.PDF))
+        queue.reserve(ImportCleanupEntry(unfinished.toString(), ImportAsset.PDF))
+        queue.reserve(ImportCleanupEntry(unbound.toString(), ImportAsset.AUDIO))
+        queue.reserve(ImportCleanupEntry(bound.pdfId.value.toString(), ImportAsset.PDF))
         val part = File(context.filesDir, "media-imports/$unfinished.part").apply { writeText("partial") }
         val audio = audioOriginals.importedFile(AudioId(unbound))
         audio.parentFile!!.mkdirs()

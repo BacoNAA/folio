@@ -137,6 +137,7 @@ private val MediaFilter.label get() = when (this) {
     MediaFilter.AUDIO -> "声音"
     MediaFilter.VIDEO -> "视频"
     MediaFilter.ATTACHMENT -> "附件"
+    MediaFilter.LINK -> "链接"
     MediaFilter.CHECKLIST -> "有清单"
     MediaFilter.TEXT_ONLY -> "纯文字"
 }
@@ -267,6 +268,7 @@ internal fun RecordContents(content: RecordContent, model: FolioViewModel) {
         content.items.forEach { item -> when (item) {
             is ContentItem.Text -> Text(item.text, fontSize = bodySize, lineHeight = lineHeight)
             is ContentItem.Pdf -> PdfAttachment(item, model)
+            is ContentItem.Link -> SavedLink(item, bodySize, lineHeight)
             is ContentItem.Video -> VideoAttachment(item, model)
             is ContentItem.Photo -> { Photo(item.photoId); if (item.caption.isNotEmpty()) Text(item.caption) }
             is ContentItem.Audio -> { AudioControl(item.audioId, item.durationMillis, model); if (item.caption.isNotEmpty()) Text(item.caption) }

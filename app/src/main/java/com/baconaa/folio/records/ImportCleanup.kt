@@ -7,14 +7,20 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.withTransaction
 import com.baconaa.folio.media.ImportedOriginals
+import com.baconaa.folio.media.LocalPhotoOriginals
+import com.baconaa.folio.media.PhotoId
 import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
+internal enum class ImportAsset(val fileType: ImportType?) {
+    PDF(ImportType.PDF), AUDIO(ImportType.AUDIO), VIDEO(ImportType.VIDEO), LINK_SCREENSHOT(null);
+}
+
 @Entity(tableName = "import_cleanup_queue")
-internal data class ImportCleanupEntry(@PrimaryKey val assetId: String, val type: ImportType)
+internal data class ImportCleanupEntry(@PrimaryKey val assetId: String, val type: ImportAsset)
 
 @Dao
 internal interface ImportCleanupDao {
@@ -53,7 +59,7 @@ internal interface ImportCleanupDao {
     suspend fun remove(id: String)
 }
 
-internal class ImportCleanup(private val db: FolioDatabase, private val originals: ImportedOriginals) {
+internal class ImportCleanup(private val db: FolioDatabase, private val originals: ImportedOriginals, private val photos: LocalPhotoOriginals) {
     private val queue = db.importCleanupDao()
 
     // 文件复制在 Room 写事务外运行。进程终止后，这些 ID 自动失去保护，持久队列仍在。
@@ -61,7 +67,7 @@ internal class ImportCleanup(private val db: FolioDatabase, private val original
         val copying = ConcurrentHashMap.newKeySet<String>()
     }
 
-    suspend fun <T> importing(type: ImportType, copyAndBind: suspend (UUID) -> T): T {
+    suspend fun <T> importing(type: ImportAsset, copyAndBind: suspend (UUID) -> T): T {
         val id = UUID.randomUUID()
         val key = id.toString()
         copying.add(key)
@@ -89,12 +95,17 @@ internal class ImportCleanup(private val db: FolioDatabase, private val original
         val entry = queue.entry(id) ?: return@withTransaction
         if (id in copying) return@withTransaction
         val referenced = when (entry.type) {
-            ImportType.PDF -> queue.pdfReferenced(id)
-            ImportType.AUDIO -> db.audioCleanupDao().isReferenced(id)
-            ImportType.VIDEO -> queue.videoReferenced(id)
+            ImportAsset.PDF -> queue.pdfReferenced(id)
+            ImportAsset.AUDIO -> db.audioCleanupDao().isReferenced(id)
+            ImportAsset.VIDEO -> queue.videoReferenced(id)
+            ImportAsset.LINK_SCREENSHOT -> db.photoCleanupDao().isReferenced(id)
         }
         try {
-            if (!referenced) originals.delete(UUID.fromString(id), entry.type)
+            if (!referenced) {
+                val uuid = UUID.fromString(id)
+                val fileType = entry.type.fileType
+                if (fileType == null) photos.deleteOriginal(PhotoId(uuid)) else originals.delete(uuid, fileType)
+            }
             queue.remove(id)
         } catch (_: IOException) {
             // 无引用的原件暂时删不掉时留下队列；已完成的记录操作仍然有效。

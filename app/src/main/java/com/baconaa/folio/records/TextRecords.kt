@@ -85,7 +85,7 @@ interface PublishedTextRecords {
     /** 读取完整正式内容、时间、标记及标签当前名称；不可查看的记录返回 null。 */
     suspend fun openRecordContent(id: RecordId): RecordContent?
 
-    /** 匹配上次完成的标题、正文、清单、PDF 和视频文件名、媒体说明及支持的线索。排除草稿与回收站。 */
+    /** 匹配上次完成的标题、正文、清单、文件名、媒体说明、网址与个人备注及支持的线索。排除草稿与回收站。 */
     suspend fun search(keyword: String): List<RecordPreview>
 
     /** 返回完整的正式正文，记录不在有效正式记录中时返回 null。 */

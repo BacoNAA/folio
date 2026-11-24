@@ -39,7 +39,7 @@ class LocalTextStore internal constructor(
     private val audioOriginals = LocalAudioOriginals.get(context)
     private val importedOriginals = ImportedOriginals(context.applicationContext, audioOriginals)
     private val importQueue = database.importCleanupDao()
-    private val importCleanup = ImportCleanup(database, importedOriginals)
+    private val importCleanup = ImportCleanup(database, importedOriginals, originals)
     private val cleanupQueue = database.photoCleanupDao()
     private val photoCleanup = PhotoCleanup(database, originals)
     private val audioCleanupQueue = database.audioCleanupDao()
@@ -150,13 +150,64 @@ class LocalTextStore internal constructor(
         return ContentItem.Audio(newItemId(), clip.id, clip.durationMillis, caption)
     }
 
+    override suspend fun insertLink(id: DraftId?, after: ItemId?, link: ContentItem.Link, initialEventTime: EventTime?): DraftId =
+        database.withTransaction {
+            require(id != null || (after == null && link.hasInput)) { "请先填写网址或选择截图" }
+            val draftId = id ?: createDraft(initialEventTime)
+            insertItems(draftId, after, listOf(link), 0)
+            draftId
+        }
+
+    override suspend fun editLink(id: DraftId, link: ContentItem.Link) {
+        val released = database.withTransaction { updateLink(id, link.id) { link } }
+        if (released) cleanPhotosAfterCommit()
+    }
+
+    private suspend fun updateLink(id: DraftId, itemId: ItemId, change: (ContentItem.Link) -> ContentItem.Link): Boolean {
+        val items = requireDraft(id).items.toMutableList()
+        val index = items.indexOfItem(itemId)
+        val previous = items[index] as? ContentItem.Link ?: error("该项不是网址")
+        val link = change(previous)
+        val changedScreenshot = previous.screenshotId != link.screenshotId
+        if (changedScreenshot) {
+            requireReadableOriginals(listOfNotNull(link.screenshotId))
+            previous.screenshotId?.let { cleanupQueue.enqueue(it.value.toString()) }
+        }
+        items[index] = link
+        database.writeMixedDraft(id, MixedDraft(items, link.id, 0), now())
+        return changedScreenshot && previous.screenshotId != null
+    }
+
+    override suspend fun importLinkScreenshot(
+        source: Uri, draftId: DraftId?, linkId: ItemId?, initialEventTime: EventTime?, initialPlaceId: PlaceId?,
+    ): DraftId = withContext(Dispatchers.IO) {
+        require(draftId != null || linkId == null) { "找不到截图所属的网址项" }
+        importCleanup.run()
+        val result = importCleanup.importing(ImportAsset.LINK_SCREENSHOT) { assetId ->
+            val photo = originals.importPhoto(source, PhotoId(assetId))
+            database.withTransaction {
+                val id = draftId ?: createDraft(initialEventTime)
+                if (draftId == null && initialPlaceId != null) selectDraftPlace(id, initialPlaceId)
+                if (linkId == null) {
+                    insertItems(id, null, listOf(ContentItem.Link(newItemId(), screenshotId = photo)), 0)
+                } else {
+                    updateLink(id, linkId) { it.copy(screenshotId = photo) }
+                }
+                importQueue.remove(assetId.toString())
+                id
+            }
+        }
+        cleanPhotosAfterCommit()
+        result
+    }
+
     override suspend fun importMedia(
         source: Uri, type: ImportType, draftId: DraftId?, after: ItemId?, initialEventTime: EventTime?, initialPlaceId: PlaceId?,
     ): ImportedItem = withContext(Dispatchers.IO) {
         require(draftId != null || after == null) { "新草稿没有可供插入的内容项" }
         try {
             importCleanup.run()
-            importCleanup.importing(type) { assetId ->
+            importCleanup.importing(ImportAsset.entries.single { it.fileType == type }) { assetId ->
                 val item = importedOriginals.copy(source, type, assetId)
                 database.withTransaction {
                     val id = draftId ?: createDraft(initialEventTime)
@@ -250,7 +301,7 @@ class LocalTextStore internal constructor(
     private suspend fun insertItems(id: DraftId, after: ItemId?, added: List<ContentItem>, cursor: Int) {
         val draft = requireDraft(id)
         val position = after?.let { draft.items.indexOfItem(it) + 1 } ?: draft.items.size
-        requireReadableOriginals(added.photos())
+        requireReadableOriginals(added.photos() + added.filterIsInstance<ContentItem.Link>().mapNotNull { it.screenshotId })
         val items = draft.items.toMutableList().apply { addAll(position, added) }
         database.writeMixedDraft(id, MixedDraft(items, added.last().id, cursor), now())
     }
@@ -395,10 +446,11 @@ class LocalTextStore internal constructor(
             val draft = checkNotNull(dao.draft(id.value)) { "草稿已不存在" }
             val items = finalState(requireDraft(id)).items
             val body = items.body()
-            val photos = items.photos()
+            val links = items.filterIsInstance<ContentItem.Link>()
             val audios = items.filterIsInstance<ContentItem.Audio>()
+            links.firstOrNull { webAddress(it.address) == null }?.let { throw InvalidLinkAddress(it.id, it.address) }
             require(items.hasActualContent(body)) { "请填写文字、清单事项或添加媒体后再完成" }
-            requireReadableOriginals(photos)
+            requireReadableOriginals(items.photos() + links.mapNotNull { it.screenshotId })
             items.filterIsInstance<ContentItem.Pdf>().forEach(importedOriginals::verify)
             items.filterIsInstance<ContentItem.Video>().forEach(importedOriginals::videoSource)
             for (audio in audios) {

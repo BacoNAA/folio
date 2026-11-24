@@ -19,6 +19,7 @@ import java.util.UUID
 internal fun RecordCard.guideLabel(): String = title ?: when (val item = preview.items.firstOrNull()) {
     is PreviewContentItem.Text -> item.text
     is PreviewContentItem.Pdf -> item.displayName
+    is PreviewContentItem.Link -> item.label
     is PreviewContentItem.Video -> item.displayName
     is PreviewContentItem.Photo -> item.caption.ifBlank { "照片" }
     is PreviewContentItem.Audio -> item.caption.ifBlank { "录音" }

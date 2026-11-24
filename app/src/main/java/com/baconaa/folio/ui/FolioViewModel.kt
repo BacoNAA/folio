@@ -60,6 +60,7 @@ data class RecordEditor(
     // 首次落盘分配后端 ID，但当前输入项及其键盘回调保留原身份；写入时再映射。
     val backendItemIds: Map<ItemId, ItemId> = emptyMap(),
     val fileImportFailure: FileImportFailure? = null,
+    val invalidLink: InvalidLinkAddress? = null,
 ) {
     fun position(id: ItemId?) = id?.takeUnless { it == unboundItem }?.let { backendItemIds[it] ?: it }
     val value: TextFieldValue get() = textValues.values.firstOrNull() ?: TextFieldValue()
@@ -69,6 +70,7 @@ data class RecordEditor(
 private fun ContentItem.hasContent() = when (this) {
     is ContentItem.Text -> text.isNotBlank()
     is ContentItem.Checklist -> entries.any { it.text.isNotBlank() }
+    is ContentItem.Link -> hasInput
     else -> true
 }
 
@@ -204,6 +206,7 @@ class FolioViewModel(
     private fun emptyItem(input: EmptyInput) = when (input) {
         EmptyInput.Text -> ContentItem.Text(newItemId(), "")
         EmptyInput.Checklist -> ContentItem.Checklist(newItemId(), listOf(ChecklistEntry(ChecklistEntryId.create(), "")))
+        EmptyInput.Link -> ContentItem.Link(newItemId())
     }
 
     private fun begin(item: ContentItem? = null, currentTime: Boolean = true) {
@@ -249,6 +252,11 @@ class FolioViewModel(
         save()
     }
 
+    fun changeLink(link: ContentItem.Link) {
+        updateItem(link.id) { link }
+        save()
+    }
+
     private fun updateItem(id: ItemId, update: (ContentItem) -> ContentItem) {
         val editor = state.editor ?: return
         if (state.busy || editor.needsReload) return
@@ -285,6 +293,7 @@ class FolioViewModel(
                             is ContentItem.Text -> requireNotNull(drafts.saveDraft(null,
                                 (snapshot.textValues[first.id] ?: TextFieldValue(first.text)).asEdit(), snapshot.eventTime))
                             is ContentItem.Checklist -> mixed.appendChecklist(null, first.entries, snapshot.eventTime)
+                            is ContentItem.Link -> mixed.insertLink(null, null, first, snapshot.eventTime)
                             else -> error("媒体必须先保存原件")
                         }
                     }
@@ -306,6 +315,10 @@ class FolioViewModel(
                                 is ContentItem.Text -> mixed.insertText(snapshot.draftId, null,
                                     (snapshot.textValues[first.id] ?: TextFieldValue(first.text)).asEdit())
                                 is ContentItem.Checklist -> mixed.insertChecklist(snapshot.draftId, null, first.entries)
+                                is ContentItem.Link -> {
+                                    mixed.insertLink(snapshot.draftId, null, first)
+                                    first.id
+                                }
                                 else -> error("媒体必须先保存原件")
                             }
                         }
@@ -326,6 +339,7 @@ class FolioViewModel(
                                 is ContentItem.Text -> mixed.editTextItem(snapshot.draftId, backendId,
                                     (snapshot.textValues[item.id] ?: TextFieldValue(item.text)).asEdit())
                                 is ContentItem.Photo -> mixed.editPhotoCaption(snapshot.draftId, backendId, item.caption)
+                                is ContentItem.Link -> mixed.editLink(snapshot.draftId, item.copy(id = backendId))
                                 is ContentItem.Pdf, is ContentItem.Video -> Unit // 文件信息随原件导入。
                                 is ContentItem.Audio -> mixed.editAudioCaption(snapshot.draftId, backendId, item.caption)
                                 is ContentItem.Checklist -> mixed.editChecklist(snapshot.draftId, backendId, item.entries)
@@ -354,21 +368,25 @@ class FolioViewModel(
         }
     }
 
-    fun addText(after: ItemId? = null) = addEmpty(after, false)
-    fun addChecklist(after: ItemId? = null) = addEmpty(after, true)
+    fun addText(after: ItemId? = null) = addEmpty(after, EmptyInput.Text)
+    fun addChecklist(after: ItemId? = null) = addEmpty(after, EmptyInput.Checklist)
+    fun addLink(after: ItemId? = null) = addEmpty(after, EmptyInput.Link)
 
-    private fun addEmpty(after: ItemId?, checklist: Boolean) {
+    private fun addEmpty(after: ItemId?, input: EmptyInput) {
         if (state.recording || state.pendingAttachment != null) return
         structure("添加失败，请重试。") { editor ->
             val id = editor.draftId
             if (id == null) {
-                val item = emptyItem(if (checklist) EmptyInput.Checklist else EmptyInput.Text)
+                val item = emptyItem(input)
                 state = state.copy(editor = editor.copy(items = listOf(item), activeItemId = item.id,
                     textValues = if (item is ContentItem.Text) mapOf(item.id to TextFieldValue()) else emptyMap(), revision = 0, savedRevision = 0))
             } else withContext(Dispatchers.IO) {
                 val position = editor.position(after)
-                if (checklist) mixed.insertChecklist(id, position, listOf(ChecklistEntry(ChecklistEntryId.create(), "")))
-                else mixed.insertText(id, position, TextEdit("", 0))
+                when (input) {
+                    EmptyInput.Text -> mixed.insertText(id, position, TextEdit("", 0))
+                    EmptyInput.Checklist -> mixed.insertChecklist(id, position, listOf(ChecklistEntry(ChecklistEntryId.create(), "")))
+                    EmptyInput.Link -> mixed.insertLink(id, position, ContentItem.Link(newItemId()))
+                }
             }
         }
     }
@@ -411,22 +429,24 @@ class FolioViewModel(
         catch (_: Exception) { state = state.copy(error = "操作已保存，草稿读取失败，请重试读取。") }
     }
 
-    fun prepareExternal(after: ItemId?, currentTime: Boolean = true, launch: (ExternalTarget) -> Unit) {
+    fun prepareExternal(after: ItemId?, currentTime: Boolean = true, screenshotFor: ItemId? = null, launch: (ExternalTarget) -> Unit) {
         if (state.recording || state.pendingAttachment != null || state.editor?.needsReload == true) return
         if (state.editor == null) begin(currentTime = currentTime)
         runAction("暂时无法打开媒体入口，请重试。") {
             writes.withLock {
                 if (!saveLatest()) return@withLock
                 val editor = state.editor ?: return@withLock
-                val emptyInput = if (editor.draftId == null) when (editor.items.singleOrNull()) {
+                val emptyInput = if (editor.draftId == null || (screenshotFor != null && screenshotFor == editor.unboundItem)) when (editor.items.singleOrNull()) {
                     is ContentItem.Text -> EmptyInput.Text
                     is ContentItem.Checklist -> EmptyInput.Checklist
+                    is ContentItem.Link -> EmptyInput.Link
                     else -> null
                 } else null
                 launch(ExternalTarget(editor.draftId?.value, editor.recordId?.value,
                     editor.draftId?.let { editor.position(after)?.value }, editor.returnPage, state.detailOrigin,
                     editor.eventTime, emptyInput = emptyInput, placeBookId = state.placeBook?.id?.value,
-                    groupId = state.groupId?.value.takeIf { state.detailOrigin.isGroupReadingPage }))
+                    groupId = state.groupId?.value.takeIf { state.detailOrigin.isGroupReadingPage },
+                    linkItemId = editor.draftId?.let { editor.position(screenshotFor)?.value }))
             }
         }
     }
@@ -434,7 +454,14 @@ class FolioViewModel(
     private suspend fun restoreTarget(target: ExternalTarget) {
         if (state.editor == null) {
             val book = target.placeBookId?.let { withContext(Dispatchers.IO) { places?.openPlace(PlaceId(it)) } }
-            if (target.draftId != null) readEditor(DraftId(target.draftId), target.recordId?.let(::RecordId), target.returnPage)
+            if (target.draftId != null) {
+                readEditor(DraftId(target.draftId), target.recordId?.let(::RecordId), target.returnPage)
+                val editor = state.editor
+                if (target.emptyInput == EmptyInput.Link && editor?.unboundItem != null) {
+                    val link = ContentItem.Link(editor.unboundItem)
+                    state = state.copy(editor = editor.copy(items = listOf(link), activeItemId = link.id, textValues = emptyMap()))
+                }
+            }
             else {
                 val item = target.emptyInput?.let(::emptyItem)
                 state = state.copy(page = Page.Editor, editor = RecordEditor(items = listOfNotNull(item),
@@ -472,6 +499,21 @@ class FolioViewModel(
 
     fun dismissFileImportFailure() {
         state.editor?.let { state = state.copy(editor = it.copy(fileImportFailure = null)) }
+    }
+
+    fun receiveLinkScreenshot(uri: Uri?, target: ExternalTarget) {
+        if (uri == null && state.editor != null) return
+        runAction("截图保存失败，请重新选择。原草稿仍保留。") {
+            writes.withLock {
+                restoreTarget(target)
+                if (uri == null || !saveLatest()) return@withLock
+                val editor = requireNotNull(state.editor)
+                val id = requireNotNull(imports).importLinkScreenshot(uri, editor.draftId, target.linkItemId?.let(::ItemId),
+                    target.eventTime, editor.place?.id)
+                state = state.copy(editor = editor.copy(draftId = id))
+                reloadCurrent()
+            }
+        }
     }
 
     suspend fun pdfViewIntent(item: ContentItem.Pdf) = withContext(Dispatchers.IO) {
@@ -631,7 +673,12 @@ class FolioViewModel(
                 if (!saveLatest()) return@withLock
                 val editor = state.editor ?: return@withLock
                 val id = editor.draftId ?: return@withLock
-                val recordId = withContext(Dispatchers.IO) { mixed.completeMixedDraft(id) }
+                val recordId = try {
+                    withContext(Dispatchers.IO) { mixed.completeMixedDraft(id) }
+                } catch (invalid: InvalidLinkAddress) {
+                    state = state.copy(editor = editor.copy(activeItemId = invalid.itemId, invalidLink = invalid))
+                    return@withLock
+                }
                 state = state.copy(editor = null, saveError = null, savedId = recordId, page = Page.Capture)
                 if (editor.recordId != null) showDetail(recordId, state.detailOrigin)
             }
@@ -1250,6 +1297,7 @@ private fun TextFieldValue.asEdit() = TextEdit(text, selection.end.coerceIn(0, t
 private fun ContentItem.withId(id: ItemId): ContentItem = when (this) {
     is ContentItem.Text -> copy(id = id)
     is ContentItem.Photo -> copy(id = id)
+    is ContentItem.Link -> copy(id = id)
     is ContentItem.Pdf -> copy(id = id)
     is ContentItem.Video -> copy(id = id)
     is ContentItem.Audio -> copy(id = id)

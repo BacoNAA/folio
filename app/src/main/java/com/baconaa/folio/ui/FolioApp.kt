@@ -404,6 +404,7 @@ private fun SearchResultSummary(count: Int, placeName: String?) {
             Text(placeName?.let { "只查关联到「$it」的正式记录。" } ?: "查找全部正式记录。")
             Text("可搜标题、正文、清单、标签、地点名、人物和物件的名称及别名，也可搜自己写的时间描述。")
             Text("PDF 附件和视频只匹配文件名。照片和录音可搜你填写的说明。照片中的文字和录音中的语音不参与匹配。")
+            Text("网址可按地址、保存的标题和备注查找。")
         } },
         confirmButton = { TextButton(onClick = { showScope = false }) { Text("关闭") } })
 }
@@ -459,6 +460,7 @@ internal fun RecordCardSummary(record: RecordCard, model: FolioViewModel? = null
     record.preview.items.forEach { item -> when (item) {
         is PreviewContentItem.Text -> Text(item.text, maxLines = 4, lineHeight = 26.sp)
         is PreviewContentItem.Pdf -> Text(item.displayName)
+        is PreviewContentItem.Link -> Text(item.label, maxLines = 3)
         is PreviewContentItem.Video -> Text(videoLabel(item.displayName, item.durationMillis))
         is PreviewContentItem.Photo -> {
             Photo(item.photoId, thumbnail = model == null, thumbnailDescription = "记录照片缩略图")

@@ -53,6 +53,11 @@ class DocumentImportNavigationTest {
                 viewIntent.set(Intent(intent))
                 return Instrumentation.ActivityResult(0, null)
             }
+            if (intent.action == Intent.ACTION_VIEW && intent.data?.host == "127.0.0.1") {
+                viewIntent.set(Intent(intent))
+                if (InstrumentationRegistry.getArguments().getString("m03BrowserPackage") == null)
+                    return Instrumentation.ActivityResult(0, null)
+            }
             return null
         }
     }
@@ -249,7 +254,89 @@ class DocumentImportNavigationTest {
         compose.onNodeWithText("记录这一刻").assertIsDisplayed()
     }
 
-    private fun sample(name: String, mime: String, asset: String = name, assetFolder: String = "m01"): Uri {
+    @Test fun partialLinkResumesAndItsSavedMaterialsOpenFromSearch() {
+        val arguments = InstrumentationRegistry.getArguments()
+        val resume = arguments.getString("m03ResumeRecord")?.let(::RecordId)
+        val address = "http://127.0.0.1:8765/filter?part=42#guide"
+        val title: String
+        if (resume == null) {
+            title = "滤芯说明${System.nanoTime()}"
+            compose.onNodeWithTag("quick-checklist").performScrollTo().performClick()
+            compose.onNodeWithText("事项 1").performTextInput("购买滤芯")
+            waitForEditorSave()
+            draftId = compose.runOnIdle { ViewModelProvider(compose.activity)[FolioViewModel::class.java].state.editor!!.draftId }
+            choose("网址", after = 0)
+            waitText("网址地址")
+            compose.onNodeWithText("网址地址").performTextInput("https://")
+            waitForEditorSave()
+            compose.onNodeWithText("返回").performClick()
+            resumeDraft()
+            editorScroll(hasText("网址地址"))
+            compose.onNodeWithText("网址地址").assertTextContains("https://")
+            editorScroll(hasText("事项 1"))
+            compose.onNodeWithText("事项 1").assertTextContains("购买滤芯")
+            compose.onNodeWithText("完成").performClick()
+            waitText("请补全 HTTP 或 HTTPS 网址，或移除这一项。")
+            compose.onNodeWithText("网址地址").assertIsFocused()
+            editorScroll(hasText("事项 1"))
+            compose.onNodeWithText("事项 1").performTextReplacement("买两只滤芯")
+            editorScroll(hasText("网址地址"))
+            compose.onNodeWithText("网址地址").performTextReplacement(address)
+            compose.onNodeWithText("链接标题（选填）").performTextInput(title)
+            compose.onNodeWithText("链接备注（选填）").performScrollTo().performTextInput("保留蓝色标记")
+            val image = sample("滤芯截图.png", "image/png") { context.resources.openRawResource(R.drawable.home_art) }
+            compose.onNodeWithText("选择截图").performScrollTo().performClick()
+            pickFile("滤芯截图.png")
+            waitText("更换截图")
+            waitForEditorSave()
+            compose.onNodeWithText("完成").performClick()
+            waitText("已保存 · 查看")
+            recordId = compose.runOnIdle { requireNotNull(ViewModelProvider(compose.activity)[FolioViewModel::class.java].state.savedId) }
+            draftId = null
+            assertEquals(1, context.contentResolver.delete(image, null, null))
+        } else {
+            val saved = runBlocking { store.openRecordContent(resume)!! }
+            val item = saved.items.last() as ContentItem.Link
+            check(item.address == address && item.title.startsWith("滤芯说明"))
+            title = item.title
+            recordId = resume
+        }
+        compose.onNodeWithTag("nav-Records").performClick()
+        compose.onNodeWithText("搜索全部记录").performClick()
+        compose.onNodeWithTag("search").performTextInput(title)
+        compose.onNodeWithText("内容类型").performScrollTo().performClick()
+        compose.onNodeWithText("链接").performScrollTo().performClick()
+        compose.onNodeWithText("完成选择").performClick()
+        waitText("1 条记录")
+        val result = hasText(title) and hasAnyAncestor(hasTestTag("search-results"))
+        compose.onNodeWithTag("search-results").performScrollToNode(hasText(title))
+        compose.onNode(result).performClick()
+        waitText("打开网址")
+        compose.onNodeWithText("☐ 买两只滤芯").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(address).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("保留蓝色标记").performScrollTo().assertIsDisplayed()
+        val photo = "记录中的照片，点击放大"
+        compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription(photo).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithContentDescription(photo).performScrollTo().assertIsDisplayed()
+        if (arguments.getString("m03KeepRecord") == "true") {
+            instrumentation.sendStatus(0, Bundle().apply { putString("m03SavedId", requireNotNull(recordId).value) })
+            recordId = null
+            return
+        }
+        compose.onNodeWithText("打开网址").performScrollTo().performClick()
+        compose.waitUntil(10_000) { viewIntent.get()?.dataString == address }
+        assertTrue(viewIntent.get().hasCategory(Intent.CATEGORY_BROWSABLE))
+        arguments.getString("m03BrowserPackage")?.let { browser ->
+            compose.waitUntil(12_000) { instrumentation.uiAutomation.rootInActiveWindow?.packageName == browser }
+            instrumentation.uiAutomation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+            compose.waitUntil(12_000) { instrumentation.uiAutomation.rootInActiveWindow?.packageName == context.packageName }
+        }
+        compose.onNodeWithText(title).performScrollTo().assertIsDisplayed()
+        assertEquals(recordId, compose.runOnIdle { ViewModelProvider(compose.activity)[FolioViewModel::class.java].state.detailId })
+    }
+
+    private fun sample(name: String, mime: String, asset: String = name, assetFolder: String = "m01",
+        open: () -> java.io.InputStream = { instrumentation.context.assets.open("$assetFolder/$asset") }): Uri {
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
             put(MediaStore.MediaColumns.MIME_TYPE, mime)
@@ -259,7 +346,7 @@ class DocumentImportNavigationTest {
         val resolver = context.contentResolver
         val uri = requireNotNull(resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values))
         sources += uri
-        instrumentation.context.assets.open("$assetFolder/$asset").use { input ->
+        open().use { input ->
             resolver.openOutputStream(uri)!!.use { input.copyTo(it) }
         }
         values.clear()
@@ -283,8 +370,12 @@ class DocumentImportNavigationTest {
 
     private fun pickFile(name: String) {
         val timeout = SystemClock.uptimeMillis() + 12_000
+        var requestedList = false
         while (SystemClock.uptimeMillis() < timeout) {
-            val node = pickerRoot()?.findAccessibilityNodeInfosByText(name)?.firstOrNull { it.text?.toString() == name && it.isVisibleToUser }
+            val root = pickerRoot()
+            val node = root?.findAccessibilityNodeInfosByText(name)?.firstOrNull {
+                it.isVisibleToUser && (it.text?.toString() == name || it.contentDescription?.toString() == name)
+            }
             if (node != null) {
                 instrumentation.uiAutomation.waitForIdle(400, 5_000)
                 if (!node.refresh()) continue
@@ -295,10 +386,15 @@ class DocumentImportNavigationTest {
                 compose.waitUntil(12_000) { pickerRoot() == null }
                 return
             }
+            // 图片目录默认使用缩略图网格；列表模式会暴露完整文件名。
+            if (root != null && !requestedList) {
+                val list = root.findAccessibilityNodeInfosByViewId("${root.packageName}:id/sub_menu_list").firstOrNull()
+                if (list != null) requestedList = list.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            }
             SystemClock.sleep(80)
         }
         val root = pickerRoot()
-        val titles = root?.findAccessibilityNodeInfosByViewId("android:id/title")?.map { it.text?.toString() }
+        val titles = root?.findAccessibilityNodeInfosByText("")?.mapNotNull { it.text ?: it.contentDescription }?.take(25)
         fail("系统选择器未显示 $name，当前文件列表为 $titles")
     }
 

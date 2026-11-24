@@ -11,6 +11,7 @@ sealed interface PreviewContentItem {
     data class Text(override val id: ItemId, val text: String) : PreviewContentItem
     data class Photo(override val id: ItemId, val photoId: PhotoId, val caption: String) : PreviewContentItem
     data class Pdf(override val id: ItemId, val displayName: String) : PreviewContentItem
+    data class Link(override val id: ItemId, val label: String) : PreviewContentItem
     data class Video(override val id: ItemId, val displayName: String, val durationMillis: Long?) : PreviewContentItem
     data class Audio(
         override val id: ItemId, val audioId: AudioId, val durationMillis: Long, val caption: String,
@@ -44,7 +45,7 @@ data class RecordCard(
 data class EventYear(val year: Int, val records: List<RecordCard>, val approximate: List<RecordCard> = emptyList())
 data class EventTimeline(val years: List<EventYear>, val undated: List<RecordCard>, val crossYear: List<RecordCard> = emptyList())
 
-enum class MediaFilter { PHOTO, AUDIO, VIDEO, ATTACHMENT, CHECKLIST, TEXT_ONLY }
+enum class MediaFilter { PHOTO, AUDIO, VIDEO, ATTACHMENT, LINK, CHECKLIST, TEXT_ONLY }
 
 /** 返回有效正式记录的全量列表。读取失败抛出异常；无记录时返回空集合。 */
 interface RecordBrowsing {
@@ -95,6 +96,7 @@ internal class LocalRecordBrowsing(private val database: FolioDatabase) : Record
             allMedia = query.mediaTypes.isEmpty(), photo = MediaFilter.PHOTO in query.mediaTypes,
             audio = MediaFilter.AUDIO in query.mediaTypes, video = MediaFilter.VIDEO in query.mediaTypes,
             attachment = MediaFilter.ATTACHMENT in query.mediaTypes, checklist = MediaFilter.CHECKLIST in query.mediaTypes,
+            link = MediaFilter.LINK in query.mediaTypes,
             textOnly = MediaFilter.TEXT_ONLY in query.mediaTypes,
         )
         val dates = when (val filter = query.time) {
@@ -170,6 +172,7 @@ private fun ContentSlot.asPreview(): PreviewContentItem = when (val item = asIte
     is ContentItem.Text -> PreviewContentItem.Text(item.id, item.text)
     is ContentItem.Photo -> PreviewContentItem.Photo(item.id, item.photoId, item.caption)
     is ContentItem.Pdf -> PreviewContentItem.Pdf(item.id, item.displayName)
+    is ContentItem.Link -> PreviewContentItem.Link(item.id, item.title.ifBlank { item.address }.previewText())
     is ContentItem.Video -> PreviewContentItem.Video(item.id, item.displayName, item.durationMillis)
     is ContentItem.Audio -> PreviewContentItem.Audio(item.id, item.audioId, item.durationMillis, item.caption)
     is ContentItem.Checklist -> PreviewContentItem.Checklist(
