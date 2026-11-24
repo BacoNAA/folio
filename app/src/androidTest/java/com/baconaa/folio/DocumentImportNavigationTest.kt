@@ -6,6 +6,7 @@ import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Rect
 import android.net.Uri
+import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.provider.DocumentsContract
@@ -172,7 +173,83 @@ class DocumentImportNavigationTest {
         play(audio)
     }
 
-    private fun sample(name: String, mime: String, asset: String = name): Uri {
+    @Test fun pickedVideoPlaysAndPausesFromTheSamePublishedRecord() {
+        val arguments = InstrumentationRegistry.getArguments()
+        val resume = arguments.getString("m02ResumeRecord")?.let(::RecordId)
+        val body: String
+        if (resume == null) {
+            body = "M02短片验收${System.nanoTime()}"
+            val draft = runBlocking { requireNotNull(store.saveDraft(null, TextEdit(body, 0))) }
+            draftId = draft
+            val valid = sample("短片.mp4", "video/mp4", "short-avc-aac.mp4", "m02")
+            sample("无画面.mp4", "video/mp4", "tone-440.m4a")
+            resumeDraft()
+            choose("导入视频", after = 0)
+            pickFile("无画面.mp4")
+            waitText("导入失败")
+            compose.onNodeWithText("格式", substring = true).assertIsDisplayed()
+            compose.onNodeWithText("重新选择").performClick()
+            pickFile("短片.mp4")
+            waitForEditorSave()
+            publish("播放视频")
+            val saved = runBlocking { store.openRecordContent(requireNotNull(recordId))!! }
+            assertEquals(body, (saved.items.first() as ContentItem.Text).text)
+            assertTrue(saved.items.size == 2 && saved.items.last() is ContentItem.Video)
+            assertEquals(1, context.contentResolver.delete(valid, null, null))
+            if (arguments.getString("m02PrepareColdStart") == "true") {
+                // 交给下一次进程从正常入口打开；常规运行在本方法内播放并清理样本。
+                instrumentation.sendStatus(0, Bundle().apply { putString("m02SavedId", requireNotNull(recordId).value) })
+                recordId = null
+                return
+            }
+        } else {
+            val saved = runBlocking { requireNotNull(store.openRecordContent(resume)) }
+            body = (saved.items.first() as ContentItem.Text).text
+            check(body.startsWith("M02短片验收") && (saved.items.last() as ContentItem.Video).displayName == "短片.mp4")
+            recordId = resume
+            compose.onNodeWithTag("nav-Records").performClick()
+            compose.onNodeWithText("最近记录").performClick()
+            waitText(body)
+            compose.onNodeWithTag("records-list").performScrollToNode(hasText(body))
+            compose.onNode(hasText(body) and hasAnyAncestor(hasTestTag("records-list")), useUnmergedTree = true)
+                .performTouchInput { click() }
+            waitText("播放视频")
+        }
+        compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("视频预览").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("播放视频").performScrollTo().performClick()
+        val pause = hasText("暂停视频") and isEnabled()
+        compose.waitUntil(10_000) { compose.onAllNodes(pause).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNode(pause).performClick()
+        compose.onNodeWithText("继续播放").assertIsEnabled().performClick()
+        compose.onNodeWithText("关闭视频").performClick()
+        compose.onNodeWithText("编辑").assertIsDisplayed()
+        compose.onNodeWithText(body).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun movedVideoAndContinuedTextSurviveLeavingTheEditor() {
+        val source = sample("续写.mp4", "video/mp4", "short-avc-aac.mp4", "m02")
+        val draft = runBlocking { requireNotNull(store.saveDraft(null, TextEdit("看短片", 3))) }
+        draftId = draft
+        val video = runBlocking { store.importMedia(source, ImportType.VIDEO, draft).item }
+        resumeDraft()
+        editorScroll(hasTestTag("item-menu-1"))
+        compose.onNodeWithTag("item-menu-1").performClick()
+        compose.onNodeWithText("上移一项").performClick()
+        editorScroll(hasTestTag("editor"))
+        compose.onNodeWithTag("editor").performTextReplacement("看短片后继续写")
+        compose.onNodeWithText("返回").performClick()
+        resumeDraft()
+        val items = runBlocking { requireNotNull(store.openMixedDraft(draft)).items }
+        assertEquals(video, items.first())
+        assertEquals("看短片后继续写", (items.last() as ContentItem.Text).text)
+        editorScroll(hasText("播放视频"))
+        compose.onNodeWithText("播放视频").assertIsEnabled().performClick()
+        compose.waitUntil(10_000) { compose.onAllNodes(hasText("暂停视频") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("关闭视频").performClick()
+        compose.onNodeWithText("记录这一刻").assertIsDisplayed()
+    }
+
+    private fun sample(name: String, mime: String, asset: String = name, assetFolder: String = "m01"): Uri {
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
             put(MediaStore.MediaColumns.MIME_TYPE, mime)
@@ -182,7 +259,7 @@ class DocumentImportNavigationTest {
         val resolver = context.contentResolver
         val uri = requireNotNull(resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values))
         sources += uri
-        instrumentation.context.assets.open("m01/$asset").use { input ->
+        instrumentation.context.assets.open("$assetFolder/$asset").use { input ->
             resolver.openOutputStream(uri)!!.use { input.copyTo(it) }
         }
         values.clear()

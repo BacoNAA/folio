@@ -459,6 +459,7 @@ internal fun RecordCardSummary(record: RecordCard, model: FolioViewModel? = null
     record.preview.items.forEach { item -> when (item) {
         is PreviewContentItem.Text -> Text(item.text, maxLines = 4, lineHeight = 26.sp)
         is PreviewContentItem.Pdf -> Text(item.displayName)
+        is PreviewContentItem.Video -> Text(videoLabel(item.displayName, item.durationMillis))
         is PreviewContentItem.Photo -> {
             Photo(item.photoId, thumbnail = model == null, thumbnailDescription = "记录照片缩略图")
             if (item.caption.isNotEmpty()) Text(item.caption)

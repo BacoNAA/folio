@@ -3,9 +3,11 @@ package com.baconaa.folio.media
 import android.content.Context
 import android.content.Intent
 import android.graphics.pdf.PdfRenderer
+import android.media.ThumbnailUtils
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
+import android.util.Size
 import androidx.core.content.FileProvider
 import com.baconaa.folio.records.ContentItem
 import com.baconaa.folio.records.ImportType
@@ -26,9 +28,11 @@ value class PdfId(val value: UUID)
 internal class ImportedOriginals(private val context: Context, private val audio: LocalAudioOriginals) {
     private fun staging(id: UUID) = File(context.filesDir, "media-imports/$id.part")
     private fun pdf(id: PdfId) = File(context.filesDir, "pdf-originals/${id.value}.pdf")
+    private fun video(id: VideoId) = File(context.filesDir, "video-originals/${id.value}.mp4")
     private fun original(id: UUID, type: ImportType) = when (type) {
         ImportType.PDF -> pdf(PdfId(id))
         ImportType.AUDIO -> audio.importedFile(AudioId(id))
+        ImportType.VIDEO -> video(VideoId(id))
     }
 
     /** 调用前已在 Room 登记清理候选；私有文件名只取本次生成的 UUID。 */
@@ -42,6 +46,9 @@ internal class ImportedOriginals(private val context: Context, private val audio
                 ContentItem.Pdf(newItemId(), PdfId(id), displayName(source) ?: "附件.pdf", size)
             }
             ImportType.AUDIO -> ContentItem.Audio(newItemId(), AudioId(id), audio.inspectDuration(temp))
+            ImportType.VIDEO -> ContentItem.Video(
+                newItemId(), VideoId(id), displayName(source) ?: "视频.mp4", size, inspectVideo(temp),
+            )
         }
         currentCoroutineContext().ensureActive()
         val target = original(id, type).toPath()
@@ -118,6 +125,23 @@ internal class ImportedOriginals(private val context: Context, private val audio
     }
 
     fun openPdf(id: PdfId) = pdf(id).inputStream()
+
+    private fun readableVideo(item: ContentItem.Video): File {
+        val file = video(item.videoId)
+        if (!file.isFile || !file.canRead() || file.length() != item.sizeBytes)
+            throw IOException("视频原件缺失或已改变，请重新选择视频")
+        return file
+    }
+
+    fun videoSource(item: ContentItem.Video): Uri = Uri.fromFile(readableVideo(item))
+
+    fun videoThumbnail(item: ContentItem.Video) = try {
+        ThumbnailUtils.createVideoThumbnail(readableVideo(item), Size(384, 384), null)
+    } catch (_: IOException) {
+        null
+    } catch (_: RuntimeException) {
+        null
+    }
 
     fun viewIntent(item: ContentItem.Pdf): Intent {
         val file = pdf(item.pdfId)

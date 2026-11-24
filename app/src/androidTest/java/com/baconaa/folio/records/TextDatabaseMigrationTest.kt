@@ -788,6 +788,26 @@ class TextDatabaseMigrationTest {
         } finally { db.close() }
     }
 
+    @Test
+    fun versionTwentyKeepsPublishedDraftAndRemovedItemsWhenAddingVideo() = runBlocking {
+        createDatabase(20) { sql ->
+            sql.execSQL("INSERT INTO text_records(id,sourceDraftId,body,firstRecordedAt,modifiedAt) VALUES ('trip','source','秋游',10,20)")
+            sql.execSQL("INSERT INTO record_items(recordId,position,itemId,text) VALUES ('trip',0,'note','秋游')")
+            sql.execSQL("INSERT INTO text_drafts(id,body,cursor,firstRecordedAt,lastEditedAt,activeItemId) VALUES ('rain','带伞',2,15,25,'r')")
+            sql.execSQL("INSERT INTO draft_items(draftId,position,itemId,text) VALUES ('rain',0,'r','带伞')")
+            sql.execSQL("INSERT INTO removed_draft_items(draftId,position,cursor,itemId,text) VALUES ('rain',1,0,'undo','折叠伞')")
+        }
+        val db = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(db, context)
+            assertEquals("秋游", (store.openRecordContent(RecordId("trip"))!!.items.single() as ContentItem.Text).text)
+            val draft = DraftId("rain")
+            assertEquals("带伞", store.openDraft(draft)!!.text)
+            assertTrue(store.undoRemoval(draft))
+            assertEquals(listOf("带伞", "折叠伞"), store.openMixedDraft(draft)!!.items.map { (it as ContentItem.Text).text })
+        } finally { db.close() }
+    }
+
     private fun createDatabase(version: Int, seed: (SQLiteDatabase) -> Unit) {
         val schemaFile = "${FolioDatabase::class.java.name}/$version.json"
         val schema = instrumentation.context.assets.open(schemaFile).bufferedReader().use {

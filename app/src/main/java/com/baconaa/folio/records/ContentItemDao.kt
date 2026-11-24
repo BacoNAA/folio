@@ -27,6 +27,10 @@ internal data class ContentSlot(
     val pdfId: String? = null,
     val pdfName: String? = null,
     val pdfSizeBytes: Long? = null,
+    val videoId: String? = null,
+    val videoName: String? = null,
+    val videoSizeBytes: Long? = null,
+    val videoDurationMillis: Long? = null,
 )
 
 @Entity(

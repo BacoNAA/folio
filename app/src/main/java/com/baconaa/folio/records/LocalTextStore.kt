@@ -181,13 +181,21 @@ class LocalTextStore internal constructor(
 
     private fun importFailure(source: Uri, type: ImportType, reason: String, cause: Exception): MediaImportException {
         val file = importedOriginals.displayName(source)?.let { "「$it」" }
-            ?: if (type == ImportType.PDF) "所选 PDF" else "所选录音"
+            ?: when (type) {
+                ImportType.PDF -> "所选 PDF"
+                ImportType.AUDIO -> "所选录音"
+                ImportType.VIDEO -> "所选视频"
+            }
         return MediaImportException("未能导入$file。$reason。", cause)
     }
 
     override fun openPdf(id: PdfId) = importedOriginals.openPdf(id)
 
     override fun pdfViewIntent(item: ContentItem.Pdf) = importedOriginals.viewIntent(item)
+
+    override fun videoSource(item: ContentItem.Video) = importedOriginals.videoSource(item)
+
+    override fun videoThumbnail(item: ContentItem.Video) = importedOriginals.videoThumbnail(item)
 
     override suspend fun appendAudio(
         id: DraftId?, audio: AudioId, caption: String, initialEventTime: EventTime?,
@@ -392,6 +400,7 @@ class LocalTextStore internal constructor(
             require(items.hasActualContent(body)) { "请填写文字、清单事项或添加媒体后再完成" }
             requireReadableOriginals(photos)
             items.filterIsInstance<ContentItem.Pdf>().forEach(importedOriginals::verify)
+            items.filterIsInstance<ContentItem.Video>().forEach(importedOriginals::videoSource)
             for (audio in audios) {
                 if (audioOriginals.inspect(audio.audioId).durationMillis != audio.durationMillis) {
                     throw IOException("录音原件已改变，请重新添加")

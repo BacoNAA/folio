@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
     }
     private val pdfPicker = documentPicker(ImportType.PDF)
     private val audioPicker = documentPicker(ImportType.AUDIO)
+    private val videoPicker = documentPicker(ImportType.VIDEO)
 
     private fun documentPicker(type: ImportType) = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val target = pendingTarget
@@ -90,6 +91,7 @@ class MainActivity : ComponentActivity() {
                 when (type) {
                     ImportType.PDF -> pdfPicker.launch(arrayOf("application/pdf"))
                     ImportType.AUDIO -> audioPicker.launch(arrayOf("audio/*"))
+                    ImportType.VIDEO -> videoPicker.launch(arrayOf("video/mp4"))
                 }
             } catch (_: ActivityNotFoundException) {
                 pendingTarget = null

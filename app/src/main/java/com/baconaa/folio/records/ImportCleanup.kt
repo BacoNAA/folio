@@ -23,17 +23,25 @@ internal interface ImportCleanupDao {
 
     @Query("""INSERT OR IGNORE INTO import_cleanup_queue(assetId, type)
               SELECT pdfId, 'PDF' FROM draft_items WHERE draftId = :id AND pdfId IS NOT NULL
-              UNION SELECT pdfId, 'PDF' FROM removed_draft_items WHERE draftId = :id AND pdfId IS NOT NULL""")
+              UNION SELECT pdfId, 'PDF' FROM removed_draft_items WHERE draftId = :id AND pdfId IS NOT NULL
+              UNION SELECT videoId, 'VIDEO' FROM draft_items WHERE draftId = :id AND videoId IS NOT NULL
+              UNION SELECT videoId, 'VIDEO' FROM removed_draft_items WHERE draftId = :id AND videoId IS NOT NULL""")
     suspend fun enqueueDraft(id: String)
 
     @Query("""INSERT OR IGNORE INTO import_cleanup_queue(assetId, type)
-              SELECT pdfId, 'PDF' FROM record_items WHERE recordId = :id AND pdfId IS NOT NULL""")
+              SELECT pdfId, 'PDF' FROM record_items WHERE recordId = :id AND pdfId IS NOT NULL
+              UNION SELECT videoId, 'VIDEO' FROM record_items WHERE recordId = :id AND videoId IS NOT NULL""")
     suspend fun enqueueRecord(id: String)
 
     @Query("""SELECT EXISTS(SELECT 1 FROM record_items WHERE pdfId = :id
               UNION ALL SELECT 1 FROM draft_items WHERE pdfId = :id
               UNION ALL SELECT 1 FROM removed_draft_items WHERE pdfId = :id)""")
     suspend fun pdfReferenced(id: String): Boolean
+
+    @Query("""SELECT EXISTS(SELECT 1 FROM record_items WHERE videoId = :id
+              UNION ALL SELECT 1 FROM draft_items WHERE videoId = :id
+              UNION ALL SELECT 1 FROM removed_draft_items WHERE videoId = :id)""")
+    suspend fun videoReferenced(id: String): Boolean
 
     @Query("SELECT assetId FROM import_cleanup_queue")
     suspend fun candidates(): List<String>
@@ -83,6 +91,7 @@ internal class ImportCleanup(private val db: FolioDatabase, private val original
         val referenced = when (entry.type) {
             ImportType.PDF -> queue.pdfReferenced(id)
             ImportType.AUDIO -> db.audioCleanupDao().isReferenced(id)
+            ImportType.VIDEO -> queue.videoReferenced(id)
         }
         try {
             if (!referenced) originals.delete(UUID.fromString(id), entry.type)

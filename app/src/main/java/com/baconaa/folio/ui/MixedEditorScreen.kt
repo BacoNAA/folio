@@ -51,6 +51,7 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
                             is ContentItem.Text -> "文字"
                             is ContentItem.Photo -> "照片"
                             is ContentItem.Pdf -> "附件"
+                            is ContentItem.Video -> "视频"
                             is ContentItem.Audio -> "录音"
                             is ContentItem.Checklist -> "清单"
                         }, Modifier.weight(1f), fontSize = 12.sp)
@@ -81,6 +82,7 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
                                 textStyle = MaterialTheme.typography.bodyLarge.copy(lineHeight = 28.sp))
                         }
                         is ContentItem.Pdf -> PdfAttachment(item, model)
+                        is ContentItem.Video -> VideoAttachment(item, model)
                         is ContentItem.Photo -> {
                             Photo(item.photoId)
                             OutlinedTextField(item.caption, { model.changeCaption(item.id, it) }, enabled = enabled,
@@ -176,7 +178,7 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
                     }
                 }, modifier = Modifier.fillMaxWidth()) { Text(label) }
             }
-            listOf(ImportType.PDF to "PDF 附件", ImportType.AUDIO to "导入已有录音").forEach { (type, label) ->
+            listOf(ImportType.PDF to "PDF 附件", ImportType.AUDIO to "导入已有录音", ImportType.VIDEO to "导入视频").forEach { (type, label) ->
                 TextButton(onClick = {
                     showAdd = false
                     chooseDocument(type, addAfter?.let(::ItemId))

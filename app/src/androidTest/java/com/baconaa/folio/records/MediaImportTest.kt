@@ -35,10 +35,10 @@ internal class MediaImportTest : AudioStoreFixture() {
     private val sources = File(context.cacheDir, "camera/m01-${UUID.randomUUID()}")
     private val imported = mutableListOf<ContentItem>()
 
-    private fun sample(name: String): File {
+    private fun sample(name: String, folder: String = "m01"): File {
         check(sources.isDirectory || sources.mkdirs())
         return File(sources, name).also { file ->
-            instrumentation.context.assets.open("m01/$name").use { input ->
+            instrumentation.context.assets.open("$folder/$name").use { input ->
                 file.outputStream().use { input.copyTo(it) }
             }
         }
@@ -56,6 +56,7 @@ internal class MediaImportTest : AudioStoreFixture() {
         imported.forEach {
             when (it) {
                 is ContentItem.Pdf -> File(context.filesDir, "pdf-originals/${it.pdfId.value}.pdf").delete()
+                is ContentItem.Video -> File(context.filesDir, "video-originals/${it.videoId.value}.mp4").delete()
                 is ContentItem.Audio -> audioOriginals.deleteOriginal(it.audioId)
                 else -> Unit
             }
@@ -246,12 +247,68 @@ internal class MediaImportTest : AudioStoreFixture() {
         assertFalse(file.exists())
     }
 
-    private fun mediaFiles(): Set<File> = listOf("pdf-originals", "audio-originals", "media-imports")
+    @Test
+    fun videoOriginalSurvivesUndoAndTrashUntilLastReferenceIsDeleted() = runBlocking {
+        val file = sample("short-avc-aac.mp4", "m02")
+        val bytes = file.readBytes()
+        val result = add(file, ImportType.VIDEO)
+        val video = result.item as ContentItem.Video
+        assertEquals(bytes.size.toLong(), video.sizeBytes)
+        assertTrue(requireNotNull(video.durationMillis) in 4_900L..5_200L)
+        assertEquals(file.name, video.displayName)
+        checkNotNull(store.videoThumbnail(video)).recycle()
+        val uri = store.videoSource(video)
+        check(file.delete())
+        store.removeItem(result.draftId, video.id)
+        reopenDatabase()
+        assertTrue(store.undoRemoval(result.draftId))
+        val record = store.completeMixedDraft(result.draftId)
+        val edit = store.editRecord(record)
+        store.removeItem(edit, video.id)
+        store.discardDraft(edit)
+        assertTrue(store.moveToTrash(record))
+        assertEquals(video, store.openTrashRecord(record)!!.content.items.single())
+        assertTrue(store.restoreRecord(record))
+        reopenDatabase()
+        assertEquals(video, store.openRecordContent(record)!!.items.single())
+        assertArrayEquals(bytes, context.contentResolver.openInputStream(uri)!!.use { it.readBytes() })
+        assertTrue(store.moveToTrash(record))
+        assertTrue(store.deletePermanently(record).deleted)
+        assertFalse(File(requireNotNull(uri.path)).exists())
+    }
+
+    @Test
+    fun mp4WithNoDecodableSamplesLeavesTheDraftAndFilesUntouched() = runBlocking {
+        val file = sample("short-avc-aac.mp4", "m02")
+        val bytes = file.readBytes()
+        val dataBox = bytes.toString(Charsets.ISO_8859_1).indexOf("mdat")
+        check(dataBox >= 0)
+        file.writeBytes(bytes.copyOf(dataBox + 4))
+        val draft = requireNotNull(store.saveDraft(null, TextEdit("保留原文字", 4)))
+        val before = store.openMixedDraft(draft)
+        val files = mediaFiles()
+        val failure = runCatching { add(file, ImportType.VIDEO, draft) }.exceptionOrNull()
+        assertTrue(failure.toString(), failure is MediaImportException &&
+            listOf("格式", "解码").any { it in failure.message.orEmpty() })
+        assertEquals(before, store.openMixedDraft(draft))
+        assertEquals(files, mediaFiles())
+        assertTrue(database.importCleanupDao().candidates().isEmpty())
+    }
+
+    private fun mediaFiles(): Set<File> = listOf("pdf-originals", "audio-originals", "video-originals", "media-imports")
         .flatMap { File(context.filesDir, it).walk().filter(File::isFile).toList() }.toSet()
 
     @Test
     fun databaseFullDuringBindingPreservesTheDraftAndReleasesTheCopiedFile() = runBlocking {
-        val pdf = sample("窗框凭证.pdf")
+        retryAfterDatabaseFull(sample("窗框凭证.pdf"), ImportType.PDF)
+    }
+
+    @Test
+    fun videoDatabaseFullThenRetryPublishesExactlyOneVideo() = runBlocking {
+        retryAfterDatabaseFull(sample("short-avc-aac.mp4", "m02"), ImportType.VIDEO)
+    }
+
+    private suspend fun retryAfterDatabaseFull(file: File, type: ImportType) {
         val draft = requireNotNull(store.saveDraft(null, TextEdit("保留", 2)))
         val saved = store.openMixedDraft(draft)
         val before = mediaFiles()
@@ -268,7 +325,7 @@ internal class MediaImportTest : AudioStoreFixture() {
             old
         }
         try {
-            val failure = runCatching { add(pdf, ImportType.PDF, draft) }.exceptionOrNull()
+            val failure = runCatching { add(file, type, draft) }.exceptionOrNull()
             assertTrue(failure.toString(), failure is IOException && failure.message.orEmpty().contains("空间不足"))
         } finally {
             database.withTransaction { pragma("max_page_count=$oldLimit") }
@@ -277,7 +334,10 @@ internal class MediaImportTest : AudioStoreFixture() {
         assertEquals(saved, store.openMixedDraft(draft))
         assertEquals(before, mediaFiles())
         assertTrue(database.importCleanupDao().candidates().isEmpty())
-        assertEquals(draft, add(pdf, ImportType.PDF, draft).draftId)
+        val retry = add(file, type, draft)
+        assertEquals(draft, retry.draftId)
+        val record = store.completeMixedDraft(draft)
+        assertEquals(requireNotNull(saved).items + retry.item, store.openRecordContent(record)!!.items)
     }
 
     @Test

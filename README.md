@@ -40,6 +40,8 @@ Folio 计划做一款私人生活记录应用，用文字、照片和声音留�
 
 第二版 M01 支持从编辑页「＋ 添加内容」选择「PDF 附件」或「导入已有录音」。要插在某一项之后，打开该项的「⋯ → 在此后添加」。系统选择器返回后可直接打开 PDF 或试听录音，取消会回到原编辑位置。导入失败时可查看原因，在原位置重新选择，或继续编辑已有内容。
 
+同一菜单中的「导入视频」可选择 MP4 短片。导入后能调整视频项的位置、继续写或完成记录。打开记录详情，点「播放视频」可看本机保存的副本，播放中可以暂停，点「关闭视频」回到原记录。[M02 兼容样本与验证](docs/engineering/开发流程.md#第二版-m02-保存与播放视频)
+
 本机接口 `LocalTextStore.get(context).importMedia(source, type, draftId, after, initialEventTime, initialPlaceId)` 接收选中的来源 URI 与 `ImportType.PDF` 或 `ImportType.AUDIO`。省略 `draftId` 时以文件起草，可带入初始事件时间和地点小册的地点。省略 `after` 时追加到末尾，指定 `ItemId` 时紧接该项插入。成功返回的 `ImportedItem` 包含草稿 ID 和已保存的内容项。来源或文件读写失败时，`MediaImportException` 提供可展示的原因，文件提供方返回名称时一并指出文件。原草稿可继续编辑。[Kotlin 接口](app/src/main/java/com/baconaa/folio/records/MediaImports.kt)
 
 PDF 项显示文件名和实际体积，仅含 PDF 的草稿也能点「完成」。从草稿、正式或回收站详情点「打开 PDF」，页面通过 `pdfViewIntent(item)` 给系统查看器授予这份 Folio 副本的只读权限。缺少查看器时，附件旁会提示安装后重试。业务代码也可用 `openPdf(pdfId)` 读取原件。已有录音沿用共享播放器和实测时长，可在草稿中填写说明。完成后删除下载的源文件，仍能从详情离线使用副本。[联验样本](app/src/androidTest/assets/m01)

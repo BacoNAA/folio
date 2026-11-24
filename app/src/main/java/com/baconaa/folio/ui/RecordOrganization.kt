@@ -265,6 +265,7 @@ internal fun RecordContents(content: RecordContent, model: FolioViewModel) {
         content.items.forEach { item -> when (item) {
             is ContentItem.Text -> Text(item.text, fontSize = bodySize, lineHeight = lineHeight)
             is ContentItem.Pdf -> PdfAttachment(item, model)
+            is ContentItem.Video -> VideoAttachment(item, model)
             is ContentItem.Photo -> { Photo(item.photoId); if (item.caption.isNotEmpty()) Text(item.caption) }
             is ContentItem.Audio -> { AudioControl(item.audioId, item.durationMillis, model); if (item.caption.isNotEmpty()) Text(item.caption) }
             is ContentItem.Checklist -> item.entries.forEach { Text("${if (it.checked) "☑" else "☐"} ${it.text}") }

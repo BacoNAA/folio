@@ -326,7 +326,7 @@ class FolioViewModel(
                                 is ContentItem.Text -> mixed.editTextItem(snapshot.draftId, backendId,
                                     (snapshot.textValues[item.id] ?: TextFieldValue(item.text)).asEdit())
                                 is ContentItem.Photo -> mixed.editPhotoCaption(snapshot.draftId, backendId, item.caption)
-                                is ContentItem.Pdf -> Unit // 文件信息随原件导入，编辑器没有待回写的字段。
+                                is ContentItem.Pdf, is ContentItem.Video -> Unit // 文件信息随原件导入。
                                 is ContentItem.Audio -> mixed.editAudioCaption(snapshot.draftId, backendId, item.caption)
                                 is ContentItem.Checklist -> mixed.editChecklist(snapshot.draftId, backendId, item.entries)
                             }
@@ -477,6 +477,10 @@ class FolioViewModel(
     suspend fun pdfViewIntent(item: ContentItem.Pdf) = withContext(Dispatchers.IO) {
         requireNotNull(imports).pdfViewIntent(item)
     }
+
+    suspend fun videoSource(item: ContentItem.Video) = withContext(Dispatchers.IO) { requireNotNull(imports).videoSource(item) }
+
+    suspend fun videoThumbnail(item: ContentItem.Video) = withContext(Dispatchers.IO) { imports?.videoThumbnail(item) }
 
     fun receivePhoto(uri: Uri, target: ExternalTarget) {
         failedPhoto = uri to target
@@ -1247,6 +1251,7 @@ private fun ContentItem.withId(id: ItemId): ContentItem = when (this) {
     is ContentItem.Text -> copy(id = id)
     is ContentItem.Photo -> copy(id = id)
     is ContentItem.Pdf -> copy(id = id)
+    is ContentItem.Video -> copy(id = id)
     is ContentItem.Audio -> copy(id = id)
     is ContentItem.Checklist -> copy(id = id)
 }
