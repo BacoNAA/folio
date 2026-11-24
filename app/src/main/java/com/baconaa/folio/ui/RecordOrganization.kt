@@ -134,7 +134,9 @@ internal fun TagDialog(model: FolioViewModel, editing: Boolean, close: () -> Uni
 
 private val MediaFilter.label get() = when (this) {
     MediaFilter.PHOTO -> "有照片"
-    MediaFilter.AUDIO -> "有录音"
+    MediaFilter.AUDIO -> "声音"
+    MediaFilter.VIDEO -> "视频"
+    MediaFilter.ATTACHMENT -> "附件"
     MediaFilter.CHECKLIST -> "有清单"
     MediaFilter.TEXT_ONLY -> "纯文字"
 }
@@ -206,7 +208,7 @@ internal fun SearchFilters(model: FolioViewModel) {
     if (showTime) EventDateFilterDialog(model, state.eventDateFilter, onApply = { model.filterEventDate(it); showTime = false },
         onDismiss = { showTime = false })
     if (showMedia) AlertDialog(onDismissRequest = { showMedia = false }, title = { Text("内容类型 · 满足任一种") },
-        text = { Column { MediaFilter.entries.forEach { type ->
+        text = { Column(Modifier.verticalScroll(rememberScrollState())) { MediaFilter.entries.forEach { type ->
             val selected = type in state.mediaTypes
             Row(Modifier.fillMaxWidth().toggleable(value = selected, role = androidx.compose.ui.semantics.Role.Checkbox) {
                 model.filterMedia(if (it) state.mediaTypes + type else state.mediaTypes - type)

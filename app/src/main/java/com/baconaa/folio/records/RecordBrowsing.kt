@@ -44,7 +44,7 @@ data class RecordCard(
 data class EventYear(val year: Int, val records: List<RecordCard>, val approximate: List<RecordCard> = emptyList())
 data class EventTimeline(val years: List<EventYear>, val undated: List<RecordCard>, val crossYear: List<RecordCard> = emptyList())
 
-enum class MediaFilter { PHOTO, AUDIO, CHECKLIST, TEXT_ONLY }
+enum class MediaFilter { PHOTO, AUDIO, VIDEO, ATTACHMENT, CHECKLIST, TEXT_ONLY }
 
 /** 返回有效正式记录的全量列表。读取失败抛出异常；无记录时返回空集合。 */
 interface RecordBrowsing {
@@ -54,7 +54,7 @@ interface RecordBrowsing {
     /** 只显示已加星的有效正式记录，排序及内容预览沿用最近记录。 */
     suspend fun listStarredRecords(): List<RecordCard>
 
-    /** 标签、人物、物件各类内部多选满足任一，各类别及关键词、星标、地点同时满足；仅查有效正式内容。 */
+    /** 标签、人物、物件、内容类型各自多选满足任一，各类别及关键词、星标、地点同时满足。仅查有效正式内容。 */
     suspend fun queryRecords(
         keyword: String = "", tagIds: Set<TagId> = emptySet(), starredOnly: Boolean = false, placeId: PlaceId? = null,
         peopleIds: Set<ObjectId> = emptySet(), thingIds: Set<ObjectId> = emptySet(),
@@ -92,8 +92,10 @@ internal class LocalRecordBrowsing(private val database: FolioDatabase) : Record
         val records = dao.activeRecords(
             query.keyword, query.tagIds.map { it.value }, query.tagIds.isEmpty(), query.starredOnly, query.placeId?.value,
             query.peopleIds.map { it.value }, query.peopleIds.isEmpty(), query.thingIds.map { it.value }, query.thingIds.isEmpty(),
-            query.mediaTypes.isEmpty(), MediaFilter.PHOTO in query.mediaTypes, MediaFilter.AUDIO in query.mediaTypes,
-            MediaFilter.CHECKLIST in query.mediaTypes, MediaFilter.TEXT_ONLY in query.mediaTypes,
+            allMedia = query.mediaTypes.isEmpty(), photo = MediaFilter.PHOTO in query.mediaTypes,
+            audio = MediaFilter.AUDIO in query.mediaTypes, video = MediaFilter.VIDEO in query.mediaTypes,
+            attachment = MediaFilter.ATTACHMENT in query.mediaTypes, checklist = MediaFilter.CHECKLIST in query.mediaTypes,
+            textOnly = MediaFilter.TEXT_ONLY in query.mediaTypes,
         )
         val dates = when (val filter = query.time) {
             null -> return@withTransaction RecordSearchResult(readCards(records), emptyList(), 0)

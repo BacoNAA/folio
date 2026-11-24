@@ -118,6 +118,45 @@ internal class MediaImportTest : AudioStoreFixture() {
         }
 
     @Test
+    fun searchingPublishedMediaUsesFullContentAndLastCompletedCaptions() = runBlocking {
+        val file = sample("窗框凭证.pdf")
+        val first = add(file, ImportType.PDF)
+        val draft = first.draftId
+        val text = store.insertText(draft, first.item.id, TextEdit("更换滤芯", 0))
+        val audio = add(sample("tone-660.mp3"), ImportType.AUDIO, draft, text).item as ContentItem.Audio
+        store.editAudioCaption(draft, audio.id, "第一次敲击")
+        val video = add(sample("short-avc-aac.mp4", "m02"), ImportType.VIDEO, draft).item
+        val record = store.completeMixedDraft(draft)
+        add(file, ImportType.PDF)
+
+        val card = store.queryRecords("窗框凭证", mediaTypes = setOf(MediaFilter.ATTACHMENT)).single()
+        assertEquals(record, card.id)
+        val detail = store.openRecordContent(record)!!.items
+        assertEquals(listOf(first.item.id, text, audio.id, video.id), detail.map { it.id })
+        assertEquals(detail.take(3).map { it.id }, card.preview.items.map { it.id })
+        assertEquals(1, card.preview.remainingItemCount)
+        assertEquals(card, store.listRecentRecords().single())
+        assertEquals(listOf(record), store.search("窗框凭证").map { it.id })
+        assertEquals(listOf(record), store.search("SHORT-AVC").map { it.id })
+        assertEquals(card, store.queryRecords("SHORT-AVC", mediaTypes = setOf(MediaFilter.VIDEO)).single())
+        assertTrue(store.queryRecords("LATCH-4827").isEmpty())
+
+        val edit = store.editRecord(record)
+        store.editAudioCaption(edit, audio.id, "修好后的声音")
+        assertEquals(record, store.queryRecords("第一次敲击").single().id)
+        assertTrue(store.search("修好后的声音").isEmpty())
+        store.completeMixedDraft(edit)
+        assertTrue(store.queryRecords("第一次敲击").isEmpty())
+        assertEquals(record, store.search("修好后的声音").single().id)
+        val recorded = publishAudio(audioClip().id)
+        val pdfOnly = store.completeMixedDraft(add(file, ImportType.PDF).draftId)
+        assertEquals(setOf(record, recorded), store.queryRecords(mediaTypes = setOf(MediaFilter.AUDIO)).map { it.id }.toSet())
+        store.moveToTrash(record)
+        assertEquals(listOf(pdfOnly), store.search("窗框凭证").map { it.id })
+        assertTrue(store.queryRecords(mediaTypes = setOf(MediaFilter.VIDEO)).isEmpty())
+    }
+
+    @Test
     fun importedMp3KeepsItsPositionAndBothOriginalsSurviveTrashAndRestore() = runBlocking {
         val draft = requireNotNull(store.saveDraft(null, TextEdit("更换窗框", 4)))
         val text = store.openMixedDraft(draft)!!.items.single()
