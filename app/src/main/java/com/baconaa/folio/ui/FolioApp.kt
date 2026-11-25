@@ -1,22 +1,16 @@
 package com.baconaa.folio.ui
 
-import android.graphics.BitmapFactory
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -25,39 +19,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.baconaa.folio.R
-import com.baconaa.folio.media.LocalPhotoOriginals
-import com.baconaa.folio.media.PhotoId
 import com.baconaa.folio.records.*
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import kotlin.math.roundToInt
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 private val Paper = Color(0xFFF7F4EE)
 private val Ink = Color(0xFF423A32)
@@ -484,85 +461,6 @@ internal fun RecordCardSummary(record: RecordCard, model: FolioViewModel? = null
             if (preview.remainingAudioCount > 0) add("${preview.remainingAudioCount} 段录音")
         }
         Text(remaining.joinToString(" · "), fontSize = 12.sp)
-    }
-}
-
-@Composable
-internal fun Photo(id: PhotoId, thumbnail: Boolean = false, thumbnailDescription: String = "草稿照片缩略图") = key(id, thumbnail) {
-    val context = LocalContext.current
-    var failed by remember { mutableStateOf(false) }
-    var expanded by remember { mutableStateOf(false) }
-    var attempt by remember { mutableIntStateOf(0) }
-    val bitmap by produceState<ImageBitmap?>(null, attempt) {
-        try {
-            value = withContext(Dispatchers.IO) {
-                val originals = LocalPhotoOriginals.get(context)
-                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                originals.openOriginal(id).use { BitmapFactory.decodeStream(it, null, bounds) }
-                val targetSize = if (thumbnail) 192 else 1024
-                val options = BitmapFactory.Options().apply { inSampleSize = maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / targetSize) }
-                originals.openOriginal(id).use { requireNotNull(BitmapFactory.decodeStream(it, null, options)).asImageBitmap() }
-            }
-        } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { failed = true }
-    }
-    val image = bitmap
-    when {
-        image != null && thumbnail -> Image(image, thumbnailDescription, Modifier.size(64.dp), contentScale = ContentScale.Crop)
-        image != null -> Image(image, "记录中的照片，点击放大",
-            Modifier.fillMaxWidth().heightIn(max = 320.dp).clickable { expanded = true })
-        failed -> Column {
-            Text("照片读取失败。")
-            if (!thumbnail) TextButton(onClick = {
-                failed = false
-                attempt++
-            }) { Text("重试读取照片") }
-        }
-        else -> Text("正在读取照片…")
-    }
-    if (expanded && image != null) PhotoViewer(image) { expanded = false }
-}
-
-@Composable
-private fun PhotoViewer(bitmap: ImageBitmap, close: () -> Unit) {
-    var scale by remember { mutableFloatStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
-    val maxScale = 5f
-    val zoomStep = 1.5f
-    val transform = rememberTransformableState { _, zoom, pan, _ ->
-        scale = (scale * zoom).coerceIn(1f, maxScale)
-        offset = if (scale == 1f) Offset.Zero else offset + pan
-    }
-    val controlBackground = Color.Black.copy(alpha = 0.8f)
-    val controlColors = ButtonDefaults.textButtonColors(
-        contentColor = Color.White, disabledContentColor = Color.White.copy(alpha = 0.45f),
-    )
-    Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Surface(Modifier.fillMaxSize(), color = Color.Black) {
-            Box(Modifier.fillMaxSize().safeDrawingPadding()) {
-                Image(bitmap, "照片", Modifier.fillMaxSize().transformable(transform).graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                    translationX = offset.x
-                    translationY = offset.y
-                }.semantics { stateDescription = "缩放 ${(scale * 100).roundToInt()}%" })
-                TextButton(onClick = close, colors = controlColors,
-                    modifier = Modifier.align(Alignment.TopEnd).background(controlBackground)) { Text("关闭照片") }
-                Row(Modifier.align(Alignment.BottomCenter).background(controlBackground)) {
-                    TextButton(onClick = {
-                        scale = (scale / zoomStep).coerceAtLeast(1f)
-                        if (scale == 1f) offset = Offset.Zero
-                    }, enabled = scale > 1f, colors = controlColors) { Text("缩小") }
-                    TextButton(onClick = {
-                        scale = (scale * zoomStep).coerceAtMost(maxScale)
-                    }, enabled = scale < maxScale, colors = controlColors) { Text("放大") }
-                    TextButton(onClick = {
-                        scale = 1f
-                        offset = Offset.Zero
-                    }, enabled = scale > 1f, colors = controlColors) { Text("还原") }
-                }
-            }
-        }
     }
 }
 

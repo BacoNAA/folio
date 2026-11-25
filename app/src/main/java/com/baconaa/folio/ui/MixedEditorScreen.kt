@@ -91,7 +91,8 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
                             model::changeLink, onScreenshot = { launchMedia("link-screenshot", item.id) })
                         is ContentItem.Video -> VideoAttachment(item, model)
                         is ContentItem.Photo -> {
-                            Photo(item.photoId)
+                            Photo(item.photoId, strokes = item.strokes)
+                            TextButton(onClick = { model.openPhotoMarkup(item) }, enabled = structureEnabled) { Text("圈画照片") }
                             OutlinedTextField(item.caption, { model.changeCaption(item.id, it) }, enabled = enabled,
                                 modifier = Modifier.fillMaxWidth(), label = { Text("照片说明（选填）") })
                         }
@@ -154,6 +155,7 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
             TextButton(onClick = discard, enabled = !state.busy) { Text("放弃修改") }
         }
     }
+    editor.markingPhoto?.let { PhotoMarkupDialog(it, model) }
     editor.photoTimeOffer?.let { offer ->
         AlertDialog(onDismissRequest = { model.resolvePhotoTime(false) }, title = { Text("采用照片拍摄时间？") },
             text = { Column {

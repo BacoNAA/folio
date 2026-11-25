@@ -57,6 +57,7 @@ data class RecordEditor(
     // 先写标题时，页面的空输入框尚不是草稿内容项。
     val unboundItem: ItemId? = null,
     val photoTimeOffer: PhotoTimeOffer? = null,
+    val markingPhoto: ContentItem.Photo? = null,
     // 首次落盘分配后端 ID，但当前输入项及其键盘回调保留原身份；写入时再映射。
     val backendItemIds: Map<ItemId, ItemId> = emptyMap(),
     val fileImportFailure: FileImportFailure? = null,
@@ -250,6 +251,42 @@ class FolioViewModel(
     fun changeChecklist(id: ItemId, entries: List<ChecklistEntry>) {
         updateItem(id) { (it as ContentItem.Checklist).copy(entries = entries) }
         save()
+    }
+
+    fun openPhotoMarkup(photo: ContentItem.Photo) {
+        val editor = state.editor ?: return
+        if (!state.busy) state = state.copy(editor = editor.copy(markingPhoto = photo), error = null)
+    }
+
+    fun changePhotoMarkup(change: (List<PhotoStroke>) -> List<PhotoStroke>) {
+        val editor = state.editor ?: return
+        val photo = editor.markingPhoto ?: return
+        if (!state.busy) state = state.copy(editor = editor.copy(markingPhoto = photo.copy(strokes = change(photo.strokes))), error = null)
+    }
+
+    fun cancelPhotoMarkup() {
+        val editor = state.editor ?: return
+        if (!state.busy) state = state.copy(editor = editor.copy(markingPhoto = null), error = null)
+    }
+
+    fun savePhotoMarkup() = runAction("标注保存失败，请重试。") {
+        writes.withLock {
+            if (!saveLatest()) return@withLock
+            val editor = state.editor ?: return@withLock
+            val photo = editor.markingPhoto ?: return@withLock
+            val saved = try {
+                withContext(Dispatchers.IO) {
+                    mixed.editPhotoStrokes(requireNotNull(editor.draftId), requireNotNull(editor.position(photo.id)), photo.strokes)
+                }
+            } catch (invalid: IllegalArgumentException) {
+                state = state.copy(error = invalid.message ?: "标注保存失败，请重试。")
+                return@withLock
+            }
+            val item = saved.copy(id = photo.id)
+            state = state.copy(editor = editor.copy(markingPhoto = null,
+                items = editor.items.map { if (it.id == item.id) item else it },
+                persistedItems = editor.persistedItems.map { if (it.id == item.id) item else it }))
+        }
     }
 
     fun changeLink(link: ContentItem.Link) {
