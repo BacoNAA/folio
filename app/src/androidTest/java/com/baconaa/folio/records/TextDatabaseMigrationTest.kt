@@ -833,6 +833,35 @@ class TextDatabaseMigrationTest {
         } finally { db.close() }
     }
 
+    @Test
+    fun versionTwentyTwoKeepsPhotosAndLinkScreenshotWhenAddingStrokes() = runBlocking {
+        val photo = PhotoId(UUID.randomUUID())
+        val original = arrayOf(photo.value.toString())
+        createDatabase(22) { sql ->
+            sql.execSQL("INSERT INTO text_records(id,sourceDraftId,body,firstRecordedAt,modifiedAt) VALUES ('room','source','',10,20)")
+            sql.execSQL("INSERT INTO record_items(recordId,position,itemId,photoId,caption) VALUES ('room',0,'p',?,'总开关')", original)
+            sql.execSQL("""INSERT INTO record_items(recordId,position,itemId,linkAddress,linkTitle,linkScreenshotId)
+                VALUES ('room',1,'l','https://example.org','说明',?)""", original)
+            sql.execSQL("INSERT INTO text_drafts(id,body,cursor,firstRecordedAt,lastEditedAt,activeItemId) VALUES ('d','',0,15,25,'a')")
+            sql.execSQL("INSERT INTO draft_items(draftId,position,itemId,photoId,caption) VALUES ('d',0,'a',?,'保险丝')", original)
+            sql.execSQL("INSERT INTO removed_draft_items(draftId,position,cursor,itemId,photoId,caption) VALUES ('d',1,0,'b',?,'右侧')", original)
+        }
+        val db = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(db, context)
+            val published = store.openRecordContent(RecordId("room"))!!.items
+            assertEquals(ContentItem.Photo(ItemId("p"), photo, "总开关"), published[0])
+            assertEquals(ContentItem.Link(ItemId("l"), "https://example.org", "说明", screenshotId = photo), published[1])
+            val draft = DraftId("d")
+            assertTrue(store.undoRemoval(draft))
+            assertEquals(listOf(ContentItem.Photo(ItemId("a"), photo, "保险丝"), ContentItem.Photo(ItemId("b"), photo, "右侧")),
+                store.openMixedDraft(draft)!!.items)
+            val strokes = listOf(PhotoStroke(listOf(PhotoPoint(0.5f, 0.5f))))
+            assertEquals(strokes, store.editPhotoStrokes(draft, ItemId("a"), strokes).strokes)
+            assertEquals(published, store.openRecordContent(RecordId("room"))!!.items)
+        } finally { db.close() }
+    }
+
     private fun createDatabase(version: Int, seed: (SQLiteDatabase) -> Unit) {
         val schemaFile = "${FolioDatabase::class.java.name}/$version.json"
         val schema = instrumentation.context.assets.open(schemaFile).bufferedReader().use {

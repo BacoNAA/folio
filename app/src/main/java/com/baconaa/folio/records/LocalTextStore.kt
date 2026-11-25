@@ -2,6 +2,7 @@ package com.baconaa.folio.records
 
 import android.content.Context
 import android.net.Uri
+import android.database.sqlite.SQLiteBlobTooBigException
 import android.database.sqlite.SQLiteException
 import android.database.sqlite.SQLiteFullException
 import android.system.ErrnoException
@@ -310,12 +311,29 @@ class LocalTextStore internal constructor(
         database.writeMixedDraft(id, requireDraft(id).withText(itemId, edit), now())
     }
 
-    override suspend fun editPhotoCaption(id: DraftId, itemId: ItemId, caption: String) = database.withTransaction {
+    override suspend fun editPhotoCaption(id: DraftId, itemId: ItemId, caption: String): Unit = database.withTransaction {
         val items = requireDraft(id).items.toMutableList()
         val index = items.indexOfItem(itemId)
         val photo = items[index] as? ContentItem.Photo ?: error("该项不是照片")
         items[index] = photo.copy(caption = caption)
         database.writeMixedDraft(id, MixedDraft(items, itemId, 0), now())
+        if (photo.strokes.isNotEmpty()) readSavedPhoto(id, itemId)
+    }
+
+    override suspend fun editPhotoStrokes(id: DraftId, itemId: ItemId, strokes: List<PhotoStroke>): ContentItem.Photo =
+        database.withTransaction {
+            check(itemDao.updatePhotoStrokes(id.value, itemId.value, PhotoStrokeStorage.encode(strokes)) == 1) {
+                "当前可编辑草稿中找不到这张照片"
+            }
+            dao.touchDraft(id.value, now())
+            readSavedPhoto(id, itemId)
+        }
+
+    // 笔画和说明共享一行。提交前从正常读取路径取回整项，超过设备窗口时回滚本次修改。
+    private suspend fun readSavedPhoto(id: DraftId, itemId: ItemId): ContentItem.Photo = try {
+        itemDao.draftItem(id.value, itemId.value).asItem() as ContentItem.Photo
+    } catch (e: SQLiteBlobTooBigException) {
+        throw IllegalArgumentException("照片说明与标注合计过大，请缩短说明或减少笔画后重试", e)
     }
 
     override suspend fun openMixedDraft(id: DraftId): MixedDraft? = database.withTransaction {

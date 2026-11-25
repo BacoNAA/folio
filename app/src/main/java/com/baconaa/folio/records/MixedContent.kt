@@ -13,7 +13,9 @@ sealed interface ContentItem {
     val id: ItemId
 
     data class Text(override val id: ItemId, val text: String) : ContentItem
-    data class Photo(override val id: ItemId, val photoId: PhotoId, val caption: String = "") : ContentItem
+    data class Photo(
+        override val id: ItemId, val photoId: PhotoId, val caption: String = "", val strokes: List<PhotoStroke> = emptyList(),
+    ) : ContentItem
     data class Link(override val id: ItemId, val address: String = "", val title: String = "",
         val note: String = "", val screenshotId: PhotoId? = null) : ContentItem {
         val hasInput get() = address.isNotBlank() || title.isNotBlank() || note.isNotBlank() || screenshotId != null
@@ -60,6 +62,8 @@ interface MixedContentDrafts {
     suspend fun editChecklist(id: DraftId, itemId: ItemId, entries: List<ChecklistEntry>)
     suspend fun editTextItem(id: DraftId, itemId: ItemId, edit: TextEdit)
     suspend fun editPhotoCaption(id: DraftId, itemId: ItemId, caption: String)
+    /** 替换该草稿照片项的有序笔画，空列表清除标注。成功后返回可从草稿重读的照片项。 */
+    suspend fun editPhotoStrokes(id: DraftId, itemId: ItemId, strokes: List<PhotoStroke>): ContentItem.Photo
     suspend fun moveItem(id: DraftId, itemId: ItemId, direction: MoveDirection)
     suspend fun removeItem(id: DraftId, itemId: ItemId)
     /** 每份草稿可撤销最近一次移除；完成或放弃草稿后，该操作结束。 */
@@ -81,6 +85,7 @@ internal fun List<ContentItem>.photos() = filterIsInstance<ContentItem.Photo>().
 internal fun ContentSlot.asItem(): ContentItem {
     check(listOf(text, photoId, checklistJson, audioId, pdfId, videoId, linkAddress).count { it != null } == 1) { "内容项类型无效" }
     check((audioId == null) == (audioDurationMillis == null)) { "录音时长缺失或类型无效" }
+    check(photoStrokes == null || photoId != null) { "标注缺少对应的照片" }
     return when {
         linkAddress != null -> ContentItem.Link(ItemId(itemId), linkAddress, linkTitle.orEmpty(), linkNote.orEmpty(),
             linkScreenshotId?.let { PhotoId(UUID.fromString(it)) })
@@ -94,14 +99,15 @@ internal fun ContentSlot.asItem(): ContentItem {
             ItemId(itemId), AudioId(UUID.fromString(audioId)), checkNotNull(audioDurationMillis), caption,
         )
         checklistJson != null -> ContentItem.Checklist(ItemId(itemId), decodeChecklist(checklistJson))
-        photoId != null -> ContentItem.Photo(ItemId(itemId), PhotoId(UUID.fromString(photoId)), caption)
+        photoId != null -> ContentItem.Photo(ItemId(itemId), PhotoId(UUID.fromString(photoId)), caption, photoStrokes.orEmpty())
         else -> ContentItem.Text(ItemId(itemId), checkNotNull(text))
     }
 }
 
 internal fun ContentItem.asSlot(): ContentSlot = when (this) {
     is ContentItem.Text -> ContentSlot(id.value, text, null)
-    is ContentItem.Photo -> ContentSlot(id.value, null, photoId.value.toString(), caption)
+    is ContentItem.Photo -> ContentSlot(id.value, null, photoId.value.toString(), caption,
+        photoStrokes = strokes.takeIf { it.isNotEmpty() })
     is ContentItem.Link -> ContentSlot(id.value, null, null, linkAddress = address, linkTitle = title,
         linkNote = note, linkScreenshotId = screenshotId?.value?.toString())
     is ContentItem.Pdf -> ContentSlot(

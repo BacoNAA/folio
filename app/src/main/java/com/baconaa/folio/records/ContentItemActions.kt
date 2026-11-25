@@ -34,6 +34,10 @@ internal class ContentItemActions(
             removals.save(RemovedItem(
                 draftId.value, removed.asSlot(), index, previous?.id?.value, next?.id?.value, draft.cursorFor(removed),
             ))
+            if (removed is ContentItem.Photo && removed.strokes.isNotEmpty()) {
+                // 撤销行还带相邻项与光标。确认能完整读取后才能从原草稿移除照片。
+                checkNotNull(removals.get(draftId.value))
+            }
             val focus = next ?: previous
             database.writeMixedDraft(draftId, MixedDraft(items, focus?.id, draft.cursorFor(focus)), now())
         }

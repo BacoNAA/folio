@@ -43,7 +43,7 @@ internal interface RecordBrowsingDao {
     @Query("""SELECT i.recordId, i.itemId, substr(i.text, 1, 80) AS text,
               i.photoId, substr(i.caption, 1, 80) AS caption, i.checklistJson, i.audioId, i.audioDurationMillis,
               i.pdfId, i.pdfName, i.pdfSizeBytes, i.videoId, i.videoName, i.videoSizeBytes, i.videoDurationMillis,
-              i.linkAddress, i.linkTitle, NULL AS linkNote, NULL AS linkScreenshotId
+              i.linkAddress, i.linkTitle, NULL AS linkNote, NULL AS linkScreenshotId, NULL AS photoStrokes
               FROM record_items i JOIN text_records r ON r.id = i.recordId
               WHERE r.deletedAt IS NULL AND i.recordId IN (:ids) AND i.position IN
                 (SELECT position FROM record_items WHERE recordId = i.recordId AND """ + VISIBLE_PREVIEW_ITEM + """
