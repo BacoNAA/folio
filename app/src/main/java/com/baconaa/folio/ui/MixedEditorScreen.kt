@@ -50,7 +50,8 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
                 var menu by remember { mutableStateOf(false) }
                 Column {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(when (item) {
+                        Text(item.fieldName ?: when (item) {
+                            is ContentItem.EmptyMediaField -> item.field.type.label
                             is ContentItem.Text -> "文字"
                             is ContentItem.Photo -> "照片"
                             is ContentItem.Pdf -> "附件"
@@ -73,6 +74,14 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
                         }
                     }
                     when (item) {
+                        is ContentItem.EmptyMediaField -> FlowRow {
+                            if (item.field.type == TemplateFieldType.PHOTO) {
+                                OutlinedButton(onClick = { launchMedia("field-photo", item.id) }, enabled = structureEnabled) { Text("选择照片") }
+                            } else {
+                                OutlinedButton(onClick = { launchMedia("field-audio", item.id) }, enabled = structureEnabled) { Text("录制声音") }
+                                TextButton(onClick = { launchMedia("field-audio-file", item.id) }, enabled = structureEnabled) { Text("选择已有录音") }
+                            }
+                        }
                         is ContentItem.Text -> {
                             val focus = remember { FocusRequester() }
                             LaunchedEffect(editor.activeItemId, enabled) {
@@ -170,7 +179,8 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
             text = { Text(failure.message, Modifier.verticalScroll(rememberScrollState())) },
             confirmButton = { TextButton(onClick = {
                 model.dismissFileImportFailure()
-                chooseDocument(failure.type, failure.after)
+                if (failure.audioField != null) launchMedia("field-audio-file", failure.audioField)
+                else chooseDocument(failure.type, failure.after)
             }) { Text("重新选择") } },
             dismissButton = { TextButton(onClick = model::dismissFileImportFailure) { Text("继续编辑") } })
     }

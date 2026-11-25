@@ -75,7 +75,8 @@ class MainActivity : ComponentActivity() {
             pendingTarget = ExternalTarget(it.getString("draft"), it.getString("record"), it.getString("after"),
                 Page.valueOf(it.getString("return") ?: "Capture"), Page.valueOf(it.getString("origin") ?: "Records"),
                 it.readEventTime(), emptyInput = it.getString("empty-input")?.let(EmptyInput::valueOf),
-                placeBookId = it.getString("place-book"), groupId = it.getString("group"), linkItemId = it.getString("link-item"))
+                placeBookId = it.getString("place-book"), groupId = it.getString("group"), linkItemId = it.getString("link-item"),
+                templateFieldId = it.getString("template-field"))
             cameraPath = it.getString("camera")
         }
         model = ViewModelProvider(this, object : ViewModelProvider.Factory {
@@ -89,8 +90,8 @@ class MainActivity : ComponentActivity() {
         setContent { FolioApp(model, ::launchMedia, ::chooseDocument) }
     }
 
-    private fun chooseDocument(type: ImportType, after: ItemId?) {
-        model.prepareExternal(after) { target ->
+    private fun chooseDocument(type: ImportType, after: ItemId?, audioField: ItemId? = null) {
+        model.prepareExternal(after, templateField = audioField) { target ->
             pendingTarget = target
             try {
                 when (type) {
@@ -109,12 +110,18 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun launchMedia(kind: String, after: ItemId?) {
+        if (kind == "field-audio-file") {
+            chooseDocument(ImportType.AUDIO, null, after)
+            return
+        }
         val isScreenshot = kind == "link-screenshot"
-        model.prepareExternal(after.takeUnless { isScreenshot }, currentTime = kind != "photo", screenshotFor = after.takeIf { isScreenshot }) { target ->
+        val isField = kind == "field-photo" || kind == "field-audio"
+        model.prepareExternal(after.takeUnless { isScreenshot || isField }, currentTime = kind != "photo",
+            screenshotFor = after.takeIf { isScreenshot }, templateField = after.takeIf { isField }) { target ->
             pendingTarget = target
             try {
                 when (kind) {
-                    "photo" -> gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    "photo", "field-photo" -> gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                     "link-screenshot" -> screenshot.launch(arrayOf("image/*"))
                     "camera" -> {
                         val folder = File(cacheDir, "camera").apply { mkdirs() }
@@ -122,7 +129,7 @@ class MainActivity : ComponentActivity() {
                         cameraPath = file.absolutePath
                         camera.launch(FileProvider.getUriForFile(this, "$packageName.camera", file))
                     }
-                    "audio" -> microphone.launch(Manifest.permission.RECORD_AUDIO)
+                    "audio", "field-audio" -> microphone.launch(Manifest.permission.RECORD_AUDIO)
                 }
             } catch (_: Exception) {
                 pendingTarget = null
@@ -142,6 +149,7 @@ class MainActivity : ComponentActivity() {
             putString("place-book", target.placeBookId)
             putString("group", target.groupId)
             putString("link-item", target.linkItemId)
+            putString("template-field", target.templateFieldId)
             target.eventTime?.let { writeEventTime(it) }
         }) }
         super.onSaveInstanceState(outState)

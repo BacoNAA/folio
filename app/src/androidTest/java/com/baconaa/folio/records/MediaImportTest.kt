@@ -102,6 +102,22 @@ internal class MediaImportTest : AudioStoreFixture() {
         assertEquals(PreviewContentItem.Pdf(pdf.id, pdf.displayName), store.listRecentRecords().single().preview.items.single())
     }
 
+    @Test fun importedAudioFillsOnlyItsNamedFieldAndSurvivesReopen() = runBlocking {
+        val template = store.saveTemplate(null, "声音", listOf(TemplateField(TemplateFieldType.AUDIO, "采访原声")), emptySet())
+        val draft = store.startTemplateDraft(template.id, template.revision)
+        val field = store.openMixedDraft(draft)!!.items.single().id
+        val file = sample("tone-440.m4a")
+        val saved = store.importMedia(source(file), ImportType.AUDIO, draft, audioField = field).item as ContentItem.Audio
+        imported += saved
+        assertEquals(field, saved.id)
+        assertEquals("采访原声", saved.fieldName)
+        assertTrue(file.delete())
+        val record = store.completeMixedDraft(draft)
+        reopenDatabase()
+        assertEquals(listOf(saved), store.openRecordContent(record)!!.items)
+        assertEquals(saved.durationMillis, audioOriginals.inspect(saved.audioId).durationMillis)
+    }
+
     private fun renderedPage(uri: Uri): IntArray =
         PdfRenderer(context.contentResolver.openFileDescriptor(uri, "r")!!).use { document ->
             assertEquals(1, document.pageCount)

@@ -117,6 +117,7 @@ private fun CopyChoice(checked: Boolean, enabled: Boolean, modifier: Modifier = 
 }
 
 private fun ContentItem.copyLabel(): String = when (this) {
+    is ContentItem.EmptyMediaField -> field.name
     is ContentItem.Text -> "文字 · $text"
     is ContentItem.Checklist -> "清单 · " + entries.take(3).joinToString("、") { it.text }.let {
         if (entries.size > 3) "$it 等 ${entries.size} 项" else it

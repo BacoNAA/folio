@@ -169,6 +169,7 @@ fun eventTimeline(records: List<RecordCard>): EventTimeline {
 }
 
 private fun ContentSlot.asPreview(): PreviewContentItem = when (val item = asItem()) {
+    is ContentItem.EmptyMediaField -> error("空模板字段不能作为记录预览")
     is ContentItem.Text -> PreviewContentItem.Text(item.id, item.text)
     is ContentItem.Photo -> PreviewContentItem.Photo(item.id, item.photoId, item.caption)
     is ContentItem.Pdf -> PreviewContentItem.Pdf(item.id, item.displayName)

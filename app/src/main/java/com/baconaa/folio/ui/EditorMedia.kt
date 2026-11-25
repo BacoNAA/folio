@@ -64,7 +64,7 @@ class LocalEditorMedia(context: Context) : EditorMedia {
 data class ExternalTarget(val draftId: String?, val recordId: String?, val afterId: String?,
     val returnPage: Page, val detailOrigin: Page, val eventTime: com.baconaa.folio.records.EventTime? = null,
     val suggestPhotoTime: Boolean = false, val emptyInput: EmptyInput? = null, val placeBookId: String? = null,
-    val groupId: String? = null, val linkItemId: String? = null)
+    val groupId: String? = null, val linkItemId: String? = null, val templateFieldId: String? = null)
 
 enum class EmptyInput { Text, Checklist, Link }
 
@@ -72,6 +72,7 @@ data class PhotoTimeOffer(val time: com.baconaa.folio.records.EventTime.Exact, v
 
 sealed interface PendingAttachment {
     val after: ItemId?
-    data class Photo(val id: PhotoId, override val after: ItemId?, val suggestTime: Boolean) : PendingAttachment
-    data class Audio(val clip: AudioClip, override val after: ItemId?) : PendingAttachment
+    val field: ItemId?
+    data class Photo(val id: PhotoId, override val after: ItemId?, val suggestTime: Boolean, override val field: ItemId? = null) : PendingAttachment
+    data class Audio(val clip: AudioClip, override val after: ItemId?, override val field: ItemId? = null) : PendingAttachment
 }

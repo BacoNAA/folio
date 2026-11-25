@@ -124,7 +124,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                     }
                 }
                 if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                state.error?.takeIf { state.copySelection == null }?.let { error ->
+                state.error?.takeIf { state.copySelection == null && state.templateLibrary == null }?.let { error ->
                     val retry = when {
                         state.draftReadRetry != null -> model::retryDraftRead
                         state.page == Page.Detail -> model::retryDetail
@@ -151,6 +151,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                         .semantics { contentDescription = label }.testTag("quick-$kind"))
                                 }
                             }
+                            TextButton(onClick = model::openTemplates, enabled = !state.busy) { Text("记录模板") }
                             state.savedId?.let { id ->
                                 TextButton(onClick = { model.openRecord(id) }, modifier = Modifier.fillMaxWidth().padding(top = 24.dp)) {
                                     Text("已保存 · 查看")
@@ -244,6 +245,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                     TextButton(onClick = { deleteDialog = true }, enabled = !state.busy) { Text("删除") }
                                 }
                                 OutlinedButton(onClick = model::startRecordCopy, enabled = !state.busy) { Text("复制为新记录") }
+                                OutlinedButton(onClick = { model.editTemplate(extract = true) }, enabled = !state.busy) { Text("提取为模板") }
                                 state.drafts.firstOrNull { it.recordId == state.detailId }?.let { draft ->
                                     Text("另有未完成修改，当前显示上次完成的内容。", fontSize = 13.sp)
                                     TextButton(onClick = { model.resume(draft) }, enabled = !state.busy) { Text("继续未完成修改") }
@@ -292,6 +294,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                 }
             }
         }
+        state.templateLibrary?.let { TemplateLibraryDialog(it, model) }
         state.copySelection?.let { selection ->
             state.detail?.let { RecordCopyDialog(it, selection, model) }
         }

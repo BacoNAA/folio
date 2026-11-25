@@ -11,10 +11,12 @@ value class ItemId(val value: String)
 
 sealed interface ContentItem {
     val id: ItemId
+    val fieldName: String? get() = null
 
-    data class Text(override val id: ItemId, val text: String) : ContentItem
+    data class Text(override val id: ItemId, val text: String, override val fieldName: String? = null) : ContentItem
     data class Photo(
         override val id: ItemId, val photoId: PhotoId, val caption: String = "", val strokes: List<PhotoStroke> = emptyList(),
+        override val fieldName: String? = null,
     ) : ContentItem
     data class Link(override val id: ItemId, val address: String = "", val title: String = "",
         val note: String = "", val screenshotId: PhotoId? = null) : ContentItem {
@@ -29,10 +31,15 @@ sealed interface ContentItem {
     ) : ContentItem
     data class Audio(
         override val id: ItemId, val audioId: AudioId, val durationMillis: Long, val caption: String = "",
+        override val fieldName: String? = null,
     ) : ContentItem {
         init { require(durationMillis > 0) { "录音时长必须大于零" } }
     }
-    data class Checklist(override val id: ItemId, val entries: List<ChecklistEntry>) : ContentItem {
+    data class EmptyMediaField(override val id: ItemId, val field: TemplateField) : ContentItem {
+        init { require(field.type == TemplateFieldType.PHOTO || field.type == TemplateFieldType.AUDIO) }
+        override val fieldName get() = field.name
+    }
+    data class Checklist(override val id: ItemId, val entries: List<ChecklistEntry>, override val fieldName: String? = null) : ContentItem {
         init { entries.requireUniqueEntryIds() }
     }
 }
@@ -55,6 +62,8 @@ interface MixedContentDrafts {
     ): DraftId
     suspend fun insertAudio(id: DraftId, after: ItemId?, audio: AudioId, caption: String = ""): ItemId
     suspend fun editAudioCaption(id: DraftId, itemId: ItemId, caption: String)
+    suspend fun fillPhotoField(id: DraftId, field: ItemId, photo: PhotoId)
+    suspend fun fillAudioField(id: DraftId, field: ItemId, audio: AudioId)
     /** 新建必须至少有一条非空白事项；已有草稿可插入空清单继续编辑。 */
     suspend fun appendChecklist(id: DraftId?, entries: List<ChecklistEntry>, initialEventTime: EventTime? = null): DraftId
     suspend fun insertChecklist(id: DraftId, after: ItemId?, entries: List<ChecklistEntry>): ItemId
@@ -75,6 +84,7 @@ interface MixedContentDrafts {
 
 internal fun newItemId() = ItemId(UUID.randomUUID().toString())
 internal fun ContentItem.withId(id: ItemId): ContentItem = when (this) {
+    is ContentItem.EmptyMediaField -> copy(id = id)
     is ContentItem.Text -> copy(id = id)
     is ContentItem.Photo -> copy(id = id)
     is ContentItem.Link -> copy(id = id)
@@ -87,13 +97,14 @@ internal fun ContentItem.withId(id: ItemId): ContentItem = when (this) {
 internal fun ContentItem.searchText(): String? = when (this) {
     is ContentItem.Text -> text
     is ContentItem.Checklist -> entries.joinToString("\n") { it.text }
-    is ContentItem.Photo, is ContentItem.Audio, is ContentItem.Pdf, is ContentItem.Video, is ContentItem.Link -> null
+    is ContentItem.Photo, is ContentItem.Audio, is ContentItem.Pdf, is ContentItem.Video, is ContentItem.Link, is ContentItem.EmptyMediaField -> null
 }
 internal fun List<ContentItem>.body() = mapNotNull { it.searchText() }.joinToString("\n")
 internal fun List<ContentItem>.photos() = filterIsInstance<ContentItem.Photo>().map { it.photoId }
 
 internal fun ContentSlot.asItem(): ContentItem {
-    check(listOf(text, photoId, checklistJson, audioId, pdfId, videoId, linkAddress).count { it != null } == 1) { "内容项类型无效" }
+    check(listOf(text, photoId, checklistJson, audioId, pdfId, videoId, linkAddress, emptyFieldType).count { it != null } == 1) { "内容项类型无效" }
+    if (emptyFieldType != null) return TemplateField(emptyFieldType, checkNotNull(fieldName)).emptyItem(ItemId(itemId))
     check((audioId == null) == (audioDurationMillis == null)) { "录音时长缺失或类型无效" }
     check(photoStrokes == null || photoId != null) { "标注缺少对应的照片" }
     return when {
@@ -106,18 +117,19 @@ internal fun ContentSlot.asItem(): ContentItem {
             ItemId(itemId), PdfId(UUID.fromString(pdfId)), checkNotNull(pdfName), checkNotNull(pdfSizeBytes),
         )
         audioId != null -> ContentItem.Audio(
-            ItemId(itemId), AudioId(UUID.fromString(audioId)), checkNotNull(audioDurationMillis), caption,
+            ItemId(itemId), AudioId(UUID.fromString(audioId)), checkNotNull(audioDurationMillis), caption, fieldName,
         )
-        checklistJson != null -> ContentItem.Checklist(ItemId(itemId), decodeChecklist(checklistJson))
-        photoId != null -> ContentItem.Photo(ItemId(itemId), PhotoId(UUID.fromString(photoId)), caption, photoStrokes.orEmpty())
-        else -> ContentItem.Text(ItemId(itemId), checkNotNull(text))
+        checklistJson != null -> ContentItem.Checklist(ItemId(itemId), decodeChecklist(checklistJson), fieldName)
+        photoId != null -> ContentItem.Photo(ItemId(itemId), PhotoId(UUID.fromString(photoId)), caption, photoStrokes.orEmpty(), fieldName)
+        else -> ContentItem.Text(ItemId(itemId), checkNotNull(text), fieldName)
     }
 }
 
 internal fun ContentItem.asSlot(): ContentSlot = when (this) {
-    is ContentItem.Text -> ContentSlot(id.value, text, null)
+    is ContentItem.EmptyMediaField -> ContentSlot(id.value, null, null, fieldName = field.name, emptyFieldType = field.type)
+    is ContentItem.Text -> ContentSlot(id.value, text, null, fieldName = fieldName)
     is ContentItem.Photo -> ContentSlot(id.value, null, photoId.value.toString(), caption,
-        photoStrokes = strokes.takeIf { it.isNotEmpty() })
+        photoStrokes = strokes.takeIf { it.isNotEmpty() }, fieldName = fieldName)
     is ContentItem.Link -> ContentSlot(id.value, null, null, linkAddress = address, linkTitle = title,
         linkNote = note, linkScreenshotId = screenshotId?.value?.toString())
     is ContentItem.Pdf -> ContentSlot(
@@ -127,9 +139,9 @@ internal fun ContentItem.asSlot(): ContentSlot = when (this) {
         id.value, null, null, videoId = videoId.value.toString(), videoName = displayName,
         videoSizeBytes = sizeBytes, videoDurationMillis = durationMillis,
     )
-    is ContentItem.Checklist -> ContentSlot(id.value, null, null, checklistJson = encodeChecklist(entries))
+    is ContentItem.Checklist -> ContentSlot(id.value, null, null, checklistJson = encodeChecklist(entries), fieldName = fieldName)
     is ContentItem.Audio -> ContentSlot(
-        id.value, null, null, caption, audioId = audioId.value.toString(), audioDurationMillis = durationMillis,
+        id.value, null, null, caption, audioId = audioId.value.toString(), audioDurationMillis = durationMillis, fieldName = fieldName,
     )
 }
 
@@ -138,8 +150,8 @@ internal fun List<ContentItem>.indexOfItem(id: ItemId): Int =
 
 internal fun MixedDraft.withText(id: ItemId, edit: TextEdit): MixedDraft {
     val index = items.indexOfItem(id)
-    require(items[index] is ContentItem.Text) { "该项不是文字" }
-    val changed = items.toMutableList().apply { set(index, ContentItem.Text(id, edit.text)) }
+    val text = items[index] as? ContentItem.Text ?: error("该项不是文字")
+    val changed = items.toMutableList().apply { set(index, text.copy(text = edit.text)) }
     return copy(items = changed, activeItemId = id, cursor = edit.cursor)
 }
 
@@ -168,11 +180,20 @@ internal suspend fun FolioDatabase.loadMixedDraft(id: DraftId): MixedDraft? {
 internal suspend fun FolioDatabase.writeMixedDraft(id: DraftId, draft: MixedDraft, timestamp: Long) {
     val body = draft.items.body()
     val cursor = draft.activeItemId?.let { (draft.items.textStart(it) + draft.cursor).coerceAtMost(body.length) } ?: 0
-    val contentAt = timestamp.takeIf { draft.items.hasActualContent(body) }
+    val contentAt = timestamp.takeIf { draft.items.any { it.hasContent() } }
     check(textDao().updateDraft(id.value, body, cursor, draft.activeItemId?.value, timestamp, contentAt) == 1) { "草稿已不存在" }
     itemDao().replaceDraftItems(id.value, draft.items.map { it.asSlot() })
 }
 
-internal fun List<ContentItem>.hasActualContent(body: String): Boolean =
-    body.isNotBlank() || any { it is ContentItem.Photo || it is ContentItem.Audio || it is ContentItem.Pdf ||
-        it is ContentItem.Video || (it is ContentItem.Link && it.hasInput) }
+internal fun ContentItem.hasContent() = when (this) {
+    is ContentItem.Text -> text.isNotBlank()
+    is ContentItem.Checklist -> entries.any { it.text.isNotBlank() }
+    is ContentItem.Link -> hasInput
+    is ContentItem.EmptyMediaField -> false
+    else -> true
+}
+
+// 再编辑可以恢复空字段；预览和查找只读取写入具体类型列的实际值。
+internal fun ContentItem.asPublishedSlot(): ContentSlot = if (fieldName != null && !hasContent()) {
+    ContentSlot(id.value, null, null, fieldName = fieldName, emptyFieldType = checkNotNull(templateField()).type)
+} else asSlot()

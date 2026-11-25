@@ -32,7 +32,7 @@ internal interface RecordBrowsingDao {
                       (:link AND i.linkAddress IS NOT NULL) OR
                       (:checklist AND i.checklistJson IS NOT NULL))) OR
                   (:textOnly AND EXISTS(SELECT 1 FROM record_items i WHERE i.recordId = r.id AND i.text IS NOT NULL)
-                      AND NOT EXISTS(SELECT 1 FROM record_items i WHERE i.recordId = r.id AND i.text IS NULL)))
+                      AND NOT EXISTS(SELECT 1 FROM record_items i WHERE i.recordId = r.id AND i.text IS NULL AND i.emptyFieldType IS NULL)))
               AND """ + RECORD_TEXT_MATCH + " ORDER BY isPinned DESC, firstRecordedAt DESC, r.rowid DESC")
     suspend fun activeRecords(keyword: String, tagIds: List<String>, allTags: Boolean, starredOnly: Boolean, placeId: String?,
         peopleIds: List<String>, allPeople: Boolean, thingIds: List<String>, allThings: Boolean,
@@ -43,7 +43,7 @@ internal interface RecordBrowsingDao {
     @Query("""SELECT i.recordId, i.itemId, substr(i.text, 1, 80) AS text,
               i.photoId, substr(i.caption, 1, 80) AS caption, i.checklistJson, i.audioId, i.audioDurationMillis,
               i.pdfId, i.pdfName, i.pdfSizeBytes, i.videoId, i.videoName, i.videoSizeBytes, i.videoDurationMillis,
-              i.linkAddress, i.linkTitle, NULL AS linkNote, NULL AS linkScreenshotId, NULL AS photoStrokes
+              i.linkAddress, i.linkTitle, NULL AS linkNote, NULL AS linkScreenshotId, NULL AS photoStrokes, i.fieldName, i.emptyFieldType
               FROM record_items i JOIN text_records r ON r.id = i.recordId
               WHERE r.deletedAt IS NULL AND i.recordId IN (:ids) AND i.position IN
                 (SELECT position FROM record_items WHERE recordId = i.recordId AND """ + VISIBLE_PREVIEW_ITEM + """

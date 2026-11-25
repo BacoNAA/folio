@@ -36,6 +36,8 @@ internal data class ContentSlot(
     val linkNote: String? = null,
     val linkScreenshotId: String? = null,
     val photoStrokes: List<PhotoStroke>? = null,
+    val fieldName: String? = null,
+    val emptyFieldType: TemplateFieldType? = null,
 )
 
 @Entity(

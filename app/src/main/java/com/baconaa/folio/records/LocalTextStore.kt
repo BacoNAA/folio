@@ -28,6 +28,7 @@ class LocalTextStore internal constructor(
 ) : TextDrafts, PublishedTextRecords, MixedContentDrafts, MediaImports, RecordTrash, RecordTimeEditing, SeasonSettings, RecordMarking,
     RecordBrowsing by LocalRecordBrowsing(database), RecordGroups by LocalRecordGroups(database),
     RecordGroupGuides by LocalRecordGroupGuides(database), RecordTags by LocalRecordTags(database, now),
+    RecordTemplates by LocalRecordTemplates(database, now),
     RecordPlaces by LocalRecordPlaces(database, now), RecordObjects by LocalRecordObjects(database, now) {
     private val dao = database.textDao()
     private val itemDao = database.itemDao()
@@ -203,9 +204,10 @@ class LocalTextStore internal constructor(
     }
 
     override suspend fun importMedia(
-        source: Uri, type: ImportType, draftId: DraftId?, after: ItemId?, initialEventTime: EventTime?, initialPlaceId: PlaceId?,
+        source: Uri, type: ImportType, draftId: DraftId?, after: ItemId?, initialEventTime: EventTime?, initialPlaceId: PlaceId?, audioField: ItemId?,
     ): ImportedItem = withContext(Dispatchers.IO) {
         require(draftId != null || after == null) { "新草稿没有可供插入的内容项" }
+        require(audioField == null || (draftId != null && after == null && type == ImportType.AUDIO)) { "请选择草稿中的空录音字段" }
         try {
             importCleanup.run()
             importCleanup.importing(ImportAsset.entries.single { it.fileType == type }) { assetId ->
@@ -213,9 +215,12 @@ class LocalTextStore internal constructor(
                 database.withTransaction {
                     val id = draftId ?: createDraft(initialEventTime)
                     if (draftId == null && initialPlaceId != null) selectDraftPlace(id, initialPlaceId)
-                    insertItems(id, after, listOf(item), 0)
+                    val saved = if (audioField != null) fillMediaField(id, audioField, item) else {
+                        insertItems(id, after, listOf(item), 0)
+                        item
+                    }
                     importQueue.remove(assetId.toString())
-                    ImportedItem(id, item)
+                    ImportedItem(id, saved)
                 }
             }
         } catch (failure: SQLiteFullException) {
@@ -294,10 +299,36 @@ class LocalTextStore internal constructor(
         database.withTransaction {
             val items = requireDraft(id).items.toMutableList()
             val index = items.indexOfItem(itemId)
-            require(items[index] is ContentItem.Checklist) { "该项不是清单" }
-            items[index] = ContentItem.Checklist(itemId, entries.toList())
+            val checklist = items[index] as? ContentItem.Checklist ?: error("该项不是清单")
+            items[index] = checklist.copy(entries = entries.toList())
             database.writeMixedDraft(id, MixedDraft(items, itemId, 0), now())
         }
+
+    override suspend fun fillPhotoField(id: DraftId, field: ItemId, photo: PhotoId) {
+        database.withTransaction {
+            requireReadableOriginals(listOf(photo))
+            fillMediaField(id, field, ContentItem.Photo(field, photo))
+        }
+    }
+
+    override suspend fun fillAudioField(id: DraftId, field: ItemId, audio: AudioId) {
+        database.withTransaction { fillMediaField(id, field, audioItem(audio, "")) }
+    }
+
+    private suspend fun fillMediaField(id: DraftId, field: ItemId, item: ContentItem): ContentItem {
+        val draft = requireDraft(id)
+        val index = draft.items.indexOfItem(field)
+        val empty = draft.items[index] as? ContentItem.EmptyMediaField ?: error("该字段已填写或已移除")
+        require(empty.field.type == item.templateField()?.type) { "所选媒体与字段类型不符" }
+        val filled = when (item) {
+            is ContentItem.Photo -> item.copy(id = field, fieldName = empty.fieldName)
+            is ContentItem.Audio -> item.copy(id = field, fieldName = empty.fieldName)
+            else -> error("请选择照片或录音")
+        }
+        val items = draft.items.toMutableList().apply { set(index, filled) }
+        database.writeMixedDraft(id, MixedDraft(items, field, 0), now())
+        return filled
+    }
 
     private suspend fun insertItems(id: DraftId, after: ItemId?, added: List<ContentItem>, cursor: Int) {
         val draft = requireDraft(id)
@@ -388,7 +419,7 @@ class LocalTextStore internal constructor(
             val items = selection.itemIds.map { id ->
                 requireNotNull(byId[id]) { "所选内容不属于来源记录。" }.copyForNewDraft(selection.keepChecked)
             }
-            require(items.hasActualContent(items.body())) { "请至少选择一项有内容的记录项。" }
+            require(items.any { it.hasContent() }) { "请至少选择一项有内容的记录项。" }
             val tags = content.tags.map { it.id }.filter { it in selection.tagIds }
             val objects = content.objects.map { it.id }.filter { it in selection.objectIds }
             require(tags.size == selection.tagIds.size && objects.size == selection.objectIds.size &&
@@ -500,13 +531,13 @@ class LocalTextStore internal constructor(
             dao.completedRecordId(id.value)?.let { return@withTransaction RecordId(it) }
             val draft = checkNotNull(dao.draft(id.value)) { "草稿已不存在" }
             val items = finalState(requireDraft(id)).items
-            val body = items.body()
+            val body = items.filter { it.fieldName == null || it.hasContent() }.body()
             val links = items.filterIsInstance<ContentItem.Link>()
             links.firstOrNull { webAddress(it.address) == null }?.let { throw InvalidLinkAddress(it.id, it.address) }
-            require(items.hasActualContent(body)) { "请填写文字、清单事项或添加媒体后再完成" }
+            require(items.any { it.hasContent() }) { "请填写文字、清单事项或添加媒体后再完成" }
             requireReadableMedia(items)
             queueDraftMedia(id.value)
-            val slots = items.map { it.asSlot() }
+            val slots = items.map { it.asPublishedSlot() }
             val tags = tagDao.draftTags(id.value).map { it.id }
             val objects = objectDao.draftObjects(id.value).map { it.row.id }
             val place = placeDao.draftPlace(id.value)?.id
@@ -562,11 +593,12 @@ class LocalTextStore internal constructor(
 
     private fun String.asPhotoId() = PhotoId(UUID.fromString(this))
 
-    private suspend fun recordContent(row: RecordRow) = RecordContent(
-        itemDao.recordItems(row.id).map { it.asItem() }, row.times(), row.marks,
-        tagDao.recordTags(row.id).map { it.asTag() }, placeDao.recordPlace(row.id)?.asPlace(),
-        objectDao.recordObjects(row.id).map { it.asObject() }, row.title, row.revision,
-    )
+    private suspend fun recordContent(row: RecordRow): RecordContent {
+        val items = itemDao.recordItems(row.id).map { it.asItem() }
+        return RecordContent(items.filter { it.fieldName == null || it.hasContent() }, row.times(), row.marks,
+            tagDao.recordTags(row.id).map { it.asTag() }, placeDao.recordPlace(row.id)?.asPlace(),
+            objectDao.recordObjects(row.id).map { it.asObject() }, row.title, row.revision, items.mapNotNull { it.templateField() })
+    }
 
     override suspend fun openRecordContent(id: RecordId): RecordContent? = database.withTransaction {
         dao.activeRecord(id.value)?.let { recordContent(it) }

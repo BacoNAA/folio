@@ -164,6 +164,45 @@ class DocumentImportNavigationTest {
         play(audio)
     }
 
+    @Test fun pickingAudioForATemplateFieldKeepsItsPositionThroughCancelAndRetry() {
+        val template = runBlocking { store.saveTemplate(null, "声音选取${System.nanoTime()}",
+            listOf(TemplateField(TemplateFieldType.AUDIO, "街声"), TemplateField(TemplateFieldType.TEXT, "感受")), emptySet()) }
+        try {
+            val id = runBlocking { store.startTemplateDraft(template.id, template.revision) }
+            draftId = id
+            val old = runBlocking { store.openMixedDraft(id)!!.items }
+            sample("bad.mp3", "audio/mpeg", "窗框凭证.pdf")
+            val source = sample("tone-440.m4a", "audio/mp4")
+            resumeDraft()
+            editorScroll(hasText("选择已有录音"))
+            startAtRoot = true
+            compose.onNodeWithText("选择已有录音").performClick()
+            cancelPicker()
+            startAtRoot = false
+            assertEquals(old, runBlocking { store.openMixedDraft(id)!!.items })
+            compose.onNodeWithText("选择已有录音").performClick()
+            pickFile("bad.mp3")
+            waitText("导入失败")
+            compose.onNodeWithText("重新选择").performClick()
+            pickFile("tone-440.m4a")
+            waitText("试听")
+            val items = runBlocking { store.openMixedDraft(id)!!.items }
+            val audio = items.first() as ContentItem.Audio
+            assertEquals(old.map { it.id }, items.map { it.id })
+            assertEquals("街声", audio.fieldName)
+            publish("试听")
+            assertEquals(1, context.contentResolver.delete(source, null, null))
+            assertEquals(listOf(audio), runBlocking { store.openRecordContent(recordId!!)!!.items })
+            play(audio)
+        } finally {
+            // 此用例使用真实 Activity 的库。只清理本例创建的模板，草稿和记录由共同清理步骤处理。
+            context.openOrCreateDatabase("folio.db", 0, null).use { db ->
+                db.setForeignKeyConstraintsEnabled(true)
+                db.delete("record_templates", "id = ?", arrayOf(template.id.value))
+            }
+        }
+    }
+
     @Test fun pickedM4aPlaysFromTheReopenedRecordAfterDeletingTheSource() {
         val before = runBlocking { store.listDrafts().map { it.id } }
         val source = sample("tone-440.m4a", "audio/mp4")

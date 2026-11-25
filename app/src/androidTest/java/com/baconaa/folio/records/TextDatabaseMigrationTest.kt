@@ -868,6 +868,32 @@ class TextDatabaseMigrationTest {
         } finally { db.close() }
     }
 
+    @Test fun versionTwentyThreeKeepsAnnotatedPhotoAndDraftWhileAddingTemplates() = runBlocking {
+        val photo = PhotoId(UUID.randomUUID())
+        val strokes = listOf(PhotoStroke(listOf(PhotoPoint(0.4f, 0.2f))))
+        createDatabase(23) { sql ->
+            sql.execSQL("INSERT INTO text_records(id,sourceDraftId,body,firstRecordedAt,modifiedAt) VALUES ('cafe','source','',10,20)")
+            sql.execSQL("INSERT INTO record_items(recordId,position,itemId,photoId,caption,photoStrokes) VALUES ('cafe',0,'p',?,'原菜单',?)",
+                arrayOf(photo.value.toString(), PhotoStrokeStorage.encode(strokes)))
+            sql.execSQL("INSERT INTO text_drafts(id,body,cursor,firstRecordedAt,lastEditedAt,activeItemId) VALUES ('d','旧感受',2,15,25,'t')")
+            sql.execSQL("INSERT INTO draft_items(draftId,position,itemId,text) VALUES ('d',0,'t','旧感受')")
+            sql.execSQL("INSERT INTO removed_draft_items(draftId,position,cursor,itemId,text) VALUES ('d',1,0,'u','旧备忘')")
+        }
+        val db = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(db, context)
+            val original = store.openRecordContent(RecordId("cafe"))!!
+            assertEquals(ContentItem.Photo(ItemId("p"), photo, "原菜单", strokes), original.items.single())
+            assertTrue(store.listTemplates().isEmpty())
+            val template = store.saveTemplate(null, "探店", original.templateFields, emptySet())
+            val fresh = store.startTemplateDraft(template.id, template.revision)
+            assertTrue(store.openDraftPhotos(fresh)!!.isEmpty())
+            assertEquals(TextEdit("旧感受", 2), store.openDraft(DraftId("d")))
+            assertTrue(store.undoRemoval(DraftId("d")))
+            assertEquals(listOf("t","u"), store.openMixedDraft(DraftId("d"))!!.items.map { it.id.value })
+        } finally { db.close() }
+    }
+
     private fun createDatabase(version: Int, seed: (SQLiteDatabase) -> Unit) {
         val schemaFile = "${FolioDatabase::class.java.name}/$version.json"
         val schema = instrumentation.context.assets.open(schemaFile).bufferedReader().use {
