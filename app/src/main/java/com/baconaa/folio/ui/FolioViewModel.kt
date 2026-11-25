@@ -99,6 +99,7 @@ data class FolioState(
     val possibleResults: List<RecordCard> = emptyList(),
     val detailId: RecordId? = null,
     val detail: RecordContent? = null,
+    val copySelection: RecordCopySelection? = null,
     val detailOrigin: Page = Page.Records,
     val savedId: RecordId? = null,
     val busy: Boolean = false,
@@ -675,6 +676,41 @@ class FolioViewModel(
             val draftId = withContext(Dispatchers.IO) { drafts.editRecord(id) }
             readEditor(draftId, id, Page.Detail)
         }
+    }
+
+    fun startRecordCopy() {
+        val content = state.detail ?: return
+        if (state.busy || state.page != Page.Detail) return
+        state = state.copy(copySelection = RecordCopySelection(placeId = content.place?.id,
+            tagIds = content.tags.map { it.id }.toSet(), objectIds = content.objects.map { it.id }.toSet()), error = null)
+    }
+
+    fun changeRecordCopy(selection: RecordCopySelection?) {
+        if (!state.busy && state.copySelection != null) state = state.copy(copySelection = selection, error = null)
+    }
+
+    fun createRecordCopy() = runAction("副本草稿创建失败，请重试。") {
+        val source = state.detailId ?: return@runAction
+        val revision = state.detail?.revision ?: return@runAction
+        val selection = state.copySelection ?: return@runAction
+        val id = try {
+            withContext(Dispatchers.IO) { drafts.copyRecordToDraft(source, revision, selection) }
+        } catch (_: CopySourceChanged) {
+            state = state.copy(copySelection = null)
+            showDetail(source, state.detailOrigin)
+            if (state.detail != null) state = state.copy(notice = "来源已更新，请重新选择要复制的内容。")
+            return@runAction
+        } catch (missing: CopyMediaUnavailable) {
+            state = state.copy(error = missing.message)
+            return@runAction
+        } catch (invalid: IllegalArgumentException) {
+            state = state.copy(error = invalid.message ?: "请重新选择要复制的内容。")
+            return@runAction
+        }
+        // 草稿已提交。后续读取失败时重开同一份，也可从「继续草稿」找回。
+        state = state.copy(page = Page.Editor, copySelection = null, savedId = null, saveError = null,
+            editor = RecordEditor(draftId = id, returnPage = Page.Records, needsReload = true))
+        reloadCurrent()
     }
 
     private suspend fun readEditor(id: DraftId, recordId: RecordId?, origin: Page) {
@@ -1330,13 +1366,3 @@ class FolioViewModel(
 }
 
 private fun TextFieldValue.asEdit() = TextEdit(text, selection.end.coerceIn(0, text.length))
-
-private fun ContentItem.withId(id: ItemId): ContentItem = when (this) {
-    is ContentItem.Text -> copy(id = id)
-    is ContentItem.Photo -> copy(id = id)
-    is ContentItem.Link -> copy(id = id)
-    is ContentItem.Pdf -> copy(id = id)
-    is ContentItem.Video -> copy(id = id)
-    is ContentItem.Audio -> copy(id = id)
-    is ContentItem.Checklist -> copy(id = id)
-}

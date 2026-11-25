@@ -36,7 +36,7 @@ internal fun Photo(id: PhotoId, thumbnail: Boolean = false, thumbnailDescription
     var expanded by rememberSaveable { mutableStateOf(false) }
     LoadedPhoto(id, thumbnail) { photo ->
         if (thumbnail) {
-            PhotoCanvas(photo, emptyList(), Modifier.size(64.dp).semantics { contentDescription = thumbnailDescription }, crop = true)
+            PhotoCanvas(photo, strokes, Modifier.size(64.dp).semantics { contentDescription = thumbnailDescription }, crop = true)
         } else {
             Box(Modifier.fillMaxWidth().heightIn(max = 320.dp).clickable { expanded = true }
                 .semantics { contentDescription = "记录中的照片，点击放大" }, contentAlignment = Alignment.Center) {

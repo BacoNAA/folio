@@ -74,6 +74,16 @@ interface MixedContentDrafts {
 }
 
 internal fun newItemId() = ItemId(UUID.randomUUID().toString())
+internal fun ContentItem.withId(id: ItemId): ContentItem = when (this) {
+    is ContentItem.Text -> copy(id = id)
+    is ContentItem.Photo -> copy(id = id)
+    is ContentItem.Link -> copy(id = id)
+    is ContentItem.Pdf -> copy(id = id)
+    is ContentItem.Video -> copy(id = id)
+    is ContentItem.Audio -> copy(id = id)
+    is ContentItem.Checklist -> copy(id = id)
+}
+
 internal fun ContentItem.searchText(): String? = when (this) {
     is ContentItem.Text -> text
     is ContentItem.Checklist -> entries.joinToString("\n") { it.text }

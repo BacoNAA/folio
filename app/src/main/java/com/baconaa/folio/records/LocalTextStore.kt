@@ -376,6 +376,32 @@ class LocalTextStore internal constructor(
         draftId
     }
 
+    override suspend fun copyRecordToDraft(source: RecordId, expectedRevision: Long, selection: RecordCopySelection): DraftId =
+        database.withTransaction {
+            val row = dao.activeRecord(source.value)
+            if (row == null || row.revision != expectedRevision) throw CopySourceChanged()
+            require(selection.itemIds.isNotEmpty() && selection.itemIds.distinct().size == selection.itemIds.size) {
+                "请选择要复制的内容，每项只能选择一次。"
+            }
+            val content = recordContent(row)
+            val byId = content.items.associateBy { it.id }
+            val items = selection.itemIds.map { id ->
+                requireNotNull(byId[id]) { "所选内容不属于来源记录。" }.copyForNewDraft(selection.keepChecked)
+            }
+            require(items.hasActualContent(items.body())) { "请至少选择一项有内容的记录项。" }
+            val tags = content.tags.map { it.id }.filter { it in selection.tagIds }
+            val objects = content.objects.map { it.id }.filter { it in selection.objectIds }
+            require(tags.size == selection.tagIds.size && objects.size == selection.objectIds.size &&
+                (selection.placeId == null || selection.placeId == content.place?.id)) { "所选线索不属于来源记录。" }
+            try { requireReadableMedia(items) } catch (failure: IOException) { throw CopyMediaUnavailable(failure) }
+            val id = createDraft(content.times.eventTime.takeIf { selection.keepEventTime }, content.title.takeIf { selection.keepTitle })
+            database.writeMixedDraft(id, MixedDraft(items, items.first().id, 0), now())
+            tagDao.replaceDraftTags(id.value, tags.map { it.value })
+            objectDao.replaceDraftObjects(id.value, objects.map { it.value })
+            placeDao.replaceDraftPlace(id.value, selection.placeId?.value)
+            id
+        }
+
     override suspend fun discardDraft(id: DraftId) {
         database.withTransaction {
             if (dao.draft(id.value) != null) {
@@ -458,6 +484,17 @@ class LocalTextStore internal constructor(
     override suspend fun completeMixedDraft(id: DraftId, itemId: ItemId, finalEdit: TextEdit) =
         publish(id) { it.withText(itemId, finalEdit) }
 
+    private fun requireReadableMedia(items: List<ContentItem>) {
+        requireReadableOriginals(items.photos() + items.filterIsInstance<ContentItem.Link>().mapNotNull { it.screenshotId })
+        items.filterIsInstance<ContentItem.Pdf>().forEach(importedOriginals::verify)
+        items.filterIsInstance<ContentItem.Video>().forEach(importedOriginals::videoSource)
+        for (audio in items.filterIsInstance<ContentItem.Audio>()) {
+            if (audioOriginals.inspect(audio.audioId).durationMillis != audio.durationMillis) {
+                throw IOException("录音原件已改变，请重新添加")
+            }
+        }
+    }
+
     private suspend fun publish(id: DraftId, finalState: (MixedDraft) -> MixedDraft): RecordId {
         val result = database.withTransaction {
             dao.completedRecordId(id.value)?.let { return@withTransaction RecordId(it) }
@@ -465,17 +502,9 @@ class LocalTextStore internal constructor(
             val items = finalState(requireDraft(id)).items
             val body = items.body()
             val links = items.filterIsInstance<ContentItem.Link>()
-            val audios = items.filterIsInstance<ContentItem.Audio>()
             links.firstOrNull { webAddress(it.address) == null }?.let { throw InvalidLinkAddress(it.id, it.address) }
             require(items.hasActualContent(body)) { "请填写文字、清单事项或添加媒体后再完成" }
-            requireReadableOriginals(items.photos() + links.mapNotNull { it.screenshotId })
-            items.filterIsInstance<ContentItem.Pdf>().forEach(importedOriginals::verify)
-            items.filterIsInstance<ContentItem.Video>().forEach(importedOriginals::videoSource)
-            for (audio in audios) {
-                if (audioOriginals.inspect(audio.audioId).durationMillis != audio.durationMillis) {
-                    throw IOException("录音原件已改变，请重新添加")
-                }
-            }
+            requireReadableMedia(items)
             queueDraftMedia(id.value)
             val slots = items.map { it.asSlot() }
             val tags = tagDao.draftTags(id.value).map { it.id }
@@ -533,11 +562,14 @@ class LocalTextStore internal constructor(
 
     private fun String.asPhotoId() = PhotoId(UUID.fromString(this))
 
+    private suspend fun recordContent(row: RecordRow) = RecordContent(
+        itemDao.recordItems(row.id).map { it.asItem() }, row.times(), row.marks,
+        tagDao.recordTags(row.id).map { it.asTag() }, placeDao.recordPlace(row.id)?.asPlace(),
+        objectDao.recordObjects(row.id).map { it.asObject() }, row.title, row.revision,
+    )
+
     override suspend fun openRecordContent(id: RecordId): RecordContent? = database.withTransaction {
-        val record = dao.activeRecord(id.value) ?: return@withTransaction null
-        RecordContent(itemDao.recordItems(id.value).map { it.asItem() }, record.times(), record.marks,
-            tagDao.recordTags(id.value).map { it.asTag() }, placeDao.recordPlace(id.value)?.asPlace(),
-            objectDao.recordObjects(id.value).map { it.asObject() }, record.title)
+        dao.activeRecord(id.value)?.let { recordContent(it) }
     }
 
     override suspend fun openRecord(id: RecordId): String? = dao.recordBody(id.value)
@@ -560,12 +592,7 @@ class LocalTextStore internal constructor(
 
     override suspend fun openTrashRecord(id: RecordId): TrashedRecord? = database.withTransaction {
         val record = trashDao.trashedRecord(id.value) ?: return@withTransaction null
-        TrashedRecord(
-            id, RecordContent(itemDao.recordItems(id.value).map { it.asItem() }, record.times(), record.marks,
-                tagDao.recordTags(id.value).map { it.asTag() }, placeDao.recordPlace(id.value)?.asPlace(),
-                objectDao.recordObjects(id.value).map { it.asObject() }, record.title),
-            checkNotNull(record.deletedAt), trashDao.hasDraft(id.value),
-        )
+        TrashedRecord(id, recordContent(record), checkNotNull(record.deletedAt), trashDao.hasDraft(id.value))
     }
 
     override suspend fun deletePermanently(id: RecordId): PermanentDeletionResult {

@@ -704,6 +704,12 @@ class TextDatabaseMigrationTest {
                 val sound = trip.items.last() as ContentItem.Audio
                 assertEquals(audio.durationMillis, sound.durationMillis)
                 assertArrayEquals(audioBytes, originals.openOriginal(sound.audioId).use { it.readBytes() })
+                val selected = listOf(sound, trip.items[1] as ContentItem.Photo)
+                val copy = store.copyRecordToDraft(RecordId("trip"), trip.revision, RecordCopySelection(selected.map { it.id }))
+                val items = store.openMixedDraft(copy)!!.items
+                assertEquals(selected, items.mapIndexed { i, item -> item.withId(selected[i].id) })
+                assertTrue(items.none { item -> trip.items.any { it.id == item.id } })
+                store.discardDraft(copy)
                 assertEquals(setOf(DraftId("edit"), DraftId("rain")), store.listDrafts().map { it.id }.toSet())
                 assertEquals(ItemId("more"), store.openMixedDraft(DraftId("edit"))!!.activeItemId)
                 assertTrue(store.search("补记山路").isEmpty())

@@ -124,7 +124,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                     }
                 }
                 if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                state.error?.let { error ->
+                state.error?.takeIf { state.copySelection == null }?.let { error ->
                     val retry = when {
                         state.draftReadRetry != null -> model::retryDraftRead
                         state.page == Page.Detail -> model::retryDetail
@@ -243,6 +243,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                         enabled = !state.busy, label = { Text(if (content.marks.isPinned) "已置顶" else "置顶") })
                                     TextButton(onClick = { deleteDialog = true }, enabled = !state.busy) { Text("删除") }
                                 }
+                                OutlinedButton(onClick = model::startRecordCopy, enabled = !state.busy) { Text("复制为新记录") }
                                 state.drafts.firstOrNull { it.recordId == state.detailId }?.let { draft ->
                                     Text("另有未完成修改，当前显示上次完成的内容。", fontSize = 13.sp)
                                     TextButton(onClick = { model.resume(draft) }, enabled = !state.busy) { Text("继续未完成修改") }
@@ -290,6 +291,9 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                     }
                 }
             }
+        }
+        state.copySelection?.let { selection ->
+            state.detail?.let { RecordCopyDialog(it, selection, model) }
         }
         if (deleteDialog) AlertDialog(onDismissRequest = { deleteDialog = false }, title = { Text("移入回收站？") },
             text = { Text("正式内容和这条记录的未完成修改会一起保留，可在回收站恢复。") },
