@@ -268,6 +268,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     OutlinedButton(onClick = { model.startTransfer(split = false) }, enabled = !state.busy) { Text("复制为新记录") }
                                     OutlinedButton(onClick = { model.startTransfer(split = true) }, enabled = !state.busy && pending == null) { Text("拆分记录") }
+                                    state.detailId?.let { RelationButton(it, model) }
                                     OutlinedButton(onClick = { model.editTemplate(extract = true) }, enabled = !state.busy) { Text("提取为模板") }
                                 }
                             }

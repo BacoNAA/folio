@@ -28,6 +28,7 @@ class LocalTextStore internal constructor(
 ) : TextDrafts, PublishedTextRecords, MixedContentDrafts, MediaImports, RecordTrash, RecordTimeEditing, SeasonSettings, RecordMarking,
     RecordBrowsing by LocalRecordBrowsing(database), RecordGroups by LocalRecordGroups(database),
     RecordGroupGuides by LocalRecordGroupGuides(database), RecordTags by LocalRecordTags(database, now),
+    RecordRelations by LocalRecordRelations(database),
     RecordChapters by LocalRecordChapters(database),
     RecordTemplates by LocalRecordTemplates(database, now),
     RecordPlaces by LocalRecordPlaces(database, now), RecordObjects by LocalRecordObjects(database, now) {

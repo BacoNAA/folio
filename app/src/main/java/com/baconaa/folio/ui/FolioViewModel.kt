@@ -170,6 +170,12 @@ class FolioViewModel(
 ) : ViewModel() {
     var state by mutableStateOf(FolioState())
         private set
+    private val relations = published as? RecordRelations ?: mixed as? RecordRelations
+    suspend fun relationChoices(source: RecordId) = withContext(Dispatchers.IO) { requireNotNull(relations).relationChoices(source) }
+    suspend fun changeRelation(source: RecordId, previous: RecordId?, next: RecordId?) = withContext(Dispatchers.IO) {
+        requireNotNull(relations).changeRelation(source, previous, next)
+    }
+
     private val chapters = published as? RecordChapters ?: mixed as? RecordChapters
     suspend fun chapterPhotos() = withContext(Dispatchers.IO) { requireNotNull(chapters).chapterPhotos() }
     suspend fun saveChapter(id: RecordGroupId, original: ChapterProfile?, profile: ChapterProfile) {
