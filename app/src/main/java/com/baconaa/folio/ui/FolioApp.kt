@@ -244,21 +244,21 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                         enabled = !state.busy, label = { Text(if (content.marks.isPinned) "已置顶" else "置顶") })
                                     TextButton(onClick = { deleteDialog = true }, enabled = !state.busy) { Text("删除") }
                                 }
-                                OutlinedButton(onClick = { model.startTransfer(split = false) }, enabled = !state.busy) { Text("复制为新记录") }
                                 val pending = state.drafts.firstOrNull { it.recordId == state.detailId || it.splitSource == state.detailId }
-                                OutlinedButton(onClick = { model.startTransfer(split = true) }, enabled = !state.busy && pending == null) { Text("拆分记录") }
-                                OutlinedButton(onClick = { model.editTemplate(extract = true) }, enabled = !state.busy) { Text("提取为模板") }
                                 pending?.let { draft ->
                                     if (draft.splitSource != null) Text("已有拆分草稿。完成或放弃后可再次编辑、拆分。", fontSize = 13.sp)
-                                    else {
-                                        Text("另有未完成修改，当前显示上次完成的内容。", fontSize = 13.sp)
-                                        Text("完成或放弃草稿后可拆分。", fontSize = 13.sp)
-                                    }
+                                    else Text("另有未完成修改，当前显示上次完成的内容。", fontSize = 13.sp)
                                     TextButton(onClick = { model.resume(draft) }, enabled = !state.busy) {
                                         Text(if (draft.splitSource != null) "继续拆分草稿" else "继续未完成修改")
                                     }
                                 }
                                 RecordContents(content, model)
+                                if (pending?.recordId != null) Text("完成或放弃草稿后可拆分。", fontSize = 13.sp)
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedButton(onClick = { model.startTransfer(split = false) }, enabled = !state.busy) { Text("复制为新记录") }
+                                    OutlinedButton(onClick = { model.startTransfer(split = true) }, enabled = !state.busy && pending == null) { Text("拆分记录") }
+                                    OutlinedButton(onClick = { model.editTemplate(extract = true) }, enabled = !state.busy) { Text("提取为模板") }
+                                }
                             }
                         }
                         Page.Places -> PlacesScreen(model, placesScroll)
