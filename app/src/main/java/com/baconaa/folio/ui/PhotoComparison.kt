@@ -30,7 +30,7 @@ internal fun PhotoComparisonScreen(model: FolioViewModel) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(if (left) "左侧照片" else "右侧照片", style = MaterialTheme.typography.titleSmall)
                     if (ref != null) key(ref) {
-                        ReadComparisonData(ref, { model.readComparisonRecord(ref.record) }) { record ->
+                        ReadLocalData(ref, { model.readSourceRecord(ref.record) }) { record ->
                             val item = record?.items?.filterIsInstance<ContentItem.Photo>()?.find { it.id == ref.item }
                             if (record == null || item == null) Text("来源照片已移除或在回收站中")
                             else {
@@ -68,7 +68,7 @@ private fun ComparisonPicker(model: FolioViewModel, scope: RecordObject?, close:
             val selected = recordId
             if (selected == null) {
                 OutlinedTextField(search, { search = it }, label = { Text("查找有照片的记录") }, singleLine = true)
-                ReadComparisonData(search to scope?.id, { model.comparisonSources(search, scope) }) { records ->
+                ReadLocalData(search to scope?.id, { model.comparisonSources(search, scope) }) { records ->
                     if (records.isEmpty()) Text("没有符合条件的照片记录")
                     LazyColumn(Modifier.heightIn(max = 360.dp)) {
                         items(records, key = { it.id.value }) { record ->
@@ -80,7 +80,7 @@ private fun ComparisonPicker(model: FolioViewModel, scope: RecordObject?, close:
                 }
             } else {
                 TextButton(onClick = { recordId = null }) { Text("重新选择记录") }
-                ReadComparisonData(selected, { model.readComparisonRecord(RecordId(selected)) }) { record ->
+                ReadLocalData(selected, { model.readSourceRecord(RecordId(selected)) }) { record ->
                     val photos = record?.items?.filterIsInstance<ContentItem.Photo>().orEmpty()
                     if (photos.isEmpty()) Text("这条记录的照片已不可选")
                     LazyColumn(Modifier.heightIn(max = 360.dp)) {
@@ -99,7 +99,7 @@ private fun ComparisonPicker(model: FolioViewModel, scope: RecordObject?, close:
 }
 
 @Composable
-private fun <T> ReadComparisonData(key: Any?, read: suspend () -> T, show: @Composable (T) -> Unit) {
+internal fun <T> ReadLocalData(key: Any?, read: suspend () -> T, error: String = "照片来源读取失败。", show: @Composable (T) -> Unit) {
     var attempt by rememberSaveable { mutableIntStateOf(0) }
     var result by remember(key, attempt) { mutableStateOf<Result<T>?>(null) }
     LaunchedEffect(key, attempt) {
@@ -110,7 +110,7 @@ private fun <T> ReadComparisonData(key: Any?, read: suspend () -> T, show: @Comp
     val current = result
     when {
         current == null -> LinearProgressIndicator(Modifier.fillMaxWidth())
-        current.isFailure -> ErrorMessage("照片来源读取失败。") { attempt++ }
+        current.isFailure -> ErrorMessage(error) { attempt++ }
         else -> show(current.getOrThrow())
     }
 }

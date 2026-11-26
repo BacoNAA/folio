@@ -136,6 +136,7 @@ internal fun PlaceBookHeader(model: FolioViewModel) {
                 DropdownMenu(actions, { actions = false }) {
                     DropdownMenuItem(text = { Text("在这里记一条") }, onClick = { actions = false; model.newTextAtPlace() })
                     DropdownMenuItem(text = { Text("关联已有记录") }, onClick = { actions = false; model.chooseExistingRecord() })
+                    DropdownMenuItem(text = { Text("变化轨道") }, onClick = { actions = false; model.openTrack(TrackOwner(place), place.info.name) })
                     DropdownMenuItem(text = { Text("编辑地点资料") }, onClick = { actions = false; editing = true })
                 }
             }

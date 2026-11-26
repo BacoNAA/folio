@@ -20,7 +20,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-enum class Page { Capture, Records, Search, Detail, Editor, Trash, TrashDetail, DateReview, Places, Groups, GroupDetail, GroupPicker, GroupDestination, GroupGuide, Chapters, Objects, ObjectBook, PhotoCompare }
+enum class Page { Capture, Records, Search, Detail, Editor, Trash, TrashDetail, DateReview, Places, Groups, GroupDetail, GroupPicker, GroupDestination, GroupGuide, Chapters, Objects, ObjectBook, PhotoCompare, ObservationTrack }
 
 internal val Page.isGroupReadingPage get() = this == Page.GroupDetail || this == Page.GroupGuide
 internal val Page.isGroupPage get() = isGroupReadingPage || this == Page.Chapters || this == Page.Groups || this == Page.GroupPicker || this == Page.GroupDestination
@@ -112,6 +112,9 @@ data class FolioState(
     val tagsLoading: Boolean = false,
     val tagsError: String? = null,
     val filterTags: Set<TagId> = emptySet(),
+    val track: TrackOwner? = null,
+    val trackName: String = "",
+    val trackVersion: Long = 0,
     val photoComparison: PhotoComparison? = null,
     val objectBook: RecordObject? = null,
     val objectQuery: String = "",
@@ -999,6 +1002,7 @@ class FolioViewModel(
         when (state.page) {
             Page.Editor -> leaveEditor()
             Page.Detail -> home(state.detailOrigin)
+            Page.ObservationTrack -> home(if (state.track?.kind == TrackKind.PLACE) Page.Search else Page.ObjectBook)
             Page.PhotoCompare -> leavePhotoComparison()
             Page.Objects -> home(Page.Records)
             Page.ObjectBook -> leaveObjectBook()
@@ -1405,6 +1409,32 @@ class FolioViewModel(
         state = if (kind == ObjectKind.PERSON) state.copy(filterPeople = ids) else state.copy(filterThings = ids)
         refresh()
     }
+    fun openTrack(owner: TrackOwner, name: String) {
+        if (state.busy) return
+        state = state.copy(track = owner, trackName = name)
+        navigate(Page.ObservationTrack)
+    }
+
+    private val observations get() = requireNotNull(published as? RecordObservations)
+    internal suspend fun trackNodes(owner: TrackOwner) = withContext(Dispatchers.IO) { observations.readObservations(owner) }
+    internal suspend fun trackSources(owner: TrackOwner) = withContext(Dispatchers.IO) {
+        browsing.queryRecords(owner.sourceQuery()).certain
+    }
+
+    fun saveTrackNode(record: RecordId, item: ItemId, note: String, saved: () -> Unit) =
+        runAction("观察保存失败，请核对来源后重试。") {
+            val owner = requireNotNull(state.track)
+            withContext(Dispatchers.IO) { observations.saveObservation(owner, record, item, note) }
+            state = state.copy(trackVersion = state.trackVersion + 1)
+            saved()
+        }
+
+    fun removeTrackNode(node: Observation) = runAction("移出观察失败，请重试。") {
+        val owner = requireNotNull(state.track)
+        withContext(Dispatchers.IO) { observations.removeObservation(owner, node.record, node.itemId) }
+        state = state.copy(trackVersion = state.trackVersion + 1)
+    }
+
     private val previousComparisons = ArrayDeque<PhotoComparison>()
 
     fun startPhotoComparison(photo: ContentItem.Photo? = null) {
@@ -1420,7 +1450,7 @@ class FolioViewModel(
     fun selectComparisonPhoto(left: Boolean, ref: PhotoReference, selected: () -> Unit) =
         runAction("选择照片失败，请重试或重新选择。") {
             val pair = state.photoComparison ?: return@runAction
-            val source = readComparisonRecord(ref.record)
+            val source = readSourceRecord(ref.record)
             val photo = source?.items?.filterIsInstance<ContentItem.Photo>()?.find { it.id == ref.item }
             if (photo == null || ref == (if (left) pair.right else pair.left)) {
                 state = state.copy(error = if (photo == null) "所选照片已不可用，请重新选择。" else "请选择另一张照片。")
@@ -1430,7 +1460,7 @@ class FolioViewModel(
             selected()
         }
 
-    internal suspend fun readComparisonRecord(id: RecordId) = withContext(Dispatchers.IO) { published.openRecordContent(id) }
+    internal suspend fun readSourceRecord(id: RecordId) = withContext(Dispatchers.IO) { published.openRecordContent(id) }
 
     internal suspend fun comparisonSources(keyword: String, scope: RecordObject?) = withContext(Dispatchers.IO) {
         browsing.queryRecords(RecordQuery(keyword, mediaTypes = setOf(MediaFilter.PHOTO),

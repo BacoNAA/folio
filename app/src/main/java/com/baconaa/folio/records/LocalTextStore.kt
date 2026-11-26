@@ -31,6 +31,7 @@ class LocalTextStore internal constructor(
     RecordRelations by LocalRecordRelations(database),
     RecordChapters by LocalRecordChapters(database),
     DateReviews, RecordTemplates by LocalRecordTemplates(database, now),
+    RecordObservations by LocalObservations(database, now),
     RecordPlaces by LocalRecordPlaces(database, now), RecordObjects by LocalRecordObjects(database, now) {
     private val dao = database.textDao()
     private val itemDao = database.itemDao()
