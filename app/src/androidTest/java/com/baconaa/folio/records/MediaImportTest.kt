@@ -11,7 +11,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.baconaa.folio.media.AudioId
 import com.baconaa.folio.media.ImportedOriginals
-import com.baconaa.folio.media.LocalAudioPlayback
 import com.baconaa.folio.media.LocalPhotoOriginals
 import java.io.File
 import java.io.IOException
@@ -20,7 +19,6 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -261,22 +259,6 @@ internal class MediaImportTest : AudioStoreFixture() {
         assertTrue(store.deletePermanently(record).deleted)
         assertFalse(originalFile(image.id).exists())
         assertFalse(audioFile(copiedAudio.audioId).exists())
-    }
-
-    private suspend fun playsToEnd(id: AudioId) {
-        lateinit var playback: LocalAudioPlayback
-        instrumentation.runOnMainSync {
-            playback = LocalAudioPlayback.get(context)
-            playback.play(id)
-        }
-        try {
-            val state = withTimeout(12_000) { playback.state.first { it.hasEnded || it.error != null } }
-            assertNull(state.error)
-            assertEquals(id, state.audioId)
-            assertTrue(state.hasEnded)
-        } finally {
-            instrumentation.runOnMainSync { playback.release() }
-        }
     }
 
     @Test

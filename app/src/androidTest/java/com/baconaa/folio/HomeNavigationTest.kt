@@ -48,7 +48,7 @@ class HomeNavigationTest {
         compose.onNodeWithTag("editor").performTextInput("，河边见")
         compose.onNodeWithText("完成").performClick()
         waitText("已保存 · 查看")
-        compose.onNodeWithText("已保存 · 查看").performClick()
+        compose.onNodeWithText("已保存 · 查看").performScrollTo().performClick()
         waitText("$text，河边见")
         compose.onNodeWithText("返回").performClick()
         compose.onNodeWithTag("nav-Records").performClick()

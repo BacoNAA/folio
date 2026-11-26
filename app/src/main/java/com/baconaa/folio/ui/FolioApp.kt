@@ -98,7 +98,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                             TextButton(onClick = goBack, enabled = !state.busy) { Text("返回") }
                         }
                         Text(when (state.page) {
-                            Page.Editor -> "记录这一刻"
+                            Page.Editor -> if (state.editor?.splitSource != null) "拆分草稿" else "记录这一刻"
                             Page.Search -> if (state.placeBook != null) "地点小册" else "搜索全部记录"
                             Page.Places -> "按地点"
                             Page.Groups -> "记录组"
@@ -124,7 +124,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                     }
                 }
                 if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                state.error?.takeIf { state.copySelection == null && state.templateLibrary == null && state.merge == null }?.let { error ->
+                state.error?.takeIf { state.transfer == null && state.templateLibrary == null && state.merge == null }?.let { error ->
                     val retry = when {
                         state.draftReadRetry != null -> model::retryDraftRead
                         state.page == Page.Detail -> model::retryDetail
@@ -246,13 +246,21 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                         enabled = !state.busy, label = { Text(if (content.marks.isPinned) "已置顶" else "置顶") })
                                     TextButton(onClick = { deleteDialog = true }, enabled = !state.busy) { Text("删除") }
                                 }
-                                OutlinedButton(onClick = model::startRecordCopy, enabled = !state.busy) { Text("复制为新记录") }
-                                OutlinedButton(onClick = { model.editTemplate(extract = true) }, enabled = !state.busy) { Text("提取为模板") }
-                                state.drafts.firstOrNull { it.recordId == state.detailId }?.let { draft ->
-                                    Text("另有未完成修改，当前显示上次完成的内容。", fontSize = 13.sp)
-                                    TextButton(onClick = { model.resume(draft) }, enabled = !state.busy) { Text("继续未完成修改") }
+                                val pending = state.drafts.firstOrNull { it.recordId == state.detailId || it.splitSource == state.detailId }
+                                pending?.let { draft ->
+                                    if (draft.splitSource != null) Text("已有拆分草稿。完成或放弃后可再次编辑、拆分。", fontSize = 13.sp)
+                                    else Text("另有未完成修改，当前显示上次完成的内容。", fontSize = 13.sp)
+                                    TextButton(onClick = { model.resume(draft) }, enabled = !state.busy) {
+                                        Text(if (draft.splitSource != null) "继续拆分草稿" else "继续未完成修改")
+                                    }
                                 }
                                 RecordContents(content, model)
+                                if (pending?.recordId != null) Text("完成或放弃草稿后可拆分。", fontSize = 13.sp)
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedButton(onClick = { model.startTransfer(split = false) }, enabled = !state.busy) { Text("复制为新记录") }
+                                    OutlinedButton(onClick = { model.startTransfer(split = true) }, enabled = !state.busy && pending == null) { Text("拆分记录") }
+                                    OutlinedButton(onClick = { model.editTemplate(extract = true) }, enabled = !state.busy) { Text("提取为模板") }
+                                }
                             }
                         }
                         Page.Places -> PlacesScreen(model, placesScroll)
@@ -298,8 +306,8 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
         }
         state.templateLibrary?.let { TemplateLibraryDialog(it, model) }
         state.merge?.let { RecordMergeDialog(it, model) }
-        state.copySelection?.let { selection ->
-            state.detail?.let { RecordCopyDialog(it, selection, model) }
+        state.transfer?.let { transfer ->
+            state.detail?.let { RecordTransferDialog(it, transfer, model) }
         }
         if (deleteDialog) AlertDialog(onDismissRequest = { deleteDialog = false }, title = { Text("移入回收站？") },
             text = { Text("正式内容和这条记录的未完成修改会一起保留，可在回收站恢复。") },
@@ -341,6 +349,7 @@ private fun DraftPickerRow(draft: DraftPreview, onClick: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically) {
             if (draft.excerpt.isBlank()) draft.firstPhotoId?.let { Photo(it, thumbnail = true) }
             Column {
+                if (draft.splitSource != null) Text("拆分草稿", style = MaterialTheme.typography.labelMedium)
                 draft.title?.let { Text(it, style = MaterialTheme.typography.titleMedium, maxLines = 2) }
                 val description = when {
                     draft.excerpt.isNotBlank() -> draft.excerpt

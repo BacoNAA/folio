@@ -23,6 +23,7 @@ data class DraftPreview(
     /** 已保存录音项的总时长；无录音时为 null，可用于辨认纯录音草稿。 */
     val totalAudioDurationMillis: Long? = null,
     val title: String? = null,
+    val splitSource: RecordId? = null,
 )
 
 data class RecordPreview(
@@ -63,6 +64,9 @@ interface TextDrafts {
 
     /** 核对预览的全部正式版本，从至少两条来源选取实际内容，在同一事务中建立独立草稿。 */
     suspend fun mergeRecordsToDraft(expectedRevisions: Map<RecordId, Long>, selection: RecordMergeSelection): DraftId
+
+    /** 建立可续写的拆分草稿；完成该草稿时才从指定来源移出仍被选中的实际内容。 */
+    suspend fun splitRecordToDraft(source: RecordId, expectedRevision: Long, selection: RecordCopySelection): DraftId
 
     /** 放弃新建或编辑草稿，保留正式记录。重复放弃不会影响后来建立的草稿。 */
     suspend fun discardDraft(id: DraftId)

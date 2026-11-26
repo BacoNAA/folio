@@ -16,69 +16,94 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.baconaa.folio.records.*
 
+data class RecordTransfer(val selection: RecordCopySelection, val split: Boolean)
+
 @Composable
-internal fun RecordCopyDialog(content: RecordContent, selection: RecordCopySelection, model: FolioViewModel) {
+internal fun RecordTransferDialog(content: RecordContent, transfer: RecordTransfer, model: FolioViewModel) {
+    val selection = transfer.selection
+    val split = transfer.split
+    val kind = if (split) "split" else "copy"
+    val available = remember(content.items, split) { if (split) content.items.filter { it.hasContent() } else content.items }
     val state = model.state
     val enabled = !state.busy
     val sourceItems = remember(content.items) { content.items.withIndex().associateBy { it.value.id } }
     val chosen = remember(selection.itemIds) { selection.itemIds.toSet() }
+    val remaining = available.filterNot { it.id in chosen }
+    val wouldEmptySource = split && remaining.isEmpty()
     fun move(index: Int, to: Int) {
         val ids = selection.itemIds.toMutableList()
         ids.add(to, ids.removeAt(index))
-        model.changeRecordCopy(selection.copy(itemIds = ids))
+        model.changeTransfer(selection.copy(itemIds = ids))
     }
-    AlertDialog(onDismissRequest = { model.changeRecordCopy(null) }, title = { Text("复制为新记录") },
+    AlertDialog(onDismissRequest = { model.changeTransfer(null) }, title = { Text(if (split) "拆分记录" else "复制为新记录") },
         text = { Column {
-            if (state.drafts.any { it.recordId == state.detailId }) Text("来源有未完成修改。本次使用上次完成的内容。")
+            if (wouldEmptySource) {
+                Text("原记录须保留至少一项实际内容。请取消勾选一项，或将所选内容复制为新记录。")
+                TextButton(onClick = model::switchSplitToCopy, enabled = enabled) { Text("转为复制") }
+            }
+            if (!split && state.drafts.any { it.recordId == state.detailId }) Text("来源有未完成修改。本次使用上次完成的内容。")
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp).testTag("copy-options")) {
-                item { Text("选择内容", style = MaterialTheme.typography.titleSmall) }
-                items(content.items, key = { "item-" + it.id.value }) { item ->
-                    SelectionCheckbox(item.id in chosen, enabled, Modifier.testTag("copy-item-${item.id.value}"), { on ->
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp).testTag("$kind-options")) {
+                item { Text(if (split) "选择要移出的内容" else "选择内容", style = MaterialTheme.typography.titleSmall) }
+                items(available, key = { "item-" + it.id.value }) { item ->
+                    SelectionCheckbox(item.id in chosen, enabled, Modifier.testTag("$kind-item-${item.id.value}"), { on ->
                         val ids = selection.itemIds.toMutableList()
                         if (on) {
                             val next = ids.indexOfFirst { sourceItems.getValue(it).index > sourceItems.getValue(item.id).index }
                             ids.add(if (next < 0) ids.size else next, item.id)
                         } else ids.remove(item.id)
-                        model.changeRecordCopy(selection.copy(itemIds = ids))
+                        model.changeTransfer(selection.copy(itemIds = ids))
                     }) {
                         if (item is ContentItem.Photo) Photo(item.photoId, thumbnail = true, thumbnailDescription = "待选照片", strokes = item.strokes)
                         Text(item.selectionLabel(), maxLines = 3, overflow = TextOverflow.Ellipsis)
                     }
                 }
-                if (selection.itemIds.isNotEmpty()) item { Text("副本顺序", style = MaterialTheme.typography.titleSmall) }
+                if (split) {
+                    item { Text("原记录将保留", style = MaterialTheme.typography.titleSmall) }
+                    items(remaining, key = { "remain-" + it.id.value }) { item ->
+                        Text(item.selectionLabel(), Modifier.testTag("split-remain-${item.id.value}"), maxLines = 3,
+                            overflow = TextOverflow.Ellipsis)
+                    }
+                    item {
+                        Text("事件时间 · " + (content.times.eventTime?.label ?: "未填写"))
+                        val clues = listOfNotNull(content.place?.info?.name) + content.objects.map { it.info.name } + content.tags.map { it.name }
+                        if (clues.isNotEmpty()) Text("保留线索 · " + clues.joinToString("、"))
+                    }
+                }
+                if (selection.itemIds.isNotEmpty()) item { Text(if (split) "新记录将得到" else "副本顺序", style = MaterialTheme.typography.titleSmall) }
                 itemsIndexed(selection.itemIds, key = { _, id -> "preview-" + id.value }) { index, id ->
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text("${index + 1}. ${sourceItems.getValue(id).value.selectionLabel()}", Modifier.weight(1f)
-                            .testTag("copy-preview-${id.value}"), maxLines = 3, overflow = TextOverflow.Ellipsis)
+                            .testTag("$kind-preview-${id.value}"), maxLines = 3, overflow = TextOverflow.Ellipsis)
                         if (selection.itemIds.size > 1) {
                             TextButton(onClick = { move(index, index - 1) }, enabled = enabled && index > 0,
-                                modifier = Modifier.testTag("copy-up-${id.value}")) { Text("上移") }
+                                modifier = Modifier.testTag("$kind-up-${id.value}")) { Text("上移") }
                             TextButton(onClick = { move(index, index + 1) }, enabled = enabled && index < selection.itemIds.lastIndex,
-                                modifier = Modifier.testTag("copy-down-${id.value}")) { Text("下移") }
+                                modifier = Modifier.testTag("$kind-down-${id.value}")) { Text("下移") }
                         }
                     }
                 }
                 item {
                     HorizontalDivider()
+                    if (split) Text("新记录的标题、时间与线索", style = MaterialTheme.typography.titleSmall)
                     content.title?.let { title ->
-                        SelectionCheckbox(selection.keepTitle, enabled, change = { model.changeRecordCopy(selection.copy(keepTitle = it)) }) {
+                        SelectionCheckbox(selection.keepTitle, enabled, change = { model.changeTransfer(selection.copy(keepTitle = it)) }) {
                             Text("沿用标题「$title」")
                         }
                     }
                     content.times.eventTime?.let { time ->
-                        SelectionCheckbox(selection.keepEventTime, enabled, change = { model.changeRecordCopy(selection.copy(keepEventTime = it)) }) {
+                        SelectionCheckbox(selection.keepEventTime, enabled, change = { model.changeTransfer(selection.copy(keepEventTime = it)) }) {
                             Text("沿用事件时间 · ${time.label}")
                         }
                     }
                     if (selection.itemIds.any { sourceItems.getValue(it).value is ContentItem.Checklist }) {
-                        SelectionCheckbox(selection.keepChecked, enabled, change = { model.changeRecordCopy(selection.copy(keepChecked = it)) }) {
+                        SelectionCheckbox(selection.keepChecked, enabled, change = { model.changeTransfer(selection.copy(keepChecked = it)) }) {
                             Text("沿用清单勾选状态")
                         }
                     }
                     content.place?.let { place ->
                         SelectionCheckbox(selection.placeId == place.id, enabled, change = { on ->
-                            model.changeRecordCopy(selection.copy(placeId = place.id.takeIf { on }))
+                            model.changeTransfer(selection.copy(placeId = place.id.takeIf { on }))
                         }) {
                             Text("地点", style = MaterialTheme.typography.labelSmall)
                             PlaceDescription(place)
@@ -87,12 +112,12 @@ internal fun RecordCopyDialog(content: RecordContent, selection: RecordCopySelec
                 }
                 items(content.tags, key = { "tag-" + it.id.value }) { tag ->
                     SelectionCheckbox(tag.id in selection.tagIds, enabled, change = { on ->
-                        model.changeRecordCopy(selection.copy(tagIds = if (on) selection.tagIds + tag.id else selection.tagIds - tag.id))
+                        model.changeTransfer(selection.copy(tagIds = if (on) selection.tagIds + tag.id else selection.tagIds - tag.id))
                     }) { Text("标签 · ${tag.name}") }
                 }
                 items(content.objects, key = { "object-" + it.id.value }) { obj ->
                     SelectionCheckbox(obj.id in selection.objectIds, enabled, change = { on ->
-                        model.changeRecordCopy(selection.copy(objectIds = if (on) selection.objectIds + obj.id else selection.objectIds - obj.id))
+                        model.changeTransfer(selection.copy(objectIds = if (on) selection.objectIds + obj.id else selection.objectIds - obj.id))
                     }) {
                         Text(obj.kind.label, style = MaterialTheme.typography.labelSmall)
                         ObjectDescription(obj)
@@ -100,10 +125,10 @@ internal fun RecordCopyDialog(content: RecordContent, selection: RecordCopySelec
                 }
             }
         } },
-        confirmButton = { TextButton(onClick = model::createRecordCopy, enabled = enabled && selection.itemIds.isNotEmpty()) {
-            Text(if (state.error == null) "创建副本草稿" else "重试创建")
+        confirmButton = { TextButton(onClick = model::createTransferDraft, enabled = enabled && selection.itemIds.isNotEmpty() && !wouldEmptySource) {
+            Text(when { state.error != null -> "重试创建"; split -> "创建拆分草稿"; else -> "创建副本草稿" })
         } },
-        dismissButton = { TextButton(onClick = { model.changeRecordCopy(null) }, enabled = enabled) { Text("取消") } })
+        dismissButton = { TextButton(onClick = { model.changeTransfer(null) }, enabled = enabled) { Text("取消") } })
 }
 
 @Composable
