@@ -196,6 +196,18 @@ class FolioViewModel(
     private var loadVersion = 0
     private var pendingInitialId: DraftId? = null
 
+    fun afterBackupRestore() {
+        bookOrigins.clear()
+        previousComparisons.clear()
+        pendingInitialId = null
+        tagsVersion++
+        objectsVersion++
+        placesVersion++
+        directoryPlaceQuery = ""
+        state = FolioState(page = Page.Records)
+        navigate(Page.Records)
+    }
+
     fun home(page: Page) {
         if (state.busy || state.editor != null) return
         navigate(page)

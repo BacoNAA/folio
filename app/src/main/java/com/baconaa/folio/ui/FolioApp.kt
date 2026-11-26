@@ -179,7 +179,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                 TextButton(onClick = { model.home(Page.Groups) }) { Text("记录组") }
                                 TextButton(onClick = { model.home(Page.Chapters) }) { Text("生活章节") }
                                 TextButton(onClick = { model.home(Page.Objects) }) { Text("人物与物件") }
-                                BackupManager()
+                                BackupManager(model::afterBackupRestore)
                             }
                             if (state.drafts.isNotEmpty()) {
                                 FilledTonalButton(onClick = {

@@ -18,12 +18,13 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun BackupManager() {
+internal fun BackupManager(onRestored: () -> Unit) {
     val context = LocalContext.current
     val backups = remember(context) { LocalTextStore.get(context).backups }
     val scope = rememberCoroutineScope()
     var open by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
+    var committing by remember { mutableStateOf(false) }
     var job by remember { mutableStateOf<Job?>(null) }
     var password by remember { mutableStateOf("") }
     var confirmation by remember { mutableStateOf("") }
@@ -61,9 +62,11 @@ internal fun BackupManager() {
                     enabled = job == null, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation())
                 Text("创建备份需要至少八个字符，两次输入须相同。")
                 Button(onClick = { directory.launch(null) }, enabled = job == null && password.length >= 8 && confirmation == password) { Text("创建完整备份") }
+                BackupRestoreControls(backups, password, job != null, { job = it }, { status = it },
+                    { password = ""; confirmation = ""; onRestored() }, { committing = it })
                 if (job != null) {
                     LinearProgressIndicator()
-                    TextButton(onClick = { job?.cancel() }) { Text("取消操作") }
+                    if (!committing) TextButton(onClick = { job?.cancel() }) { Text("取消操作") }
                 }
                 if (status.isNotEmpty()) Text(status)
                 saved?.let { file ->
