@@ -48,7 +48,10 @@ internal fun ObjectBookScreen(model: FolioViewModel, scroll: LazyListState) {
     LazyColumn(state = scroll, contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             ObjectDescription(book)
-            TextButton(onClick = { editing = true }) { Text("编辑共享资料") }
+            Row {
+                TextButton(onClick = { editing = true }) { Text("编辑共享资料") }
+                TextButton(onClick = { model.startPhotoComparison() }) { Text("照片对照") }
+            }
             OutlinedTextField(state.objectQuery, model::queryObjectBook, singleLine = true,
                 label = { Text("在本小册中查找") }, modifier = Modifier.fillMaxWidth().testTag("book-query"))
         }

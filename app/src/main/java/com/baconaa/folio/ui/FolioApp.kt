@@ -103,6 +103,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                         Text(when (state.page) {
                             Page.Editor -> if (state.editor?.splitSource != null) "拆分草稿" else "记录这一刻"
                             Page.Search -> if (state.placeBook != null) "地点小册" else "搜索全部记录"
+                            Page.PhotoCompare -> "照片对照"
                             Page.Objects -> "人物与物件"
                             Page.ObjectBook -> state.objectBook?.let { "${it.kind.label}小册" } ?: "对象小册"
                             Page.DateReview -> "日期回看"
@@ -276,6 +277,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                 }
                             }
                         }
+                        Page.PhotoCompare -> PhotoComparisonScreen(model)
                         Page.Objects -> ObjectDirectory(model, objectDirectoryQuery, { objectDirectoryQuery = it }, objectDirectoryScroll)
                         Page.ObjectBook -> ObjectBookScreen(model, bookScroll)
                         Page.DateReview -> DateReviewScreen(model)

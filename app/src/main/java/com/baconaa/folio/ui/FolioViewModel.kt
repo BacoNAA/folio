@@ -20,7 +20,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-enum class Page { Capture, Records, Search, Detail, Editor, Trash, TrashDetail, DateReview, Places, Groups, GroupDetail, GroupPicker, GroupDestination, GroupGuide, Chapters, Objects, ObjectBook }
+enum class Page { Capture, Records, Search, Detail, Editor, Trash, TrashDetail, DateReview, Places, Groups, GroupDetail, GroupPicker, GroupDestination, GroupGuide, Chapters, Objects, ObjectBook, PhotoCompare }
 
 internal val Page.isGroupReadingPage get() = this == Page.GroupDetail || this == Page.GroupGuide
 internal val Page.isGroupPage get() = isGroupReadingPage || this == Page.Chapters || this == Page.Groups || this == Page.GroupPicker || this == Page.GroupDestination
@@ -112,6 +112,7 @@ data class FolioState(
     val tagsLoading: Boolean = false,
     val tagsError: String? = null,
     val filterTags: Set<TagId> = emptySet(),
+    val photoComparison: PhotoComparison? = null,
     val objectBook: RecordObject? = null,
     val objectQuery: String = "",
     val objectRecords: List<RecordCard> = emptyList(),
@@ -998,6 +999,7 @@ class FolioViewModel(
         when (state.page) {
             Page.Editor -> leaveEditor()
             Page.Detail -> home(state.detailOrigin)
+            Page.PhotoCompare -> leavePhotoComparison()
             Page.Objects -> home(Page.Records)
             Page.ObjectBook -> leaveObjectBook()
             Page.Groups, Page.Chapters -> home(Page.Records)
@@ -1403,6 +1405,47 @@ class FolioViewModel(
         state = if (kind == ObjectKind.PERSON) state.copy(filterPeople = ids) else state.copy(filterThings = ids)
         refresh()
     }
+    private val previousComparisons = ArrayDeque<PhotoComparison>()
+
+    fun startPhotoComparison(photo: ContentItem.Photo? = null) {
+        if (state.busy) return
+        val detailId = state.detailId.takeIf { state.page == Page.Detail }
+        if (detailId != null && state.detailOrigin == Page.PhotoCompare) state.photoComparison?.let(previousComparisons::addLast)
+        else previousComparisons.clear()
+        val left = if (detailId != null && photo != null) PhotoReference(detailId, photo.id) else null
+        state = state.copy(photoComparison = PhotoComparison(state.page, detailId, state.detailOrigin, left))
+        navigate(Page.PhotoCompare)
+    }
+
+    fun selectComparisonPhoto(left: Boolean, ref: PhotoReference, selected: () -> Unit) =
+        runAction("选择照片失败，请重试或重新选择。") {
+            val pair = state.photoComparison ?: return@runAction
+            val source = readComparisonRecord(ref.record)
+            val photo = source?.items?.filterIsInstance<ContentItem.Photo>()?.find { it.id == ref.item }
+            if (photo == null || ref == (if (left) pair.right else pair.left)) {
+                state = state.copy(error = if (photo == null) "所选照片已不可用，请重新选择。" else "请选择另一张照片。")
+                return@runAction
+            }
+            state = state.copy(photoComparison = if (left) pair.copy(left = ref) else pair.copy(right = ref))
+            selected()
+        }
+
+    internal suspend fun readComparisonRecord(id: RecordId) = withContext(Dispatchers.IO) { published.openRecordContent(id) }
+
+    internal suspend fun comparisonSources(keyword: String, scope: RecordObject?) = withContext(Dispatchers.IO) {
+        browsing.queryRecords(RecordQuery(keyword, mediaTypes = setOf(MediaFilter.PHOTO),
+            peopleIds = setOfNotNull(scope?.takeIf { it.kind == ObjectKind.PERSON }?.id),
+            thingIds = setOfNotNull(scope?.takeIf { it.kind == ObjectKind.THING }?.id))).certain
+    }
+
+    private fun leavePhotoComparison() {
+        val pair = state.photoComparison
+        state = state.copy(photoComparison = previousComparisons.removeLastOrNull())
+        if (pair?.origin == Page.Detail && pair.detail != null) runAction("记录读取失败，请重试。") {
+            showDetail(pair.detail, pair.detailOrigin)
+        } else navigate(pair?.origin ?: Page.Records)
+    }
+
     private data class BookOrigin(val page: Page, val detail: RecordId?, val detailOrigin: Page,
                                   val book: RecordObject?, val query: String)
     private val bookOrigins = ArrayDeque<BookOrigin>()

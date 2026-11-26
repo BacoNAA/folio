@@ -277,7 +277,12 @@ internal fun RecordContents(content: RecordContent, model: FolioViewModel) {
                 is ContentItem.Pdf -> PdfAttachment(item, model)
                 is ContentItem.Link -> SavedLink(item, bodySize, lineHeight)
                 is ContentItem.Video -> VideoAttachment(item, model)
-                is ContentItem.Photo -> { Photo(item.photoId, strokes = item.strokes); if (item.caption.isNotEmpty()) Text(item.caption) }
+                is ContentItem.Photo -> {
+                    Photo(item.photoId, strokes = item.strokes)
+                    if (item.caption.isNotEmpty()) Text(item.caption)
+                    if (model.state.page == Page.Detail) TextButton(onClick = { model.startPhotoComparison(item) },
+                        modifier = Modifier.testTag("compare-start-${item.id.value}")) { Text("用这张照片对照") }
+                }
                 is ContentItem.Audio -> { AudioControl(item.audioId, item.durationMillis, model); if (item.caption.isNotEmpty()) Text(item.caption) }
                 is ContentItem.Checklist -> item.entries.forEach { Text("${if (it.checked) "☑" else "☐"} ${it.text}") }
             }
