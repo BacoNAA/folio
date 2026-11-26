@@ -62,6 +62,7 @@ data class RecordEditor(
     val backendItemIds: Map<ItemId, ItemId> = emptyMap(),
     val fileImportFailure: FileImportFailure? = null,
     val invalidLink: InvalidLinkAddress? = null,
+    val splitSource: RecordId? = null,
 ) {
     fun position(id: ItemId?) = id?.takeUnless { it == unboundItem }?.let { backendItemIds[it] ?: it }
     val value: TextFieldValue get() = textValues.values.firstOrNull() ?: TextFieldValue()
@@ -92,7 +93,7 @@ data class FolioState(
     val possibleResults: List<RecordCard> = emptyList(),
     val detailId: RecordId? = null,
     val detail: RecordContent? = null,
-    val copySelection: RecordCopySelection? = null,
+    val transfer: RecordTransfer? = null,
     val templateLibrary: TemplateLibrary? = null,
     val detailOrigin: Page = Page.Records,
     val savedId: RecordId? = null,
@@ -735,36 +736,51 @@ class FolioViewModel(
         openCreatedDraft(id)
     }
 
-    fun startRecordCopy() {
+    fun startTransfer(split: Boolean) {
         val content = state.detail ?: return
         if (state.busy || state.page != Page.Detail) return
-        state = state.copy(copySelection = RecordCopySelection(placeId = content.place?.id,
-            tagIds = content.tags.map { it.id }.toSet(), objectIds = content.objects.map { it.id }.toSet()), error = null)
+        val selection = RecordCopySelection(placeId = content.place?.id, tagIds = content.tags.map { it.id }.toSet(),
+            objectIds = content.objects.map { it.id }.toSet())
+        state = state.copy(transfer = RecordTransfer(selection, split), error = null)
     }
 
-    fun changeRecordCopy(selection: RecordCopySelection?) {
-        if (!state.busy && state.copySelection != null) state = state.copy(copySelection = selection, error = null)
+    fun changeTransfer(selection: RecordCopySelection?) {
+        val transfer = state.transfer ?: return
+        if (!state.busy) state = state.copy(transfer = selection?.let { transfer.copy(selection = it) }, error = null)
     }
 
-    fun createRecordCopy() = runAction("副本草稿创建失败，请重试。") {
+    fun switchSplitToCopy() {
+        val transfer = state.transfer ?: return
+        if (!state.busy) state = state.copy(transfer = transfer.copy(split = false), error = null)
+    }
+
+    fun createTransferDraft() = runAction(if (state.transfer?.split == true) "拆分草稿创建失败，请重试。" else "副本草稿创建失败，请重试。") {
         val source = state.detailId ?: return@runAction
         val revision = state.detail?.revision ?: return@runAction
-        val selection = state.copySelection ?: return@runAction
+        val transfer = state.transfer ?: return@runAction
         val id = try {
-            withContext(Dispatchers.IO) { drafts.copyRecordToDraft(source, revision, selection) }
-        } catch (_: CopySourceChanged) {
-            state = state.copy(copySelection = null)
+            withContext(Dispatchers.IO) {
+                if (transfer.split) drafts.splitRecordToDraft(source, revision, transfer.selection)
+                else drafts.copyRecordToDraft(source, revision, transfer.selection)
+            }
+        } catch (conflict: SplitDraftConflict) {
+            state = state.copy(transfer = null)
             showDetail(source, state.detailOrigin)
-            if (state.detail != null) state = state.copy(notice = "来源已更新，请重新选择要复制的内容。")
+            if (state.detail != null) state = state.copy(notice = conflict.message)
+            return@runAction
+        } catch (_: CopySourceChanged) {
+            state = state.copy(transfer = null)
+            showDetail(source, state.detailOrigin)
+            if (state.detail != null) state = state.copy(notice = if (transfer.split) "来源已更新，请重新选择要移出的内容。" else "来源已更新，请重新选择要复制的内容。")
             return@runAction
         } catch (missing: CopyMediaUnavailable) {
             state = state.copy(error = missing.message)
             return@runAction
         } catch (invalid: IllegalArgumentException) {
-            state = state.copy(error = invalid.message ?: "请重新选择要复制的内容。")
+            state = state.copy(error = invalid.message ?: "请重新选择内容。")
             return@runAction
         }
-        state = state.copy(copySelection = null)
+        state = state.copy(transfer = null)
         openCreatedDraft(id)
     }
 
@@ -797,7 +813,7 @@ class FolioViewModel(
                     TextRange(if (item.id == content.activeItemId) content.cursor else item.text.length)) },
                 content.activeItemId, content.items, unboundItem = titleOnlyInput?.id, title = content.title.orEmpty(), persistedTitle = content.title.orEmpty(), returnPage = origin, canUndo = canUndo,
                 eventTime = eventTime, persistedEventTime = eventTime, tags = selectedTags, objects = selectedObjects,
-                place = selectedPlace, persistedPlaceId = selectedPlace?.id))
+                place = selectedPlace, persistedPlaceId = selectedPlace?.id, splitSource = content.splitSource))
     }
 
     fun complete() {
@@ -810,8 +826,15 @@ class FolioViewModel(
                 val id = editor.draftId ?: return@withLock
                 val recordId = try {
                     withContext(Dispatchers.IO) { mixed.completeMixedDraft(id) }
+                } catch (changed: CopySourceChanged) {
+                    state = state.copy(error = changed.message)
+                    return@withLock
                 } catch (invalid: InvalidLinkAddress) {
                     state = state.copy(editor = editor.copy(activeItemId = invalid.itemId, invalidLink = invalid))
+                    return@withLock
+                } catch (invalid: IllegalArgumentException) {
+                    if (editor.splitSource == null) throw invalid
+                    state = state.copy(error = invalid.message ?: "请核对拆分草稿中的内容。")
                     return@withLock
                 }
                 state = state.copy(editor = null, saveError = null, savedId = recordId, page = Page.Capture)
@@ -829,7 +852,7 @@ class FolioViewModel(
                 if (!saveLatest()) return@withLock
                 val editor = state.editor ?: return@withLock
                 state = state.copy(editor = null, saveError = null, page = editor.returnPage)
-                if (editor.returnPage == Page.Detail && editor.recordId != null) showDetail(editor.recordId, state.detailOrigin)
+                if (editor.returnPage == Page.Detail) (editor.recordId ?: editor.splitSource)?.let { showDetail(it, state.detailOrigin) }
                 if (editor.returnPage == Page.Records || editor.returnPage == Page.Search) refresh()
             }
         }
@@ -845,7 +868,7 @@ class FolioViewModel(
                 pendingInitialId = null
                 failedPhoto = null
                 state = state.copy(editor = null, page = editor.returnPage, saveError = null, pendingAttachment = null, importFailed = false)
-                if (editor.returnPage == Page.Detail && editor.recordId != null) showDetail(editor.recordId, state.detailOrigin)
+                if (editor.returnPage == Page.Detail) (editor.recordId ?: editor.splitSource)?.let { showDetail(it, state.detailOrigin) }
                 if (editor.returnPage == Page.Records || editor.returnPage == Page.Search) refresh()
             }
         }
@@ -1345,7 +1368,7 @@ class FolioViewModel(
         val origin = state.detailOrigin
         val context = DeletedRecord(id, origin, state.query, state.filterTags, state.starredOnly, state.recent, state.placeScope, state.searchOrigin, state.placeRecent,
             state.filterPeople, state.filterThings, state.mediaTypes, state.eventDateFilter, state.groupId)
-        val hasDraft = state.drafts.any { it.recordId == id }
+        val hasDraft = state.drafts.any { it.recordId == id || it.splitSource == id }
         media?.stopPlayback()
         runAction("移入回收站失败，请重试。") {
             val moved = withContext(Dispatchers.IO) { requireNotNull(trash).moveToTrash(id) }
@@ -1415,6 +1438,7 @@ class FolioViewModel(
             var success = false
             try { action(); success = true }
             catch (cancelled: CancellationException) { throw cancelled }
+            catch (conflict: SplitDraftConflict) { state = state.copy(error = conflict.message ?: failure) }
             catch (_: Exception) { state = state.copy(error = failure) }
             finally { state = state.copy(busy = false) }
             if (success) afterSuccess?.invoke()

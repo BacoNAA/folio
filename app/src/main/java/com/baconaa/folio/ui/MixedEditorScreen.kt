@@ -43,6 +43,9 @@ internal fun MixedEditorScreen(model: FolioViewModel, launchMedia: (String, Item
         LazyColumn(Modifier.weight(1f).testTag("mixed-editor"), state = scroll,
             verticalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(bottom = 16.dp)) {
             item("optional-title") {
+                if (editor.splitSource != null) {
+                    Text("完成后，选中的内容会从原记录移到这条新记录。在草稿中移除的来源项会留在原记录。")
+                }
                 OutlinedTextField(editor.title, model::changeTitle, label = { Text("标题（选填）") },
                     singleLine = true, enabled = enabled, modifier = Modifier.fillMaxWidth().testTag("record-title"))
             }
