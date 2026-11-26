@@ -124,7 +124,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                     }
                 }
                 if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                state.error?.takeIf { state.transfer == null && state.templateLibrary == null }?.let { error ->
+                state.error?.takeIf { state.transfer == null && state.templateLibrary == null && state.merge == null }?.let { error ->
                     val retry = when {
                         state.draftReadRetry != null -> model::retryDraftRead
                         state.page == Page.Detail -> model::retryDetail
@@ -178,6 +178,8 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                 FilterChip(selected = state.recent, onClick = { model.selectRecent(true) }, label = { Text("最近记录") })
                                 TextButton(onClick = { model.home(Page.Places) }) { Text("按地点") }
                                 TextButton(onClick = model::pickGroupMembers) { Text("多选成组") }
+                                TextButton(onClick = { model.selectMergeSources() }, enabled = !state.loading && !state.busy &&
+                                    state.error == null) { Text("多选合并") }
                             }
                             if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
                             if (!state.loading && state.error == null && state.records.isEmpty()) EmptyMessage("还没有记录\n从「写一句」开始，完成后会出现在这里。")
@@ -303,6 +305,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
             }
         }
         state.templateLibrary?.let { TemplateLibraryDialog(it, model) }
+        state.merge?.let { RecordMergeDialog(it, model) }
         state.transfer?.let { transfer ->
             state.detail?.let { RecordTransferDialog(it, transfer, model) }
         }

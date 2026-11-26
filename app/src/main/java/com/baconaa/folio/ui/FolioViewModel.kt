@@ -94,6 +94,7 @@ data class FolioState(
     val detailId: RecordId? = null,
     val detail: RecordContent? = null,
     val transfer: RecordTransfer? = null,
+    val merge: RecordMerge? = null,
     val templateLibrary: TemplateLibrary? = null,
     val detailOrigin: Page = Page.Records,
     val savedId: RecordId? = null,
@@ -733,6 +734,59 @@ class FolioViewModel(
             return@runAction
         }
         state = state.copy(templateLibrary = null)
+        openCreatedDraft(id)
+    }
+
+    fun selectMergeSources(ids: List<RecordId> = emptyList()) {
+        if (!state.busy) state = state.copy(merge = RecordMerge.Sources(ids), error = null)
+    }
+
+    fun cancelMerge() {
+        if (!state.busy) state = state.copy(merge = null, error = null)
+    }
+
+    fun previewMerge() = runAction("来源记录读取失败，请重试预览。") {
+        val selected = (state.merge as? RecordMerge.Sources)?.ids ?: return@runAction
+        val sources = withContext(Dispatchers.IO) {
+            selected.mapNotNull { id -> published.openRecordContent(id)?.let { id to it } }.toMap()
+        }
+        if (sources.size != selected.size) {
+            state = state.copy(merge = RecordMerge.Sources(sources.keys.toList()))
+            refresh()
+            state = state.copy(error = "部分来源已移入回收站，已保留其余选择。")
+            return@runAction
+        }
+        val items = sources.flatMap { (id, content) ->
+            content.items.filter { it.hasContent() }.map { MergeItem(id, it.id) }
+        }
+        val sharedTime = sources.values.map { it.times.eventTime }.distinct().singleOrNull()
+        val selection = RecordMergeSelection(items, eventTimeSource = selected.firstOrNull().takeIf { sharedTime != null })
+        state = state.copy(merge = RecordMerge.Preview(sources, selection))
+    }
+
+    fun changeMerge(selection: RecordMergeSelection) {
+        val preview = state.merge as? RecordMerge.Preview ?: return
+        if (!state.busy) state = state.copy(merge = preview.copy(selection = selection), error = null)
+    }
+
+    fun createMergeDraft() = runAction("合并草稿创建失败，请重试。") {
+        val preview = state.merge as? RecordMerge.Preview ?: return@runAction
+        val id = try {
+            withContext(Dispatchers.IO) {
+                drafts.mergeRecordsToDraft(preview.sources.mapValues { it.value.revision }, preview.selection)
+            }
+        } catch (_: CopySourceChanged) {
+            state = state.copy(merge = RecordMerge.Sources(preview.sources.keys.toList()),
+                error = "来源已发生变化，请重新预览后再创建。")
+            return@runAction
+        } catch (missing: CopyMediaUnavailable) {
+            state = state.copy(error = missing.message)
+            return@runAction
+        } catch (invalid: IllegalArgumentException) {
+            state = state.copy(error = invalid.message ?: "请重新核对合并内容。")
+            return@runAction
+        }
+        state = state.copy(merge = null)
         openCreatedDraft(id)
     }
 

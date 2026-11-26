@@ -46,7 +46,7 @@ internal fun RecordTransferDialog(content: RecordContent, transfer: RecordTransf
             LazyColumn(Modifier.fillMaxWidth().heightIn(max = 440.dp).testTag("$kind-options")) {
                 item { Text(if (split) "选择要移出的内容" else "选择内容", style = MaterialTheme.typography.titleSmall) }
                 items(available, key = { "item-" + it.id.value }) { item ->
-                    CopyChoice(item.id in chosen, enabled, Modifier.testTag("$kind-item-${item.id.value}"), { on ->
+                    SelectionCheckbox(item.id in chosen, enabled, Modifier.testTag("$kind-item-${item.id.value}"), { on ->
                         val ids = selection.itemIds.toMutableList()
                         if (on) {
                             val next = ids.indexOfFirst { sourceItems.getValue(it).index > sourceItems.getValue(item.id).index }
@@ -55,13 +55,13 @@ internal fun RecordTransferDialog(content: RecordContent, transfer: RecordTransf
                         model.changeTransfer(selection.copy(itemIds = ids))
                     }) {
                         if (item is ContentItem.Photo) Photo(item.photoId, thumbnail = true, thumbnailDescription = "待选照片", strokes = item.strokes)
-                        Text(item.copyLabel(), maxLines = 3, overflow = TextOverflow.Ellipsis)
+                        Text(item.selectionLabel(), maxLines = 3, overflow = TextOverflow.Ellipsis)
                     }
                 }
                 if (split) {
                     item { Text("原记录将保留", style = MaterialTheme.typography.titleSmall) }
                     items(remaining, key = { "remain-" + it.id.value }) { item ->
-                        Text(item.copyLabel(), Modifier.testTag("split-remain-${item.id.value}"), maxLines = 3,
+                        Text(item.selectionLabel(), Modifier.testTag("split-remain-${item.id.value}"), maxLines = 3,
                             overflow = TextOverflow.Ellipsis)
                     }
                     item {
@@ -73,7 +73,7 @@ internal fun RecordTransferDialog(content: RecordContent, transfer: RecordTransf
                 if (selection.itemIds.isNotEmpty()) item { Text(if (split) "新记录将得到" else "副本顺序", style = MaterialTheme.typography.titleSmall) }
                 itemsIndexed(selection.itemIds, key = { _, id -> "preview-" + id.value }) { index, id ->
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("${index + 1}. ${sourceItems.getValue(id).value.copyLabel()}", Modifier.weight(1f)
+                        Text("${index + 1}. ${sourceItems.getValue(id).value.selectionLabel()}", Modifier.weight(1f)
                             .testTag("$kind-preview-${id.value}"), maxLines = 3, overflow = TextOverflow.Ellipsis)
                         if (selection.itemIds.size > 1) {
                             TextButton(onClick = { move(index, index - 1) }, enabled = enabled && index > 0,
@@ -87,22 +87,22 @@ internal fun RecordTransferDialog(content: RecordContent, transfer: RecordTransf
                     HorizontalDivider()
                     if (split) Text("新记录的标题、时间与线索", style = MaterialTheme.typography.titleSmall)
                     content.title?.let { title ->
-                        CopyChoice(selection.keepTitle, enabled, change = { model.changeTransfer(selection.copy(keepTitle = it)) }) {
+                        SelectionCheckbox(selection.keepTitle, enabled, change = { model.changeTransfer(selection.copy(keepTitle = it)) }) {
                             Text("沿用标题「$title」")
                         }
                     }
                     content.times.eventTime?.let { time ->
-                        CopyChoice(selection.keepEventTime, enabled, change = { model.changeTransfer(selection.copy(keepEventTime = it)) }) {
+                        SelectionCheckbox(selection.keepEventTime, enabled, change = { model.changeTransfer(selection.copy(keepEventTime = it)) }) {
                             Text("沿用事件时间 · ${time.label}")
                         }
                     }
                     if (selection.itemIds.any { sourceItems.getValue(it).value is ContentItem.Checklist }) {
-                        CopyChoice(selection.keepChecked, enabled, change = { model.changeTransfer(selection.copy(keepChecked = it)) }) {
+                        SelectionCheckbox(selection.keepChecked, enabled, change = { model.changeTransfer(selection.copy(keepChecked = it)) }) {
                             Text("沿用清单勾选状态")
                         }
                     }
                     content.place?.let { place ->
-                        CopyChoice(selection.placeId == place.id, enabled, change = { on ->
+                        SelectionCheckbox(selection.placeId == place.id, enabled, change = { on ->
                             model.changeTransfer(selection.copy(placeId = place.id.takeIf { on }))
                         }) {
                             Text("地点", style = MaterialTheme.typography.labelSmall)
@@ -111,12 +111,12 @@ internal fun RecordTransferDialog(content: RecordContent, transfer: RecordTransf
                     }
                 }
                 items(content.tags, key = { "tag-" + it.id.value }) { tag ->
-                    CopyChoice(tag.id in selection.tagIds, enabled, change = { on ->
+                    SelectionCheckbox(tag.id in selection.tagIds, enabled, change = { on ->
                         model.changeTransfer(selection.copy(tagIds = if (on) selection.tagIds + tag.id else selection.tagIds - tag.id))
                     }) { Text("标签 · ${tag.name}") }
                 }
                 items(content.objects, key = { "object-" + it.id.value }) { obj ->
-                    CopyChoice(obj.id in selection.objectIds, enabled, change = { on ->
+                    SelectionCheckbox(obj.id in selection.objectIds, enabled, change = { on ->
                         model.changeTransfer(selection.copy(objectIds = if (on) selection.objectIds + obj.id else selection.objectIds - obj.id))
                     }) {
                         Text(obj.kind.label, style = MaterialTheme.typography.labelSmall)
@@ -132,7 +132,7 @@ internal fun RecordTransferDialog(content: RecordContent, transfer: RecordTransf
 }
 
 @Composable
-private fun CopyChoice(checked: Boolean, enabled: Boolean, modifier: Modifier = Modifier, change: (Boolean) -> Unit,
+internal fun SelectionCheckbox(checked: Boolean, enabled: Boolean, modifier: Modifier = Modifier, change: (Boolean) -> Unit,
     label: @Composable () -> Unit) {
     Row(modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(value = checked, enabled = enabled, role = Role.Checkbox, onValueChange = change)
         .padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -141,7 +141,7 @@ private fun CopyChoice(checked: Boolean, enabled: Boolean, modifier: Modifier = 
     }
 }
 
-private fun ContentItem.copyLabel(): String = when (this) {
+internal fun ContentItem.selectionLabel(): String = when (this) {
     is ContentItem.EmptyMediaField -> field.name
     is ContentItem.Text -> "文字 · $text"
     is ContentItem.Checklist -> "清单 · " + entries.take(3).joinToString("、") { it.text }.let {

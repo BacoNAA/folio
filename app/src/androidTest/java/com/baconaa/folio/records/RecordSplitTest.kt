@@ -78,6 +78,36 @@ internal class RecordSplitTest : AudioStoreFixture() {
         assertEquals(RecordMarks(), created.marks)
     }
 
+    @Test fun splittingAPublishedMergeMovesOnlyTheMergedCopyAfterReopen() = runBlocking {
+        val photo = importPhoto(Color.GREEN)
+        val clip = audioClip()
+        val photoRecord = store.completeMixedDraft(store.appendPhotos(null, listOf(photo.id)))
+        val audioRecord = store.completeMixedDraft(store.appendAudio(null, clip.id, "现场录音"))
+        val originals = listOf(photoRecord, audioRecord).associateWith { store.openRecordContent(it)!! }
+        val selection = RecordMergeSelection(originals.map { (id, content) -> MergeItem(id, content.items.single().id) })
+        val merged = store.completeMixedDraft(store.mergeRecordsToDraft(originals.mapValues { it.value.revision }, selection))
+        val before = store.openRecordContent(merged)!!
+        val (picture, sound) = before.items
+        val draft = store.splitRecordToDraft(merged, before.revision, RecordCopySelection(listOf(sound.id)))
+
+        reopenDatabase()
+        assertEquals(merged, store.openMixedDraft(draft)!!.splitSource)
+        assertEquals(before, store.openRecordContent(merged))
+        val separated = store.completeMixedDraft(draft)
+        reopenDatabase()
+        assertEquals(separated, store.completeMixedDraft(draft))
+        val remaining = store.openRecordContent(merged)!!
+        assertEquals(listOf(picture), remaining.items)
+        assertPhotos(remaining.photos, photo)
+        val moved = store.openRecordContent(separated)!!.items.single() as ContentItem.Audio
+        assertEquals(sound, moved.withId(sound.id))
+        assertEquals(clip.id, moved.audioId)
+        playsToEnd(moved.audioId)
+        originals.forEach { (id, original) -> assertEquals(original, store.openRecordContent(id)) }
+        assertEquals(setOf(photoRecord, audioRecord, merged, separated), store.listRecentRecords().map { it.id }.toSet())
+        assertTrue(store.listDrafts().isEmpty())
+    }
+
     @Test fun onlyActualRetainedContentCountsAndFailedDraftCreationLeavesNoLock() = runBlocking {
         val fields = listOf(TemplateField(TemplateFieldType.TEXT, "正文"), TemplateField(TemplateFieldType.AUDIO, "声音"))
         val template = store.saveTemplate(null, "走访", fields, emptySet())

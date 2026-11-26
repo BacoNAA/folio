@@ -412,29 +412,63 @@ class LocalTextStore internal constructor(
 
     override suspend fun copyRecordToDraft(source: RecordId, expectedRevision: Long, selection: RecordCopySelection): DraftId =
         database.withTransaction {
-            val row = dao.activeRecord(source.value)
-            if (row == null || row.revision != expectedRevision) throw CopySourceChanged()
-            require(selection.itemIds.isNotEmpty() && selection.itemIds.distinct().size == selection.itemIds.size) {
-                "请选择要复制的内容，每项只能选择一次。"
-            }
-            val content = recordContent(row)
-            val byId = content.items.associateBy { it.id }
-            val items = selection.itemIds.map { id ->
-                requireNotNull(byId[id]) { "所选内容不属于来源记录。" }.copyForNewDraft(selection.keepChecked)
-            }
-            require(items.any { it.hasContent() }) { "请至少选择一项有内容的记录项。" }
-            val tags = content.tags.map { it.id }.filter { it in selection.tagIds }
-            val objects = content.objects.map { it.id }.filter { it in selection.objectIds }
-            require(tags.size == selection.tagIds.size && objects.size == selection.objectIds.size &&
-                (selection.placeId == null || selection.placeId == content.place?.id)) { "所选线索不属于来源记录。" }
-            try { requireReadableMedia(items) } catch (failure: IOException) { throw CopyMediaUnavailable(failure) }
-            val id = createDraft(content.times.eventTime.takeIf { selection.keepEventTime }, content.title.takeIf { selection.keepTitle })
-            database.writeMixedDraft(id, MixedDraft(items, items.first().id, 0), now())
-            tagDao.replaceDraftTags(id.value, tags.map { it.value })
-            objectDao.replaceDraftObjects(id.value, objects.map { it.value })
-            placeDao.replaceDraftPlace(id.value, selection.placeId?.value)
-            id
+            val content = readSourceVersion(source, expectedRevision)
+            val chosen = RecordMergeSelection(
+                items = selection.itemIds.map { MergeItem(source, it) },
+                eventTimeSource = source.takeIf { selection.keepEventTime },
+                placeId = selection.placeId, tagIds = selection.tagIds, objectIds = selection.objectIds,
+                keepChecked = selection.keepChecked,
+            )
+            createSelectedDraft(mapOf(source to content), chosen, content.title.takeIf { selection.keepTitle })
         }
+
+    override suspend fun mergeRecordsToDraft(
+        expectedRevisions: Map<RecordId, Long>,
+        selection: RecordMergeSelection,
+    ): DraftId = database.withTransaction {
+        require(expectedRevisions.size >= 2) { "请至少选择两条正式记录。" }
+        val sources = expectedRevisions.mapValues { (source, revision) -> readSourceVersion(source, revision) }
+        createSelectedDraft(sources, selection)
+    }
+
+    private suspend fun readSourceVersion(id: RecordId, revision: Long): RecordContent {
+        val row = dao.activeRecord(id.value)
+        if (row == null || row.revision != revision) throw CopySourceChanged()
+        return recordContent(row)
+    }
+
+    private suspend fun createSelectedDraft(
+        sources: Map<RecordId, RecordContent>,
+        selection: RecordMergeSelection,
+        title: String? = null,
+    ): DraftId {
+        require(selection.items.distinct().size == selection.items.size) { "每项内容只能选择一次。" }
+        val sourceItems = sources.mapValues { (_, content) -> content.items.associateBy { it.id } }
+        val contributingSources = mutableSetOf<RecordId>()
+        val items = selection.items.map { (source, id) ->
+            val item = requireNotNull(sourceItems[source]?.get(id)) { "所选内容不属于来源记录。" }
+            if (item.hasContent()) contributingSources.add(source)
+            item.copyForNewDraft(selection.keepChecked)
+        }
+        require(contributingSources.isNotEmpty()) { "请至少选择一项有内容的记录项。" }
+        require(sources.size == 1 || contributingSources.size >= 2) { "请从至少两条来源选择实际内容。" }
+        val eventTime = selection.eventTimeSource?.let {
+            requireNotNull(sources[it]) { "所选事件时间不属于来源记录。" }.times.eventTime
+        }
+        val tags = sources.values.flatMap { it.tags }.map { it.id }.distinct().filter { it in selection.tagIds }
+        val objects = sources.values.flatMap { it.objects }.map { it.id }.distinct().filter { it in selection.objectIds }
+        require(tags.size == selection.tagIds.size && objects.size == selection.objectIds.size &&
+            (selection.placeId == null || sources.values.any { it.place?.id == selection.placeId })) {
+            "所选线索不属于来源记录。"
+        }
+        try { requireReadableMedia(items) } catch (failure: IOException) { throw CopyMediaUnavailable(failure) }
+        val id = createDraft(eventTime, title)
+        database.writeMixedDraft(id, MixedDraft(items, items.first().id, 0), now())
+        tagDao.replaceDraftTags(id.value, tags.map { it.value })
+        objectDao.replaceDraftObjects(id.value, objects.map { it.value })
+        placeDao.replaceDraftPlace(id.value, selection.placeId?.value)
+        return id
+    }
 
     override suspend fun splitRecordToDraft(
         source: RecordId, expectedRevision: Long, selection: RecordCopySelection,

@@ -62,6 +62,9 @@ interface TextDrafts {
     /** 按预览的正式版本和顺序建立独立草稿。来源失效或版本变化时抛出 CopySourceChanged。 */
     suspend fun copyRecordToDraft(source: RecordId, expectedRevision: Long, selection: RecordCopySelection): DraftId
 
+    /** 核对预览的全部正式版本，从至少两条来源选取实际内容，在同一事务中建立独立草稿。 */
+    suspend fun mergeRecordsToDraft(expectedRevisions: Map<RecordId, Long>, selection: RecordMergeSelection): DraftId
+
     /** 建立可续写的拆分草稿；完成该草稿时才从指定来源移出仍被选中的实际内容。 */
     suspend fun splitRecordToDraft(source: RecordId, expectedRevision: Long, selection: RecordCopySelection): DraftId
 
