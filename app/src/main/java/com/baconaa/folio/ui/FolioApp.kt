@@ -101,6 +101,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                             Page.Editor -> if (state.editor?.splitSource != null) "拆分草稿" else "记录这一刻"
                             Page.Search -> if (state.placeBook != null) "地点小册" else "搜索全部记录"
                             Page.Places -> "按地点"
+                            Page.Chapters -> "生活章节"
                             Page.Groups -> "记录组"
                             Page.GroupDetail -> state.groupContent?.group?.name ?: "记录组"
                             Page.GroupGuide -> if (state.guideEdit != null) "编辑导览" else "专题导览"
@@ -165,6 +166,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                 TextButton(onClick = model::openStarred) { Text("星标") }
                                 TextButton(onClick = { model.home(Page.Trash) }) { Text("回收站") }
                                 TextButton(onClick = { model.home(Page.Groups) }) { Text("记录组") }
+                                TextButton(onClick = { model.home(Page.Chapters) }) { Text("生活章节") }
                             }
                             if (state.drafts.isNotEmpty()) {
                                 FilledTonalButton(onClick = {
@@ -264,7 +266,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                             }
                         }
                         Page.Places -> PlacesScreen(model, placesScroll)
-                        Page.Groups, Page.GroupDetail, Page.GroupPicker, Page.GroupDestination, Page.GroupGuide ->
+                        Page.Chapters, Page.Groups, Page.GroupDetail, Page.GroupPicker, Page.GroupDestination, Page.GroupGuide ->
                             RecordGroupScreens(model, groupsScroll, membersScroll, pickerScroll, guideScroll)
                         Page.Trash -> TrashScreen(model)
                         Page.TrashDetail -> state.trashDetail?.let { record ->

@@ -193,10 +193,10 @@ internal interface TextDao {
         PlaceRow::class, DraftPlaceRow::class, RecordPlaceRow::class,
         ObjectRow::class, ObjectAliasRow::class, DraftObjectRow::class, PublishedObjectRow::class,
         SeasonSettingRow::class, ImportCleanupEntry::class, GroupRow::class, GroupMemberRow::class,
-        GuideSectionRow::class, GuideAssignmentRow::class, TemplateRow::class, TemplateFieldRow::class, TemplateTagRow::class,
+        ChapterRow::class, GuideSectionRow::class, GuideAssignmentRow::class, TemplateRow::class, TemplateFieldRow::class, TemplateTagRow::class,
     ],
     views = [EditableDraftRow::class],
-    version = 25,
+    version = 26,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -222,6 +222,7 @@ internal interface TextDao {
         AutoMigration(from = 22, to = 23),
         AutoMigration(from = 23, to = 24),
         AutoMigration(from = 24, to = 25),
+        AutoMigration(from = 25, to = 26),
     ],
 )
 @TypeConverters(PhotoStrokeStorage::class)
@@ -230,6 +231,7 @@ internal abstract class FolioDatabase : RoomDatabase() {
     abstract fun itemDao(): ContentItemDao
     abstract fun removedItemDao(): RemovedItemDao
     abstract fun trashDao(): TrashDao
+    abstract fun chapterDao(): ChapterDao
     abstract fun groupDao(): GroupDao
     abstract fun guideDao(): GroupGuideDao
     abstract fun templateDao(): TemplateDao

@@ -935,6 +935,19 @@ class TextDatabaseMigrationTest {
         } finally { db.close() }
     }
 
+    @Test fun v25GroupsStayOrdinaryWhenChaptersBecomeAvailable() = runBlocking {
+        createDatabase(25) { it.execSQL("INSERT INTO record_groups(id,name) VALUES ('old','原有记录组')") }
+        val db = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(db, context)
+            assertEquals("原有记录组", store.listGroups().single().name)
+            assertTrue(store.listChapters().isEmpty())
+            val id = RecordGroupId("new")
+            store.saveChapter(id, null, ChapterProfile("第一次独居", "2023"))
+            assertEquals("2023", store.openGroup(id)!!.chapter?.start)
+        } finally { db.close() }
+    }
+
     private fun createDatabase(version: Int, seed: (SQLiteDatabase) -> Unit) {
         val schemaFile = "${FolioDatabase::class.java.name}/$version.json"
         val schema = instrumentation.context.assets.open(schemaFile).bufferedReader().use {

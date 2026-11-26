@@ -20,10 +20,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-enum class Page { Capture, Records, Search, Detail, Editor, Trash, TrashDetail, Places, Groups, GroupDetail, GroupPicker, GroupDestination, GroupGuide }
+enum class Page { Capture, Records, Search, Detail, Editor, Trash, TrashDetail, Places, Groups, GroupDetail, GroupPicker, GroupDestination, GroupGuide, Chapters }
 
 internal val Page.isGroupReadingPage get() = this == Page.GroupDetail || this == Page.GroupGuide
-internal val Page.isGroupPage get() = isGroupReadingPage || this == Page.Groups || this == Page.GroupPicker || this == Page.GroupDestination
+internal val Page.isGroupPage get() = isGroupReadingPage || this == Page.Chapters || this == Page.Groups || this == Page.GroupPicker || this == Page.GroupDestination
 
 data class GuideEditing(val layout: GuideLayout, val conflicting: GroupGuideContent? = null)
 
@@ -78,6 +78,7 @@ data class FolioState(
     val drafts: List<DraftPreview> = emptyList(),
     val draftReadRetry: DraftPreview? = null,
     val records: List<RecordCard> = emptyList(),
+    val groupListOrigin: Page = Page.Groups,
     val groups: List<RecordGroup> = emptyList(),
     val groupId: RecordGroupId? = null,
     val groupContent: RecordGroupContent? = null,
@@ -166,6 +167,13 @@ class FolioViewModel(
 ) : ViewModel() {
     var state by mutableStateOf(FolioState())
         private set
+    private val chapters = published as? RecordChapters ?: mixed as? RecordChapters
+    suspend fun chapterPhotos() = withContext(Dispatchers.IO) { requireNotNull(chapters).chapterPhotos() }
+    suspend fun saveChapter(id: RecordGroupId, original: ChapterProfile?, profile: ChapterProfile) {
+        withContext(Dispatchers.IO) { requireNotNull(chapters).saveChapter(id, original, profile) }
+        openGroup(id)
+    }
+
     private val writes = Mutex()
     private var loadVersion = 0
     private var pendingInitialId: DraftId? = null
@@ -975,8 +983,8 @@ class FolioViewModel(
         when (state.page) {
             Page.Editor -> leaveEditor()
             Page.Detail -> home(state.detailOrigin)
-            Page.Groups -> home(Page.Records)
-            Page.GroupDetail -> home(Page.Groups)
+            Page.Groups, Page.Chapters -> home(Page.Records)
+            Page.GroupDetail -> home(state.groupListOrigin)
             Page.GroupGuide -> if (state.guideEdit == null) home(Page.GroupDetail) else {
                 state = state.copy(guideEdit = null, groupFeedback = null)
                 refresh()
@@ -1062,7 +1070,8 @@ class FolioViewModel(
             Page.GroupDetail -> {
                 val id = requireNotNull(state.groupId)
                 val content = withContext(Dispatchers.IO) { requireNotNull(recordGroups).openGroup(id) }
-                if (version == loadVersion) state = state.copy(groupContent = content, loading = false)
+                if (version == loadVersion) state = state.copy(groupContent = content, loading = false,
+                    groupListOrigin = if (content?.chapter != null) Page.Chapters else state.groupListOrigin)
             }
             Page.GroupPicker -> {
                 val records = withContext(Dispatchers.IO) { browsing.listRecentRecords() }
@@ -1072,6 +1081,10 @@ class FolioViewModel(
                 val valid = selection.members.filter { it in active }
                 state = state.copy(records = records, groupSelection = selection.copy(members = valid), loading = false,
                     groupFeedback = if (valid.size == selection.members.size) state.groupFeedback else "部分记录已失效，请确认剩余选择。")
+            }
+            Page.Chapters -> {
+                val groups = withContext(Dispatchers.IO) { requireNotNull(chapters).listChapters() }
+                if (version == loadVersion) state = state.copy(groups = groups, loading = false)
             }
             Page.Groups, Page.GroupDestination -> {
                 val groups = withContext(Dispatchers.IO) { requireNotNull(recordGroups).listGroups() }
@@ -1083,7 +1096,8 @@ class FolioViewModel(
 
     fun openGroup(id: RecordGroupId) {
         if (state.busy) return
-        state = state.copy(groupId = id, groupContent = null, groupGuide = null, guideEdit = null)
+        val origin = if (state.page == Page.GroupDetail) state.groupListOrigin else if (state.page == Page.Chapters) Page.Chapters else Page.Groups
+        state = state.copy(groupId = id, groupContent = null, groupGuide = null, guideEdit = null, groupListOrigin = origin)
         navigate(Page.GroupDetail)
     }
 
@@ -1233,7 +1247,7 @@ class FolioViewModel(
         runAction("删除记录组失败，请重试。") {
             withContext(Dispatchers.IO) { requireNotNull(recordGroups).deleteGroup(id) }
             state = state.copy(groupId = null, groupContent = null)
-            navigate(Page.Groups)
+            navigate(state.groupListOrigin)
         }
     }
 
