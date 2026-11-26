@@ -1,34 +1,35 @@
 package com.baconaa.folio.records
 
 import android.content.Context
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+import androidx.room.withTransaction
+import kotlin.coroutines.cancellation.CancellationException
 
-/** 设备上的阅读偏好。缺少设置时跟随系统，读取失败时返回 null 供页面重试。 */
-internal class ReadingSettings(context: Context) {
-    private val app = context.applicationContext
-    private val preferences by lazy { app.getSharedPreferences("reading_settings", Context.MODE_PRIVATE) }
-    private val key = "enlarge_body"
+@Entity(tableName = "reading_preference")
+internal data class ReadingPreference(@PrimaryKey val id: Int, val enlarged: Boolean)
 
-    suspend fun readEnlargedBody(): Boolean? = withContext(Dispatchers.IO) {
-        try {
-            synchronized(preferences) { preferences.getBoolean(key, false) }
-        } catch (_: RuntimeException) {
-            null
+internal class ReadingSettings(private val database: FolioDatabase, private val context: Context) {
+    // Earlier versions stored this setting outside Room. A restored preference always takes precedence.
+    internal fun current(): Boolean {
+        val db = database.openHelper.writableDatabase
+        db.query("SELECT enlarged FROM reading_preference WHERE id=1").use {
+            if (it.moveToFirst()) return it.getInt(0) != 0
         }
+        val initial = context.getSharedPreferences("reading_settings", Context.MODE_PRIVATE).getBoolean("enlarge_body", false)
+        db.execSQL("INSERT INTO reading_preference(id,enlarged) VALUES(1,?)", arrayOf(if (initial) 1 else 0))
+        return initial
     }
 
-    suspend fun saveEnlargedBody(enlarged: Boolean): Boolean = withContext(Dispatchers.IO) {
-        try {
-            synchronized(preferences) {
-                val previous = preferences.getBoolean(key, false)
-                val saved = preferences.edit().putBoolean(key, enlarged).commit()
-                // commit 失败时 SharedPreferences 的进程内值也可能已经改变。
-                if (!saved) preferences.edit().putBoolean(key, previous).apply()
-                saved
-            }
-        } catch (_: RuntimeException) {
-            false
+    suspend fun readEnlargedBody(): Boolean? = try {
+        database.withTransaction { current() }
+    } catch (cancel: CancellationException) { throw cancel } catch (_: RuntimeException) { null }
+
+    suspend fun saveEnlargedBody(enlarged: Boolean): Boolean = try {
+        database.withTransaction {
+            database.openHelper.writableDatabase.execSQL("INSERT OR REPLACE INTO reading_preference(id,enlarged) VALUES(1,?)",
+                arrayOf(if (enlarged) 1 else 0))
         }
-    }
+        true
+    } catch (cancel: CancellationException) { throw cancel } catch (_: RuntimeException) { false }
 }

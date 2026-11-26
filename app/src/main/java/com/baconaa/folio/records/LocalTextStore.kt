@@ -33,6 +33,8 @@ class LocalTextStore internal constructor(
     DateReviews, RecordTemplates by LocalRecordTemplates(database, now),
     RecordObservations by LocalObservations(database, now),
     RecordPlaces by LocalRecordPlaces(database, now), RecordObjects by LocalRecordObjects(database, now) {
+    internal val backups = LocalBackups(database, context.applicationContext)
+    internal val reading = ReadingSettings(database, context.applicationContext)
     private val dao = database.textDao()
     private val itemDao = database.itemDao()
     private val trashDao = database.trashDao()

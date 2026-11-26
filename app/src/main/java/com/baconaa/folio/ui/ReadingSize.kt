@@ -13,13 +13,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import com.baconaa.folio.records.ReadingSettings
+import com.baconaa.folio.records.LocalTextStore
 import kotlinx.coroutines.launch
 
 @Composable
 internal fun ReadingBody(content: @Composable (enlarged: Boolean) -> Unit) {
     val app = LocalContext.current.applicationContext
-    val settings = remember(app) { ReadingSettings(app) }
+    val settings = remember(app) { LocalTextStore.get(app).reading }
     var enlarged by remember { mutableStateOf<Boolean?>(null) }
     var readFailed by remember { mutableStateOf(false) }
     var attempt by remember { mutableIntStateOf(0) }

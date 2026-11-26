@@ -60,11 +60,7 @@ class LocalPhotoOriginals private constructor(private val context: Context) {
                 if (expected >= 0 && copied != expected) throw IOException("照片读取不完整，请重新导入")
             }
 
-            // Decode a small sample to verify readability. The saved bytes retain the original metadata.
-            ImageDecoder.decodeBitmap(ImageDecoder.createSource(staging)) { decoder, info, _ ->
-                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-                decoder.setTargetSampleSize(maxOf(1, maxOf(info.size.width, info.size.height) / 128))
-            }.recycle()
+            inspectPhoto(staging)
             ensureActive()
             Files.move(staging.toPath(), original(id).toPath(), ATOMIC_MOVE)
             id
@@ -114,4 +110,12 @@ class LocalPhotoOriginals private constructor(private val context: Context) {
             context.applicationContext,
         ).also { instance = it }
     }
+}
+
+/** Decode a small sample while retaining the original bytes. */
+internal fun inspectPhoto(file: File) {
+    ImageDecoder.decodeBitmap(ImageDecoder.createSource(file)) { decoder, info, _ ->
+        decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+        decoder.setTargetSampleSize(maxOf(1, maxOf(info.size.width, info.size.height) / 128))
+    }.recycle()
 }
