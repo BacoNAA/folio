@@ -46,6 +46,9 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
     val state = model.state
     val recordsScroll = rememberLazyListState()
     val searchScroll = rememberLazyListState()
+    val objectDirectoryScroll = rememberLazyListState()
+    var objectDirectoryQuery by rememberSaveable { mutableStateOf("") }
+    val bookScroll = key(state.objectBook?.id) { rememberLazyListState() }
     val placesScroll = rememberLazyListState()
     val groupsScroll = rememberLazyListState()
     val membersScroll = key(state.groupId) { rememberLazyListState() }
@@ -100,6 +103,8 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                         Text(when (state.page) {
                             Page.Editor -> if (state.editor?.splitSource != null) "拆分草稿" else "记录这一刻"
                             Page.Search -> if (state.placeBook != null) "地点小册" else "搜索全部记录"
+                            Page.Objects -> "人物与物件"
+                            Page.ObjectBook -> state.objectBook?.let { "${it.kind.label}小册" } ?: "对象小册"
                             Page.Places -> "按地点"
                             Page.Chapters -> "生活章节"
                             Page.Groups -> "记录组"
@@ -128,6 +133,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                 state.error?.takeIf { state.transfer == null && state.templateLibrary == null && state.merge == null }?.let { error ->
                     val retry = when {
                         state.draftReadRetry != null -> model::retryDraftRead
+                        state.page == Page.ObjectBook -> model::refresh
                         state.page == Page.Detail -> model::retryDetail
                         state.page == Page.TrashDetail -> model::retryTrashDetail
                         state.page == Page.GroupGuide && state.guideEdit != null -> model::saveGuide
@@ -167,6 +173,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                 TextButton(onClick = { model.home(Page.Trash) }) { Text("回收站") }
                                 TextButton(onClick = { model.home(Page.Groups) }) { Text("记录组") }
                                 TextButton(onClick = { model.home(Page.Chapters) }) { Text("生活章节") }
+                                TextButton(onClick = { model.home(Page.Objects) }) { Text("人物与物件") }
                             }
                             if (state.drafts.isNotEmpty()) {
                                 FilledTonalButton(onClick = {
@@ -265,6 +272,8 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                 }
                             }
                         }
+                        Page.Objects -> ObjectDirectory(model, objectDirectoryQuery, { objectDirectoryQuery = it }, objectDirectoryScroll)
+                        Page.ObjectBook -> ObjectBookScreen(model, bookScroll)
                         Page.Places -> PlacesScreen(model, placesScroll)
                         Page.Chapters, Page.Groups, Page.GroupDetail, Page.GroupPicker, Page.GroupDestination, Page.GroupGuide ->
                             RecordGroupScreens(model, groupsScroll, membersScroll, pickerScroll, guideScroll)

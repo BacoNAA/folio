@@ -20,7 +20,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-enum class Page { Capture, Records, Search, Detail, Editor, Trash, TrashDetail, Places, Groups, GroupDetail, GroupPicker, GroupDestination, GroupGuide, Chapters }
+enum class Page { Capture, Records, Search, Detail, Editor, Trash, TrashDetail, Places, Groups, GroupDetail, GroupPicker, GroupDestination, GroupGuide, Chapters, Objects, ObjectBook }
 
 internal val Page.isGroupReadingPage get() = this == Page.GroupDetail || this == Page.GroupGuide
 internal val Page.isGroupPage get() = isGroupReadingPage || this == Page.Chapters || this == Page.Groups || this == Page.GroupPicker || this == Page.GroupDestination
@@ -110,6 +110,9 @@ data class FolioState(
     val tagsLoading: Boolean = false,
     val tagsError: String? = null,
     val filterTags: Set<TagId> = emptySet(),
+    val objectBook: RecordObject? = null,
+    val objectQuery: String = "",
+    val objectRecords: List<RecordCard> = emptyList(),
     val sharedObjects: List<RecordObject> = emptyList(),
     val objectsLoading: Boolean = false,
     val objectsError: String? = null,
@@ -192,6 +195,8 @@ class FolioViewModel(
         if (page == Page.Records || page == Page.Search || page == Page.Trash || page.isGroupPage) refresh()
         if (page == Page.Search) { loadTags(); loadObjects() }
         if (page == Page.Places) loadPlaces(directoryPlaceQuery)
+        if (page == Page.Objects) loadObjects()
+        if (page == Page.ObjectBook) refresh()
     }
 
     private var recordingAfter: ItemId? = null
@@ -983,6 +988,8 @@ class FolioViewModel(
         when (state.page) {
             Page.Editor -> leaveEditor()
             Page.Detail -> home(state.detailOrigin)
+            Page.Objects -> home(Page.Records)
+            Page.ObjectBook -> leaveObjectBook()
             Page.Groups, Page.Chapters -> home(Page.Records)
             Page.GroupDetail -> home(state.groupListOrigin)
             Page.GroupGuide -> if (state.guideEdit == null) home(Page.GroupDetail) else {
@@ -1027,6 +1034,16 @@ class FolioViewModel(
             try {
                 if (page.isGroupPage) {
                     readGroupPage(page, version)
+                } else if (page == Page.ObjectBook) {
+                    val book = requireNotNull(state.objectBook)
+                    val keyword = state.objectQuery
+                    val (current, records) = withContext(Dispatchers.IO) {
+                        val current = requireNotNull(objects).listObjects().first { it.id == book.id }
+                        val scoped = if (current.kind == ObjectKind.PERSON) RecordQuery(keyword, peopleIds = setOf(book.id))
+                            else RecordQuery(keyword, thingIds = setOf(book.id))
+                        current to browsing.queryRecords(scoped).certain
+                    }
+                    if (version == loadVersion) state = state.copy(objectBook = current, objectRecords = records, loading = false)
                 } else if (page == Page.Search) {
                     val (result, currentScope) = withContext(Dispatchers.IO) {
                         browsing.queryRecords(RecordQuery(query, filterTags, starredOnly, placeScope?.place?.id, people, things, mediaTypes,
@@ -1361,11 +1378,29 @@ class FolioViewModel(
         state = if (kind == ObjectKind.PERSON) state.copy(filterPeople = ids) else state.copy(filterThings = ids)
         refresh()
     }
+    private data class BookOrigin(val page: Page, val detail: RecordId?, val detailOrigin: Page,
+                                  val book: RecordObject?, val query: String)
+    private val bookOrigins = ArrayDeque<BookOrigin>()
+
     fun openObject(value: RecordObject) {
-        state = state.copy(query = "", filterTags = emptySet(), starredOnly = false, placeScope = null,
-            mediaTypes = emptySet(), eventDateFilter = null, filterPeople = if (value.kind == ObjectKind.PERSON) setOf(value.id) else emptySet(),
-            filterThings = if (value.kind == ObjectKind.THING) setOf(value.id) else emptySet(), searchOrigin = cardSearchOrigin, linkingPlace = null)
-        home(Page.Search)
+        if (state.busy) return
+        if (state.page != Page.ObjectBook && !(state.page == Page.Detail && state.detailOrigin == Page.ObjectBook)) bookOrigins.clear()
+        bookOrigins.addLast(BookOrigin(state.page, state.detailId, state.detailOrigin, state.objectBook, state.objectQuery))
+        state = state.copy(objectBook = value, objectQuery = "", objectRecords = emptyList())
+        navigate(Page.ObjectBook)
+    }
+
+    fun queryObjectBook(value: String) {
+        state = state.copy(objectQuery = value)
+        refresh()
+    }
+
+    private fun leaveObjectBook() {
+        val origin = bookOrigins.removeLastOrNull()
+        state = state.copy(objectBook = origin?.book, objectQuery = origin?.query.orEmpty())
+        if (origin?.page == Page.Detail && origin.detail != null) {
+            runAction("记录读取失败，请重试。") { showDetail(origin.detail, origin.detailOrigin) }
+        } else navigate(origin?.page ?: Page.Objects)
     }
 
     private var placesVersion = 0

@@ -261,7 +261,11 @@ internal fun RecordContents(content: RecordContent, model: FolioViewModel) {
     content.title?.let { Text(it, style = MaterialTheme.typography.titleLarge) }
     Text("事件时间：${content.times.eventTime.label()}", fontSize = 12.sp)
     content.place?.let { Text("地点", fontSize = 12.sp); PlaceDescription(it) }
-    content.objects.forEach { Text(it.kind.label, fontSize = 12.sp); ObjectDescription(it) }
+    content.objects.forEach { value ->
+        Text(value.kind.label, fontSize = 12.sp)
+        ObjectDescription(value)
+        if (model.state.page == Page.Detail) TextButton(onClick = { model.openObject(value) }) { Text("查看${value.info.name}的小册") }
+    }
     ReadingBody { enlarged ->
         val bodySize = if (enlarged) 24.sp else 18.sp
         val lineHeight = if (enlarged) 40.sp else 32.sp

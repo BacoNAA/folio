@@ -100,6 +100,46 @@ class ObjectNavigationTest {
         listOf(both, people, thing).forEach(::clean)
     }
 
+    @Test fun aliasOpensOneIdentityAndLastRecordLeavesOnlyAfterPublishingItsEdit() {
+        val suffix = System.nanoTime().toString()
+        val alias = "小白$suffix"
+        val homeText = "维修单$suffix"
+        val (home, office, homeId) = runBlocking {
+            val homeDraft = store.saveDraft(null, TextEdit(homeText, 0))!!
+            val homeId = store.createDraftObject(homeDraft, ObjectKind.THING, ObjectInfo("咖啡机", "家用", listOf(alias)))
+            val officeDraft = store.saveDraft(null, TextEdit("办公室记录$suffix", 0))!!
+            store.createDraftObject(officeDraft, ObjectKind.THING, ObjectInfo("咖啡机", "办公室"))
+            Triple(store.completeMixedDraft(homeDraft), store.completeMixedDraft(officeDraft), homeId)
+        }
+        try {
+            compose.onNodeWithTag("nav-Records").performClick()
+            compose.onNodeWithText("人物与物件").performClick()
+            compose.onNodeWithTag("object-directory-query").performTextInput(alias)
+            waitText("家用")
+            compose.onNodeWithText("家用").performClick()
+            waitText(homeText)
+            compose.onNodeWithText("办公室记录$suffix").assertDoesNotExist()
+            val edit = runBlocking {
+                val draft = store.editRecord(home)
+                store.saveDraftObjects(draft, listOf(store.openRecordContent(office)!!.objects.single().id))
+                draft
+            }
+            compose.onNodeWithTag("book-query").performTextInput("维修")
+            waitText(homeText)
+            compose.onNodeWithText(homeText).performClick()
+            waitText("继续未完成修改")
+            runBlocking { store.completeMixedDraft(edit) }
+            compose.onNodeWithText("返回").performClick()
+            waitText("本小册没有匹配的记录")
+            compose.onNodeWithTag("book-query").performTextClearance()
+            waitText("小册中还没有正式记录")
+            compose.onNodeWithText("返回").performClick()
+            compose.onNodeWithTag("object-directory-query").assertTextContains(alias)
+            waitText("家用")
+            assertEquals(homeId, runBlocking { store.listObjects().single { alias in it.info.aliases }.id })
+        } finally { clean(home); clean(office) }
+    }
+
     private fun filter(kind: String, value: RecordObject, query: String) {
         compose.onNodeWithText("筛选$kind").performScrollTo().performClick()
         compose.onNodeWithTag("object-search").performTextInput(query)
