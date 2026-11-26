@@ -164,6 +164,45 @@ class DocumentImportNavigationTest {
         play(audio)
     }
 
+    @Test fun pickingAudioForATemplateFieldKeepsItsPositionThroughCancelAndRetry() {
+        val template = runBlocking { store.saveTemplate(null, "声音选取${System.nanoTime()}",
+            listOf(TemplateField(TemplateFieldType.AUDIO, "街声"), TemplateField(TemplateFieldType.TEXT, "感受")), emptySet()) }
+        try {
+            val id = runBlocking { store.startTemplateDraft(template.id, template.revision) }
+            draftId = id
+            val old = runBlocking { store.openMixedDraft(id)!!.items }
+            sample("bad.mp3", "audio/mpeg", "窗框凭证.pdf")
+            val source = sample("tone-440.m4a", "audio/mp4")
+            resumeDraft()
+            editorScroll(hasText("选择已有录音"))
+            startAtRoot = true
+            compose.onNodeWithText("选择已有录音").performClick()
+            cancelPicker()
+            startAtRoot = false
+            assertEquals(old, runBlocking { store.openMixedDraft(id)!!.items })
+            compose.onNodeWithText("选择已有录音").performClick()
+            pickFile("bad.mp3")
+            waitText("导入失败")
+            compose.onNodeWithText("重新选择").performClick()
+            pickFile("tone-440.m4a")
+            waitText("试听")
+            val items = runBlocking { store.openMixedDraft(id)!!.items }
+            val audio = items.first() as ContentItem.Audio
+            assertEquals(old.map { it.id }, items.map { it.id })
+            assertEquals("街声", audio.fieldName)
+            publish("试听")
+            assertEquals(1, context.contentResolver.delete(source, null, null))
+            assertEquals(listOf(audio), runBlocking { store.openRecordContent(recordId!!)!!.items })
+            play(audio)
+        } finally {
+            // 此用例使用真实 Activity 的库。只清理本例创建的模板，草稿和记录由共同清理步骤处理。
+            context.openOrCreateDatabase("folio.db", 0, null).use { db ->
+                db.setForeignKeyConstraintsEnabled(true)
+                db.delete("record_templates", "id = ?", arrayOf(template.id.value))
+            }
+        }
+    }
+
     @Test fun pickedM4aPlaysFromTheReopenedRecordAfterDeletingTheSource() {
         val before = runBlocking { store.listDrafts().map { it.id } }
         val source = sample("tone-440.m4a", "audio/mp4")
@@ -327,7 +366,11 @@ class DocumentImportNavigationTest {
         compose.waitUntil(10_000) { viewIntent.get()?.dataString == address }
         assertTrue(viewIntent.get().hasCategory(Intent.CATEGORY_BROWSABLE))
         arguments.getString("m03BrowserPackage")?.let { browser ->
-            compose.waitUntil(12_000) { instrumentation.uiAutomation.rootInActiveWindow?.packageName == browser }
+            val marker = arguments.getString("m03PageMarker")
+            compose.waitUntil("浏览器打开保存的网址", 12_000) {
+                val root = instrumentation.uiAutomation.rootInActiveWindow
+                root?.packageName == browser && (marker == null || root.displaysPageText(marker))
+            }
             instrumentation.uiAutomation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
             compose.waitUntil(12_000) { instrumentation.uiAutomation.rootInActiveWindow?.packageName == context.packageName }
         }
@@ -362,6 +405,12 @@ class DocumentImportNavigationTest {
         compose.onNodeWithTag(tag).performClick()
         if (after != null) compose.onNodeWithText("在此后添加").performClick()
         compose.onNodeWithText(label).performScrollTo().performClick()
+    }
+
+    // Android 10 WebView 的正文是虚拟子节点，要从窗口树读取。
+    private fun AccessibilityNodeInfo.displaysPageText(expected: String): Boolean {
+        if (isVisibleToUser && text?.toString() == expected) return true
+        return (0 until childCount).any { getChild(it)?.displaysPageText(expected) == true }
     }
 
     private fun pickerRoot(): AccessibilityNodeInfo? = instrumentation.uiAutomation.rootInActiveWindow?.takeIf {

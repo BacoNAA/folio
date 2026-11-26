@@ -18,7 +18,7 @@ interface MediaImports {
     /** 选择成功后调用。after 为空时追加。初始时间和地点仅用于以文件起草，原件与草稿项均落盘后返回。 */
     suspend fun importMedia(
         source: Uri, type: ImportType, draftId: DraftId? = null, after: ItemId? = null,
-        initialEventTime: EventTime? = null, initialPlaceId: PlaceId? = null,
+        initialEventTime: EventTime? = null, initialPlaceId: PlaceId? = null, audioField: ItemId? = null,
     ): ImportedItem
 
     /** linkId 为空表示给尚未落盘的网址项选第一张截图，已有项则只替换该项的截图。 */

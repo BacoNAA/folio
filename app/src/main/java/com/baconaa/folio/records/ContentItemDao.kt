@@ -15,7 +15,7 @@ import androidx.room.migration.AutoMigrationSpec
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.execSQL
 
-/** itemId 标识这一次插入；不同照片项可以共用原图，各自保留自己的说明。 */
+/** itemId 标识这一次插入；共用一张原图的照片项各自保留说明和笔画。 */
 internal data class ContentSlot(
     val itemId: String,
     val text: String?,
@@ -35,6 +35,9 @@ internal data class ContentSlot(
     val linkTitle: String? = null,
     val linkNote: String? = null,
     val linkScreenshotId: String? = null,
+    val photoStrokes: List<PhotoStroke>? = null,
+    val fieldName: String? = null,
+    val emptyFieldType: TemplateFieldType? = null,
 )
 
 @Entity(
@@ -64,6 +67,15 @@ internal abstract class ContentItemDao {
     @RewriteQueriesToDropUnusedColumns
     @Query("SELECT * FROM draft_items WHERE draftId = :id ORDER BY position")
     abstract suspend fun draftItems(id: String): List<ContentSlot>
+
+    @Query("""UPDATE draft_items SET photoStrokes = :strokes
+              WHERE draftId = :draftId AND itemId = :itemId AND photoId IS NOT NULL
+              AND EXISTS (SELECT 1 FROM editable_text_drafts WHERE id = :draftId)""")
+    abstract suspend fun updatePhotoStrokes(draftId: String, itemId: String, strokes: ByteArray?): Int
+
+    @RewriteQueriesToDropUnusedColumns
+    @Query("SELECT * FROM draft_items WHERE draftId = :draftId AND itemId = :itemId")
+    abstract suspend fun draftItem(draftId: String, itemId: String): ContentSlot
 
     @RewriteQueriesToDropUnusedColumns
     @Query("SELECT * FROM record_items WHERE recordId = :id ORDER BY position")

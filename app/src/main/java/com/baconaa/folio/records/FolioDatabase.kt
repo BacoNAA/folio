@@ -14,6 +14,7 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.RewriteQueriesToDropUnusedColumns
 import androidx.room.RoomDatabase
+import androidx.room.TypeConverters
 import androidx.room.Update
 import androidx.room.migration.AutoMigrationSpec
 import androidx.sqlite.SQLiteConnection
@@ -166,10 +167,10 @@ internal interface TextDao {
         PlaceRow::class, DraftPlaceRow::class, RecordPlaceRow::class,
         ObjectRow::class, ObjectAliasRow::class, DraftObjectRow::class, PublishedObjectRow::class,
         SeasonSettingRow::class, ImportCleanupEntry::class, GroupRow::class, GroupMemberRow::class,
-        GuideSectionRow::class, GuideAssignmentRow::class,
+        GuideSectionRow::class, GuideAssignmentRow::class, TemplateRow::class, TemplateFieldRow::class, TemplateTagRow::class,
     ],
     views = [EditableDraftRow::class],
-    version = 22,
+    version = 24,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -192,8 +193,11 @@ internal interface TextDao {
         AutoMigration(from = 19, to = 20),
         AutoMigration(from = 20, to = 21),
         AutoMigration(from = 21, to = 22),
+        AutoMigration(from = 22, to = 23),
+        AutoMigration(from = 23, to = 24),
     ],
 )
+@TypeConverters(PhotoStrokeStorage::class)
 internal abstract class FolioDatabase : RoomDatabase() {
     abstract fun textDao(): TextDao
     abstract fun itemDao(): ContentItemDao
@@ -201,6 +205,7 @@ internal abstract class FolioDatabase : RoomDatabase() {
     abstract fun trashDao(): TrashDao
     abstract fun groupDao(): GroupDao
     abstract fun guideDao(): GroupGuideDao
+    abstract fun templateDao(): TemplateDao
     abstract fun photoCleanupDao(): PhotoCleanupDao
     abstract fun audioCleanupDao(): AudioCleanupDao
     abstract fun importCleanupDao(): ImportCleanupDao

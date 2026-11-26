@@ -32,7 +32,7 @@ data class GroupSelection(
     val members: List<RecordId> = emptyList(), val name: String = "",
 )
 
-data class FileImportFailure(val type: ImportType, val after: ItemId?, val message: String)
+data class FileImportFailure(val type: ImportType, val after: ItemId?, val message: String, val audioField: ItemId? = null)
 
 data class RecordEditor(
     val draftId: DraftId? = null,
@@ -57,6 +57,7 @@ data class RecordEditor(
     // 先写标题时，页面的空输入框尚不是草稿内容项。
     val unboundItem: ItemId? = null,
     val photoTimeOffer: PhotoTimeOffer? = null,
+    val markingPhoto: ContentItem.Photo? = null,
     // 首次落盘分配后端 ID，但当前输入项及其键盘回调保留原身份；写入时再映射。
     val backendItemIds: Map<ItemId, ItemId> = emptyMap(),
     val fileImportFailure: FileImportFailure? = null,
@@ -65,13 +66,6 @@ data class RecordEditor(
     fun position(id: ItemId?) = id?.takeUnless { it == unboundItem }?.let { backendItemIds[it] ?: it }
     val value: TextFieldValue get() = textValues.values.firstOrNull() ?: TextFieldValue()
     val hasContent: Boolean get() = items.any { it.hasContent() }
-}
-
-private fun ContentItem.hasContent() = when (this) {
-    is ContentItem.Text -> text.isNotBlank()
-    is ContentItem.Checklist -> entries.any { it.text.isNotBlank() }
-    is ContentItem.Link -> hasInput
-    else -> true
 }
 
 /** 同一地点既可作为普通搜索条件，也可作为有资料和记录操作的地点小册。 */
@@ -98,6 +92,8 @@ data class FolioState(
     val possibleResults: List<RecordCard> = emptyList(),
     val detailId: RecordId? = null,
     val detail: RecordContent? = null,
+    val copySelection: RecordCopySelection? = null,
+    val templateLibrary: TemplateLibrary? = null,
     val detailOrigin: Page = Page.Records,
     val savedId: RecordId? = null,
     val busy: Boolean = false,
@@ -164,6 +160,7 @@ class FolioViewModel(
     private val imports: MediaImports? = mixed as? MediaImports ?: published as? MediaImports,
     private val recordGroups: RecordGroups? = published as? RecordGroups ?: mixed as? RecordGroups,
     private val groupGuides: RecordGroupGuides? = published as? RecordGroupGuides ?: mixed as? RecordGroupGuides,
+    private val templates: RecordTemplates? = published as? RecordTemplates ?: mixed as? RecordTemplates,
 ) : ViewModel() {
     var state by mutableStateOf(FolioState())
         private set
@@ -188,6 +185,7 @@ class FolioViewModel(
     }
 
     private var recordingAfter: ItemId? = null
+    private var recordingField: ItemId? = null
     private var failedPhoto: Pair<Uri, ExternalTarget>? = null
     val playback = media?.playback ?: MutableStateFlow(AudioPlaybackState())
 
@@ -214,10 +212,12 @@ class FolioViewModel(
         loadVersion++
         state = state.copy(page = Page.Editor, editor = RecordEditor(
             items = listOfNotNull(item), activeItemId = item?.id,
-            eventTime = if (currentTime) ZonedDateTime.now().let { EventTime(it.toLocalDate(), it.toLocalTime().withSecond(0).withNano(0), it.zone) } else null,
+            eventTime = if (currentTime) currentEventTime() else null,
             textValues = if (item is ContentItem.Text) mapOf(item.id to TextFieldValue()) else emptyMap()),
             savedId = null, error = null, saveError = null, loading = false)
     }
+
+    private fun currentEventTime() = ZonedDateTime.now().let { EventTime(it.toLocalDate(), it.toLocalTime().withSecond(0).withNano(0), it.zone) }
 
     fun changeTitle(title: String) {
         val editor = state.editor ?: return
@@ -250,6 +250,42 @@ class FolioViewModel(
     fun changeChecklist(id: ItemId, entries: List<ChecklistEntry>) {
         updateItem(id) { (it as ContentItem.Checklist).copy(entries = entries) }
         save()
+    }
+
+    fun openPhotoMarkup(photo: ContentItem.Photo) {
+        val editor = state.editor ?: return
+        if (!state.busy) state = state.copy(editor = editor.copy(markingPhoto = photo), error = null)
+    }
+
+    fun changePhotoMarkup(change: (List<PhotoStroke>) -> List<PhotoStroke>) {
+        val editor = state.editor ?: return
+        val photo = editor.markingPhoto ?: return
+        if (!state.busy) state = state.copy(editor = editor.copy(markingPhoto = photo.copy(strokes = change(photo.strokes))), error = null)
+    }
+
+    fun cancelPhotoMarkup() {
+        val editor = state.editor ?: return
+        if (!state.busy) state = state.copy(editor = editor.copy(markingPhoto = null), error = null)
+    }
+
+    fun savePhotoMarkup() = runAction("标注保存失败，请重试。") {
+        writes.withLock {
+            if (!saveLatest()) return@withLock
+            val editor = state.editor ?: return@withLock
+            val photo = editor.markingPhoto ?: return@withLock
+            val saved = try {
+                withContext(Dispatchers.IO) {
+                    mixed.editPhotoStrokes(requireNotNull(editor.draftId), requireNotNull(editor.position(photo.id)), photo.strokes)
+                }
+            } catch (invalid: IllegalArgumentException) {
+                state = state.copy(error = invalid.message ?: "标注保存失败，请重试。")
+                return@withLock
+            }
+            val item = saved.copy(id = photo.id)
+            state = state.copy(editor = editor.copy(markingPhoto = null,
+                items = editor.items.map { if (it.id == item.id) item else it },
+                persistedItems = editor.persistedItems.map { if (it.id == item.id) item else it }))
+        }
     }
 
     fun changeLink(link: ContentItem.Link) {
@@ -340,7 +376,7 @@ class FolioViewModel(
                                     (snapshot.textValues[item.id] ?: TextFieldValue(item.text)).asEdit())
                                 is ContentItem.Photo -> mixed.editPhotoCaption(snapshot.draftId, backendId, item.caption)
                                 is ContentItem.Link -> mixed.editLink(snapshot.draftId, item.copy(id = backendId))
-                                is ContentItem.Pdf, is ContentItem.Video -> Unit // 文件信息随原件导入。
+                                is ContentItem.Pdf, is ContentItem.Video, is ContentItem.EmptyMediaField -> Unit
                                 is ContentItem.Audio -> mixed.editAudioCaption(snapshot.draftId, backendId, item.caption)
                                 is ContentItem.Checklist -> mixed.editChecklist(snapshot.draftId, backendId, item.entries)
                             }
@@ -429,7 +465,7 @@ class FolioViewModel(
         catch (_: Exception) { state = state.copy(error = "操作已保存，草稿读取失败，请重试读取。") }
     }
 
-    fun prepareExternal(after: ItemId?, currentTime: Boolean = true, screenshotFor: ItemId? = null, launch: (ExternalTarget) -> Unit) {
+    fun prepareExternal(after: ItemId?, currentTime: Boolean = true, screenshotFor: ItemId? = null, templateField: ItemId? = null, launch: (ExternalTarget) -> Unit) {
         if (state.recording || state.pendingAttachment != null || state.editor?.needsReload == true) return
         if (state.editor == null) begin(currentTime = currentTime)
         runAction("暂时无法打开媒体入口，请重试。") {
@@ -446,7 +482,8 @@ class FolioViewModel(
                     editor.draftId?.let { editor.position(after)?.value }, editor.returnPage, state.detailOrigin,
                     editor.eventTime, emptyInput = emptyInput, placeBookId = state.placeBook?.id?.value,
                     groupId = state.groupId?.value.takeIf { state.detailOrigin.isGroupReadingPage },
-                    linkItemId = editor.draftId?.let { editor.position(screenshotFor)?.value }))
+                    linkItemId = editor.draftId?.let { editor.position(screenshotFor)?.value },
+                    templateFieldId = editor.position(templateField)?.value))
             }
         }
     }
@@ -482,13 +519,14 @@ class FolioViewModel(
                 if (uri == null || !saveLatest()) return@withLock
                 val editor = requireNotNull(state.editor)
                 val after = target.afterId?.let(::ItemId)
+                val audioField = target.templateFieldId?.let(::ItemId)
                 val result = try {
-                    requireNotNull(imports).importMedia(uri, type, editor.draftId, after, target.eventTime, editor.place?.id)
+                    requireNotNull(imports).importMedia(uri, type, editor.draftId, after, target.eventTime, editor.place?.id, audioField)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (failure: Exception) {
                     val message = (failure as? MediaImportException)?.message ?: "文件未能加入草稿，请重新选择或继续编辑。"
-                    state = state.copy(editor = editor.copy(fileImportFailure = FileImportFailure(type, after, message)))
+                    state = state.copy(editor = editor.copy(fileImportFailure = FileImportFailure(type, after, message, audioField)))
                     return@withLock
                 }
                 state = state.copy(editor = editor.copy(draftId = result.draftId, fileImportFailure = null))
@@ -530,7 +568,8 @@ class FolioViewModel(
             try {
                 restoreTarget(target)
                 val id = requireNotNull(media).importPhoto(uri)
-                state = state.copy(pendingAttachment = PendingAttachment.Photo(id, target.afterId?.let(::ItemId), target.suggestPhotoTime), importFailed = false)
+                state = state.copy(pendingAttachment = PendingAttachment.Photo(id, target.afterId?.let(::ItemId), target.suggestPhotoTime,
+                    target.templateFieldId?.let(::ItemId)), importFailed = false)
                 failedPhoto = null
                 writes.withLock { if (saveLatest()) bindPending() }
             } catch (cancelled: CancellationException) { throw cancelled }
@@ -561,10 +600,16 @@ class FolioViewModel(
         val editor = state.editor ?: return
         val id = withContext(Dispatchers.IO) {
             when (pending) {
-                is PendingAttachment.Photo -> if (editor.draftId == null) drafts.appendPhotos(null, listOf(pending.id), editor.eventTime)
-                    else { mixed.insertPhoto(editor.draftId, pending.after, pending.id); editor.draftId }
-                is PendingAttachment.Audio -> if (editor.draftId == null) mixed.appendAudio(null, pending.clip.id, initialEventTime = editor.eventTime)
-                    else { mixed.insertAudio(editor.draftId, pending.after, pending.clip.id); editor.draftId }
+                is PendingAttachment.Photo -> when {
+                    pending.field != null -> requireNotNull(editor.draftId).also { mixed.fillPhotoField(it, pending.field, pending.id) }
+                    editor.draftId == null -> drafts.appendPhotos(null, listOf(pending.id), editor.eventTime)
+                    else -> editor.draftId.also { mixed.insertPhoto(it, pending.after, pending.id) }
+                }
+                is PendingAttachment.Audio -> when {
+                    pending.field != null -> requireNotNull(editor.draftId).also { mixed.fillAudioField(it, pending.field, pending.clip.id) }
+                    editor.draftId == null -> mixed.appendAudio(null, pending.clip.id, initialEventTime = editor.eventTime)
+                    else -> editor.draftId.also { mixed.insertAudio(it, pending.after, pending.clip.id) }
+                }
             }
         }
         state = state.copy(editor = editor.copy(draftId = id), pendingAttachment = null)
@@ -592,6 +637,7 @@ class FolioViewModel(
 
     fun startRecording(target: ExternalTarget) = runAction("无法开始录音，请检查麦克风权限或是否被占用。") {
         restoreTarget(target)
+        recordingField = target.templateFieldId?.let(::ItemId)
         recordingAfter = target.afterId?.let(::ItemId)?.let { state.editor?.backendItemIds?.get(it) ?: it }
         requireNotNull(media).start()
     }
@@ -600,7 +646,7 @@ class FolioViewModel(
         if (state.busy || !state.recording) return
         try {
             val clip = requireNotNull(media).stop()
-            state = state.copy(recording = false, pendingAttachment = PendingAttachment.Audio(clip, recordingAfter))
+            state = state.copy(recording = false, pendingAttachment = PendingAttachment.Audio(clip, recordingAfter, recordingField))
             runAction("录音加入草稿失败，原件已保留，请重试。", afterSuccess = {
                 if (state.pendingAttachment == null && state.editor?.needsReload == false && state.saveError == null) afterSave?.invoke()
             }) {
@@ -638,6 +684,95 @@ class FolioViewModel(
             val draftId = withContext(Dispatchers.IO) { drafts.editRecord(id) }
             readEditor(draftId, id, Page.Detail)
         }
+    }
+
+    fun openTemplates() {
+        if (state.busy) return
+        state = state.copy(templateLibrary = TemplateLibrary())
+        runAction("模板读取失败，请重试。") {
+            val saved = withContext(Dispatchers.IO) { requireNotNull(templates).listTemplates() }
+            state = state.copy(templateLibrary = TemplateLibrary(saved))
+        }
+    }
+
+    fun editTemplate(template: RecordTemplate? = null, extract: Boolean = false) {
+        if (state.busy) return
+        val source = state.detail.takeIf { extract }
+        val form = TemplateEdit(template, template?.name.orEmpty(), template?.fields ?: source?.templateFields.orEmpty(),
+            (template?.tags ?: source?.tags.orEmpty()).map { it.id }.toSet())
+        state = state.copy(templateLibrary = (state.templateLibrary ?: TemplateLibrary()).copy(edit = form), error = null)
+        loadTags()
+    }
+
+    fun changeTemplate(edit: TemplateEdit) {
+        if (!state.busy) state = state.copy(templateLibrary = state.templateLibrary?.copy(edit = edit), error = null)
+    }
+
+    fun dismissTemplates() {
+        if (!state.busy) state = state.copy(templateLibrary = null, error = null)
+    }
+
+    fun saveTemplate() = runAction("模板保存失败，已保留当前填写，请重试。") {
+        val form = state.templateLibrary?.edit ?: return@runAction
+        try {
+            val saved = withContext(Dispatchers.IO) { requireNotNull(templates).saveTemplate(form.previous, form.name, form.fields, form.tags) }
+            state = state.copy(templateLibrary = TemplateLibrary(listOf(saved), justSaved = true))
+        } catch (changed: TemplateChanged) { templateChanged(changed) }
+    }
+
+    private fun templateChanged(changed: TemplateChanged) {
+        state = state.copy(templateLibrary = state.templateLibrary?.copy(stale = true), error = changed.message)
+    }
+
+    fun useTemplate(template: RecordTemplate) = runAction("模板草稿创建失败，请重试。") {
+        val id = try {
+            withContext(Dispatchers.IO) { requireNotNull(templates).startTemplateDraft(template.id, template.revision, currentEventTime()) }
+        } catch (changed: TemplateChanged) {
+            templateChanged(changed)
+            return@runAction
+        }
+        state = state.copy(templateLibrary = null)
+        openCreatedDraft(id)
+    }
+
+    fun startRecordCopy() {
+        val content = state.detail ?: return
+        if (state.busy || state.page != Page.Detail) return
+        state = state.copy(copySelection = RecordCopySelection(placeId = content.place?.id,
+            tagIds = content.tags.map { it.id }.toSet(), objectIds = content.objects.map { it.id }.toSet()), error = null)
+    }
+
+    fun changeRecordCopy(selection: RecordCopySelection?) {
+        if (!state.busy && state.copySelection != null) state = state.copy(copySelection = selection, error = null)
+    }
+
+    fun createRecordCopy() = runAction("副本草稿创建失败，请重试。") {
+        val source = state.detailId ?: return@runAction
+        val revision = state.detail?.revision ?: return@runAction
+        val selection = state.copySelection ?: return@runAction
+        val id = try {
+            withContext(Dispatchers.IO) { drafts.copyRecordToDraft(source, revision, selection) }
+        } catch (_: CopySourceChanged) {
+            state = state.copy(copySelection = null)
+            showDetail(source, state.detailOrigin)
+            if (state.detail != null) state = state.copy(notice = "来源已更新，请重新选择要复制的内容。")
+            return@runAction
+        } catch (missing: CopyMediaUnavailable) {
+            state = state.copy(error = missing.message)
+            return@runAction
+        } catch (invalid: IllegalArgumentException) {
+            state = state.copy(error = invalid.message ?: "请重新选择要复制的内容。")
+            return@runAction
+        }
+        state = state.copy(copySelection = null)
+        openCreatedDraft(id)
+    }
+
+    // 草稿已提交。后续读取失败时重开同一份，也可从「继续草稿」找回。
+    private suspend fun openCreatedDraft(id: DraftId) {
+        state = state.copy(page = Page.Editor, savedId = null, saveError = null,
+            editor = RecordEditor(draftId = id, returnPage = Page.Records, needsReload = true))
+        reloadCurrent()
     }
 
     private suspend fun readEditor(id: DraftId, recordId: RecordId?, origin: Page) {
@@ -1293,13 +1428,3 @@ class FolioViewModel(
 }
 
 private fun TextFieldValue.asEdit() = TextEdit(text, selection.end.coerceIn(0, text.length))
-
-private fun ContentItem.withId(id: ItemId): ContentItem = when (this) {
-    is ContentItem.Text -> copy(id = id)
-    is ContentItem.Photo -> copy(id = id)
-    is ContentItem.Link -> copy(id = id)
-    is ContentItem.Pdf -> copy(id = id)
-    is ContentItem.Video -> copy(id = id)
-    is ContentItem.Audio -> copy(id = id)
-    is ContentItem.Checklist -> copy(id = id)
-}

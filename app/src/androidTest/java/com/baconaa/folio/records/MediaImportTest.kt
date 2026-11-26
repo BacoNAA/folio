@@ -102,6 +102,22 @@ internal class MediaImportTest : AudioStoreFixture() {
         assertEquals(PreviewContentItem.Pdf(pdf.id, pdf.displayName), store.listRecentRecords().single().preview.items.single())
     }
 
+    @Test fun importedAudioFillsOnlyItsNamedFieldAndSurvivesReopen() = runBlocking {
+        val template = store.saveTemplate(null, "声音", listOf(TemplateField(TemplateFieldType.AUDIO, "采访原声")), emptySet())
+        val draft = store.startTemplateDraft(template.id, template.revision)
+        val field = store.openMixedDraft(draft)!!.items.single().id
+        val file = sample("tone-440.m4a")
+        val saved = store.importMedia(source(file), ImportType.AUDIO, draft, audioField = field).item as ContentItem.Audio
+        imported += saved
+        assertEquals(field, saved.id)
+        assertEquals("采访原声", saved.fieldName)
+        assertTrue(file.delete())
+        val record = store.completeMixedDraft(draft)
+        reopenDatabase()
+        assertEquals(listOf(saved), store.openRecordContent(record)!!.items)
+        assertEquals(saved.durationMillis, audioOriginals.inspect(saved.audioId).durationMillis)
+    }
+
     private fun renderedPage(uri: Uri): IntArray =
         PdfRenderer(context.contentResolver.openFileDescriptor(uri, "r")!!).use { document ->
             assertEquals(1, document.pageCount)
@@ -210,6 +226,41 @@ internal class MediaImportTest : AudioStoreFixture() {
         assertTrue(store.moveToTrash(record))
         assertTrue(store.deletePermanently(record).deleted)
         assertFalse(audioFile(audio.audioId).exists())
+    }
+
+    @Test fun copyDraftRetainsSelectedFilesAudioAndLinkScreenshotAfterSourceDeletion() = runBlocking {
+        val pdf = sample("窗框凭证.pdf")
+        val video = sample("short-avc-aac.mp4", "m02")
+        val sound = sample("tone-440.m4a")
+        val draft = add(pdf, ImportType.PDF).draftId
+        add(sound, ImportType.AUDIO, draft)
+        add(video, ImportType.VIDEO, draft)
+        val image = importPhoto(android.graphics.Color.BLUE)
+        val link = ContentItem.Link(newItemId(), "https://example.org", "路书", "桥边转弯", image.id)
+        store.insertLink(draft, null, link)
+        val source = store.completeMixedDraft(draft)
+        val official = store.openRecordContent(source)!!
+        val copy = store.copyRecordToDraft(source, official.revision, RecordCopySelection(official.items.map { it.id }))
+        store.moveToTrash(source)
+        assertTrue(store.deletePermanently(source).deleted)
+        reopenDatabase()
+        val items = store.openMixedDraft(copy)!!.items
+        assertEquals(official.items, items.mapIndexed { i, item -> item.withId(official.items[i].id) })
+        assertTrue(items.none { item -> official.items.any { it.id == item.id } })
+        val copiedPdf = items[0] as ContentItem.Pdf
+        val copiedAudio = items[1] as ContentItem.Audio
+        val copiedVideo = items[2] as ContentItem.Video
+        assertArrayEquals(pdf.readBytes(), store.openPdf(copiedPdf.pdfId).use { it.readBytes() })
+        assertArrayEquals(video.readBytes(), context.contentResolver.openInputStream(store.videoSource(copiedVideo))!!.use { it.readBytes() })
+        assertArrayEquals(sound.readBytes(), audioOriginals.openOriginal(copiedAudio.audioId).use { it.readBytes() })
+        assertPhotos(listOf((items[3] as ContentItem.Link).screenshotId!!), image)
+        playsToEnd(copiedAudio.audioId)
+        val record = store.completeMixedDraft(copy)
+        assertEquals(items, store.openRecordContent(record)!!.items)
+        store.moveToTrash(record)
+        assertTrue(store.deletePermanently(record).deleted)
+        assertFalse(originalFile(image.id).exists())
+        assertFalse(audioFile(copiedAudio.audioId).exists())
     }
 
     private suspend fun playsToEnd(id: AudioId) {

@@ -37,6 +37,8 @@ data class RecordContent(
     val place: Place? = null,
     val objects: List<RecordObject> = emptyList(),
     val title: String? = null,
+    val revision: Long = 1,
+    val templateFields: List<TemplateField> = items.mapNotNull { it.templateField() },
 ) {
     val text: String get() = items.body()
     val photos: List<PhotoId> get() = items.photos()
@@ -55,6 +57,9 @@ interface TextDrafts {
 
     /** 开始修改有效正式记录；已有编辑草稿时继续同一份。 */
     suspend fun editRecord(id: RecordId): DraftId
+
+    /** 按预览的正式版本和顺序建立独立草稿。来源失效或版本变化时抛出 CopySourceChanged。 */
+    suspend fun copyRecordToDraft(source: RecordId, expectedRevision: Long, selection: RecordCopySelection): DraftId
 
     /** 放弃新建或编辑草稿，保留正式记录。重复放弃不会影响后来建立的草稿。 */
     suspend fun discardDraft(id: DraftId)

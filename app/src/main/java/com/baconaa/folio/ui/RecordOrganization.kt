@@ -265,15 +265,19 @@ internal fun RecordContents(content: RecordContent, model: FolioViewModel) {
     ReadingBody { enlarged ->
         val bodySize = if (enlarged) 24.sp else 18.sp
         val lineHeight = if (enlarged) 40.sp else 32.sp
-        content.items.forEach { item -> when (item) {
-            is ContentItem.Text -> Text(item.text, fontSize = bodySize, lineHeight = lineHeight)
-            is ContentItem.Pdf -> PdfAttachment(item, model)
-            is ContentItem.Link -> SavedLink(item, bodySize, lineHeight)
-            is ContentItem.Video -> VideoAttachment(item, model)
-            is ContentItem.Photo -> { Photo(item.photoId); if (item.caption.isNotEmpty()) Text(item.caption) }
-            is ContentItem.Audio -> { AudioControl(item.audioId, item.durationMillis, model); if (item.caption.isNotEmpty()) Text(item.caption) }
-            is ContentItem.Checklist -> item.entries.forEach { Text("${if (it.checked) "☑" else "☐"} ${it.text}") }
-        } }
+        content.items.forEach { item ->
+            item.fieldName?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
+            when (item) {
+                is ContentItem.EmptyMediaField -> Unit
+                is ContentItem.Text -> Text(item.text, fontSize = bodySize, lineHeight = lineHeight)
+                is ContentItem.Pdf -> PdfAttachment(item, model)
+                is ContentItem.Link -> SavedLink(item, bodySize, lineHeight)
+                is ContentItem.Video -> VideoAttachment(item, model)
+                is ContentItem.Photo -> { Photo(item.photoId, strokes = item.strokes); if (item.caption.isNotEmpty()) Text(item.caption) }
+                is ContentItem.Audio -> { AudioControl(item.audioId, item.durationMillis, model); if (item.caption.isNotEmpty()) Text(item.caption) }
+                is ContentItem.Checklist -> item.entries.forEach { Text("${if (it.checked) "☑" else "☐"} ${it.text}") }
+            }
+        }
     }
     if (content.tags.isNotEmpty()) Text(content.tags.joinToString(" · ") { it.name })
     HorizontalDivider()

@@ -1,0 +1,10 @@
+// 仅在显式传入本 init script 时，把安装包覆盖用例加入测试 APK。
+def probe = gradle.startParameter.initScripts.find { it.name == 'd01-probe.gradle' }
+def sources = new File(probe.parentFile, 'androidTest')
+gradle.beforeProject { project ->
+    if (project.path == ':app') {
+        project.pluginManager.withPlugin('com.android.application') {
+            project.android.sourceSets.getByName('androidTest').kotlin.srcDir(sources)
+        }
+    }
+}
