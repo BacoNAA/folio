@@ -141,6 +141,8 @@ data class FolioState(
     val placeQuery: String = "",
     val placesLoading: Boolean = false,
     val placesError: String? = null,
+    val showPlaceStars: Boolean = false,
+    val selectedStar: PlaceId? = null,
     val placeScope: PlaceScope? = null,
     val searchOrigin: Page = Page.Records,
     val placeRecent: Boolean = false,
@@ -1502,6 +1504,9 @@ class FolioViewModel(
     }
 
     private var placesVersion = 0
+    fun showPlaceStars(show: Boolean) { state = state.copy(showPlaceStars = show) }
+    fun selectPlaceStar(id: PlaceId) { state = state.copy(selectedStar = id) }
+
     private var directoryPlaceQuery = ""
     fun loadPlaces(query: String = "") {
         if (state.page == Page.Places) directoryPlaceQuery = query
