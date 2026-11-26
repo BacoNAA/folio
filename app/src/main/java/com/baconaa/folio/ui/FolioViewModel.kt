@@ -20,7 +20,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-enum class Page { Capture, Records, Search, Detail, Editor, Trash, TrashDetail, Places, Groups, GroupDetail, GroupPicker, GroupDestination, GroupGuide, Chapters, Objects, ObjectBook }
+enum class Page { Capture, Records, Search, Detail, Editor, Trash, TrashDetail, DateReview, Places, Groups, GroupDetail, GroupPicker, GroupDestination, GroupGuide, Chapters, Objects, ObjectBook }
 
 internal val Page.isGroupReadingPage get() = this == Page.GroupDetail || this == Page.GroupGuide
 internal val Page.isGroupPage get() = isGroupReadingPage || this == Page.Chapters || this == Page.Groups || this == Page.GroupPicker || this == Page.GroupDestination
@@ -77,6 +77,8 @@ data class FolioState(
     val editor: RecordEditor? = null,
     val drafts: List<DraftPreview> = emptyList(),
     val draftReadRetry: DraftPreview? = null,
+    val reviewQuery: DateReviewQuery = DateReviewQuery(),
+    val reviewMatches: List<ReviewMatch> = emptyList(),
     val records: List<RecordCard> = emptyList(),
     val groupListOrigin: Page = Page.Groups,
     val groups: List<RecordGroup> = emptyList(),
@@ -166,6 +168,7 @@ class FolioViewModel(
     private val imports: MediaImports? = mixed as? MediaImports ?: published as? MediaImports,
     private val recordGroups: RecordGroups? = published as? RecordGroups ?: mixed as? RecordGroups,
     private val groupGuides: RecordGroupGuides? = published as? RecordGroupGuides ?: mixed as? RecordGroupGuides,
+    private val dateReviews: DateReviews? = browsing as? DateReviews ?: published as? DateReviews,
     private val templates: RecordTemplates? = published as? RecordTemplates ?: mixed as? RecordTemplates,
 ) : ViewModel() {
     var state by mutableStateOf(FolioState())
@@ -200,6 +203,7 @@ class FolioViewModel(
             linkingPlace = if (page == Page.Search) state.linkingPlace else null)
         if (page == Page.Records || page == Page.Search || page == Page.Trash || page.isGroupPage) refresh()
         if (page == Page.Search) { loadTags(); loadObjects() }
+        if (page == Page.DateReview) refresh()
         if (page == Page.Places) loadPlaces(directoryPlaceQuery)
         if (page == Page.Objects) loadObjects()
         if (page == Page.ObjectBook) refresh()
@@ -1009,12 +1013,23 @@ class FolioViewModel(
             }
             Page.GroupDestination -> home(Page.GroupPicker)
             Page.Search -> home(state.searchOrigin)
+            Page.DateReview -> home(Page.Records)
             Page.Places -> home(Page.Records)
             Page.Records -> home(Page.Capture)
             Page.Trash -> home(Page.Records)
             Page.TrashDetail -> home(Page.Trash)
             Page.Capture -> Unit
         }
+    }
+
+    fun reviewDates(query: DateReviewQuery) {
+        state = state.copy(reviewQuery = query, reviewMatches = emptyList())
+        refresh()
+    }
+
+    fun setSeasonExcluded(id: RecordId, excluded: Boolean) = runAction("回看选择保存失败，请重试。") {
+        withContext(Dispatchers.IO) { requireNotNull(dateReviews).setSeasonExcluded(id, excluded) }
+        refresh()
     }
 
     fun selectRecent(recent: Boolean) { state = state.copy(recent = recent) }
@@ -1027,6 +1042,7 @@ class FolioViewModel(
     fun refresh() {
         val version = ++loadVersion
         val page = state.page
+        val reviewQuery = state.reviewQuery
         val query = state.query
         val filterTags = state.filterTags
         val starredOnly = state.starredOnly
@@ -1050,6 +1066,9 @@ class FolioViewModel(
                         current to browsing.queryRecords(scoped).certain
                     }
                     if (version == loadVersion) state = state.copy(objectBook = current, objectRecords = records, loading = false)
+                } else if (page == Page.DateReview) {
+                    val matches = withContext(Dispatchers.IO) { requireNotNull(dateReviews).reviewDates(reviewQuery) }
+                    if (version == loadVersion) state = state.copy(reviewMatches = matches, loading = false)
                 } else if (page == Page.Search) {
                     val (result, currentScope) = withContext(Dispatchers.IO) {
                         browsing.queryRecords(RecordQuery(query, filterTags, starredOnly, placeScope?.place?.id, people, things, mediaTypes,

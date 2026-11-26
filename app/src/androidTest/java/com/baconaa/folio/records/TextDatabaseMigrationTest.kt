@@ -37,6 +37,36 @@ class TextDatabaseMigrationTest {
         context.deleteDatabase(name)
     }
 
+    @Test fun savedSeasonRangeAndNewExclusionSurviveUpgradeAndReopen() = runBlocking {
+        val day = LocalDate.of(2023, 11, 8)
+        createDatabase(27) { sql ->
+            sql.execSQL("""INSERT INTO text_records(id,sourceDraftId,body,firstRecordedAt,modifiedAt,
+                isStarred,isPinned,eventDate,eventZone) VALUES ('autumn','source','桂花',1,1,0,0,?,'Asia/Tokyo')""",
+                arrayOf(day.toEpochDay()))
+        }
+        val id = RecordId("autumn")
+        val query = DateReviewQuery(day.plusYears(1), NamedSeason.AUTUMN)
+        fun open() = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        val first = open()
+        try {
+            val store = LocalTextStore(first, context)
+            assertFalse(store.reviewDates(query).single().excluded)
+            store.setSeasonExcluded(id, true)
+        } finally { first.close() }
+        val reopened = open()
+        try {
+            val store = LocalTextStore(reopened, context)
+            assertTrue(store.reviewDates(query).single().excluded)
+            assertFalse(store.reviewDates(query.copy(season = null)).single().excluded)
+            store.moveToTrash(id)
+            assertTrue(store.reviewDates(query).isEmpty())
+            store.restoreRecord(id)
+            assertTrue(store.reviewDates(query).single().excluded)
+            store.setSeasonExcluded(id, false)
+            assertFalse(store.reviewDates(query).single().excluded)
+        } finally { reopened.close() }
+    }
+
     @Test
     fun oldDraftAndPublishedRecordSurviveUpgradeAndRemainEditable() = runBlocking {
         createDatabase(1) { sql ->

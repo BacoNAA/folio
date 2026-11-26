@@ -105,6 +105,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                             Page.Search -> if (state.placeBook != null) "地点小册" else "搜索全部记录"
                             Page.Objects -> "人物与物件"
                             Page.ObjectBook -> state.objectBook?.let { "${it.kind.label}小册" } ?: "对象小册"
+                            Page.DateReview -> "日期回看"
                             Page.Places -> "按地点"
                             Page.Chapters -> "生活章节"
                             Page.Groups -> "记录组"
@@ -136,6 +137,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                         state.page == Page.ObjectBook -> model::refresh
                         state.page == Page.Detail -> model::retryDetail
                         state.page == Page.TrashDetail -> model::retryTrashDetail
+                        state.page == Page.DateReview -> model::refresh
                         state.page == Page.GroupGuide && state.guideEdit != null -> model::saveGuide
                         state.page == Page.Records || state.page == Page.Search || state.page == Page.Trash -> model::refresh
                         state.editor?.needsReload == true -> model::reload
@@ -169,6 +171,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                         Page.Records -> Column {
                             FlowRow {
                                 TextButton(onClick = model::openSearch) { Text("搜索全部记录") }
+                                TextButton(onClick = { model.home(Page.DateReview) }) { Text("日期回看") }
                                 TextButton(onClick = model::openStarred) { Text("星标") }
                                 TextButton(onClick = { model.home(Page.Trash) }) { Text("回收站") }
                                 TextButton(onClick = { model.home(Page.Groups) }) { Text("记录组") }
@@ -275,6 +278,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                         }
                         Page.Objects -> ObjectDirectory(model, objectDirectoryQuery, { objectDirectoryQuery = it }, objectDirectoryScroll)
                         Page.ObjectBook -> ObjectBookScreen(model, bookScroll)
+                        Page.DateReview -> DateReviewScreen(model)
                         Page.Places -> PlacesScreen(model, placesScroll)
                         Page.Chapters, Page.Groups, Page.GroupDetail, Page.GroupPicker, Page.GroupDestination, Page.GroupGuide ->
                             RecordGroupScreens(model, groupsScroll, membersScroll, pickerScroll, guideScroll)
