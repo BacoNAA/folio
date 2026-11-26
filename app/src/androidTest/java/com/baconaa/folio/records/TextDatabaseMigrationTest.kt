@@ -894,6 +894,47 @@ class TextDatabaseMigrationTest {
         } finally { db.close() }
     }
 
+    @Test fun versionTwentyFourKeepsThePendingEditAndCanSplitItsOriginalAfterDiscard() = runBlocking {
+        createDatabase(24) { sql ->
+            sql.execSQL("""INSERT INTO text_records(id,sourceDraftId,body,firstRecordedAt,modifiedAt,revision)
+                VALUES ('trip','published','木桥' || char(10) || '溪水',100,200,3)""")
+            sql.execSQL("""INSERT INTO record_items(recordId,position,itemId,text,fieldName)
+                VALUES ('trip',0,'bridge','木桥','地点'),('trip',2,'water','溪水','声音笔记')""")
+            sql.execSQL("""INSERT INTO record_items(recordId,position,itemId,fieldName,emptyFieldType)
+                VALUES ('trip',1,'picture','现场照片','PHOTO')""")
+            sql.execSQL("""INSERT INTO text_drafts(id,body,cursor,firstRecordedAt,lastEditedAt,activeItemId,firstContentAt)
+                VALUES ('pending','旧编辑',2,220,240,'paragraph',100)""")
+            sql.execSQL("INSERT INTO draft_items(draftId,position,itemId,text) VALUES ('pending',0,'paragraph','旧编辑')")
+            sql.execSQL("INSERT INTO text_record_edits(draftId,recordId,baseRevision) VALUES ('pending','trip',3)")
+        }
+        val db = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(db, context)
+            val source = RecordId("trip")
+            val edit = DraftId("pending")
+            val preview = store.listDrafts().single()
+            assertEquals(edit, preview.id)
+            assertEquals(source, preview.recordId)
+            assertNull(preview.splitSource)
+            assertEquals(edit, store.editRecord(source))
+            assertEquals(TextEdit("旧编辑", 2), store.openDraft(edit))
+            assertNull(store.openMixedDraft(edit)!!.splitSource)
+            val selection = RecordCopySelection(listOf(ItemId("water")))
+            assertTrue(runCatching { store.splitRecordToDraft(source, 3, selection) }.exceptionOrNull() is SplitDraftConflict)
+            store.discardDraft(edit)
+            val split = store.splitRecordToDraft(source, 3, selection)
+            val result = store.completeMixedDraft(split)
+            val remaining = store.openRecordContent(source)!!
+            assertEquals("木桥", remaining.text)
+            assertEquals(100L, remaining.times.firstRecordedAt)
+            assertEquals(listOf(TemplateField(TemplateFieldType.TEXT, "地点"), TemplateField(TemplateFieldType.PHOTO, "现场照片")),
+                remaining.templateFields)
+            assertEquals("溪水", store.openRecord(result))
+            assertEquals(listOf(result), store.search("溪水").map { it.id })
+            assertEquals(listOf(source), store.search("木桥").map { it.id })
+        } finally { db.close() }
+    }
+
     private fun createDatabase(version: Int, seed: (SQLiteDatabase) -> Unit) {
         val schemaFile = "${FolioDatabase::class.java.name}/$version.json"
         val schema = instrumentation.context.assets.open(schemaFile).bufferedReader().use {

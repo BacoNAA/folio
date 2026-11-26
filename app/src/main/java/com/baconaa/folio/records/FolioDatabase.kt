@@ -58,6 +58,17 @@ internal data class RecordRow(
 )
 internal data class RecordEditRow(@PrimaryKey val draftId: String, val recordId: String, val baseRevision: Long)
 
+/** 拆分预览选中的原项和对应草稿项。草稿移除某项后再撤销，仍可找回它对应的原项。 */
+@Entity(
+    tableName = "record_split_items",
+    primaryKeys = ["draftId", "sourceItemId"],
+    foreignKeys = [ForeignKey(
+        entity = DraftRow::class, parentColumns = ["id"], childColumns = ["draftId"],
+        onDelete = ForeignKey.CASCADE,
+    )],
+)
+internal data class RecordSplitItemRow(val draftId: String, val sourceItemId: String, val draftItemId: String)
+
 @DatabaseView(
     """SELECT d.*, d.rowid AS insertionOrder, e.recordId FROM text_drafts d
        LEFT JOIN text_record_edits e ON e.draftId = d.id
@@ -79,6 +90,7 @@ internal data class DraftPreviewRow(
     val id: String, val excerpt: String, val recordId: String?, val firstPhotoId: String?,
     val totalAudioDurationMillis: Long?,
     val title: String?,
+    val isSplit: Boolean,
 )
 
 @Dao
@@ -102,6 +114,7 @@ internal interface TextDao {
     suspend fun touchDraft(id: String, editedAt: Long)
 
     @Query("""SELECT d.id, d.title, substr(d.body, 1, 80) AS excerpt, d.recordId,
+              EXISTS(SELECT 1 FROM record_split_items s WHERE s.draftId = d.id) AS isSplit,
               (SELECT photoId FROM draft_items WHERE draftId = d.id AND photoId IS NOT NULL ORDER BY position LIMIT 1) AS firstPhotoId,
               (SELECT sum(audioDurationMillis) FROM draft_items WHERE draftId = d.id) AS totalAudioDurationMillis
               FROM editable_text_drafts d
@@ -113,6 +126,19 @@ internal interface TextDao {
 
     @Insert
     suspend fun insertEdit(edit: RecordEditRow)
+
+    @Query("SELECT itemId FROM draft_items WHERE draftId = :draftId ORDER BY position")
+    suspend fun draftItemIds(draftId: String): List<String>
+
+    @Insert
+    suspend fun insertSplitItems(items: List<RecordSplitItemRow>)
+
+    @Query("SELECT * FROM record_split_items WHERE draftId = :draftId")
+    suspend fun splitItems(draftId: String): List<RecordSplitItemRow>
+
+    @Query("""SELECT recordId FROM text_record_edits WHERE draftId = :draftId
+              AND EXISTS (SELECT 1 FROM record_split_items s WHERE s.draftId = :draftId)""")
+    suspend fun splitSource(draftId: String): String?
 
     @Query("SELECT * FROM text_record_edits WHERE draftId = :draftId")
     suspend fun recordEdit(draftId: String): RecordEditRow?
@@ -161,7 +187,7 @@ internal interface TextDao {
 
 @Database(
     entities = [
-        DraftRow::class, RecordRow::class, RecordEditRow::class,
+        DraftRow::class, RecordRow::class, RecordEditRow::class, RecordSplitItemRow::class,
         DraftItemRow::class, RecordItemRow::class, RemovedItem::class, PhotoCleanupEntry::class,
         AudioCleanupEntry::class, TagRow::class, DraftTagRow::class, RecordTagRow::class,
         PlaceRow::class, DraftPlaceRow::class, RecordPlaceRow::class,
@@ -170,7 +196,7 @@ internal interface TextDao {
         GuideSectionRow::class, GuideAssignmentRow::class, TemplateRow::class, TemplateFieldRow::class, TemplateTagRow::class,
     ],
     views = [EditableDraftRow::class],
-    version = 24,
+    version = 25,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -195,6 +221,7 @@ internal interface TextDao {
         AutoMigration(from = 21, to = 22),
         AutoMigration(from = 22, to = 23),
         AutoMigration(from = 23, to = 24),
+        AutoMigration(from = 24, to = 25),
     ],
 )
 @TypeConverters(PhotoStrokeStorage::class)

@@ -368,7 +368,7 @@ class LocalTextStore internal constructor(
     }
 
     override suspend fun openMixedDraft(id: DraftId): MixedDraft? = database.withTransaction {
-        database.loadMixedDraft(id)
+        database.loadMixedDraft(id)?.copy(splitSource = dao.splitSource(id.value)?.let(::RecordId))
     }
 
     override suspend fun openDraftPhotos(id: DraftId): List<PhotoId>? = openMixedDraft(id)?.items?.photos()
@@ -390,7 +390,10 @@ class LocalTextStore internal constructor(
     override suspend fun undoRemoval(id: DraftId) = itemActions.undo(id)
 
     override suspend fun editRecord(id: RecordId): DraftId = database.withTransaction {
-        dao.activeEditId(id.value)?.let { return@withTransaction DraftId(it) }
+        dao.activeEditId(id.value)?.let { active ->
+            if (dao.splitSource(active) != null) throw SplitDraftConflict()
+            return@withTransaction DraftId(active)
+        }
         val record = checkNotNull(dao.activeRecord(id.value)) { "正式记录已不存在" }
         val draftId = DraftId(UUID.randomUUID().toString())
         val items = itemDao.recordItems(id.value)
@@ -432,6 +435,26 @@ class LocalTextStore internal constructor(
             placeDao.replaceDraftPlace(id.value, selection.placeId?.value)
             id
         }
+
+    override suspend fun splitRecordToDraft(
+        source: RecordId, expectedRevision: Long, selection: RecordCopySelection,
+    ): DraftId = database.withTransaction {
+        if (dao.activeEditId(source.value) != null) throw SplitDraftConflict()
+        val draft = copyRecordToDraft(source, expectedRevision, selection)
+        val moved = selection.itemIds.mapTo(mutableSetOf()) { it.value }
+        val actual = itemDao.recordItems(source.value).filter { it.asItem().hasContent() }.mapTo(mutableSetOf()) { it.itemId }
+        require(actual.containsAll(moved)) { "请选择有实际内容的记录项。" }
+        require(actual.size > moved.size) {
+            "请给原记录保留至少一项实际内容，或转为复制。"
+        }
+        val copies = dao.draftItemIds(draft.value)
+        check(copies.size == selection.itemIds.size) { "拆分草稿与所选内容不一致" }
+        dao.insertEdit(RecordEditRow(draft.value, source.value, expectedRevision))
+        dao.insertSplitItems(selection.itemIds.mapIndexed { index, item ->
+            RecordSplitItemRow(draft.value, item.value, copies[index])
+        })
+        draft
+    }
 
     override suspend fun discardDraft(id: DraftId) {
         database.withTransaction {
@@ -479,9 +502,10 @@ class LocalTextStore internal constructor(
 
     override suspend fun listDrafts(): List<DraftPreview> =
         dao.listDrafts().map { row ->
+            val source = row.recordId?.let(::RecordId)
             DraftPreview(
-                DraftId(row.id), row.excerpt, row.recordId?.let(::RecordId), row.firstPhotoId?.asPhotoId(),
-                row.totalAudioDurationMillis, row.title,
+                DraftId(row.id), row.excerpt, source.takeUnless { row.isSplit }, row.firstPhotoId?.asPhotoId(),
+                row.totalAudioDurationMillis, row.title, splitSource = source.takeIf { row.isSplit },
             )
         }
 
@@ -542,7 +566,13 @@ class LocalTextStore internal constructor(
             val objects = objectDao.draftObjects(id.value).map { it.row.id }
             val place = placeDao.draftPlace(id.value)?.id
             val edit = dao.recordEdit(id.value)
-            val recordId = if (edit == null) {
+            val splitItems = if (edit != null) dao.splitItems(id.value) else emptyList()
+            if (edit != null && splitItems.isNotEmpty()) {
+                applySplitToSource(edit, splitItems, items)
+                // 完成重试通过新记录的 sourceDraftId 找回结果；原记录不再关联这份草稿。
+                dao.deleteEdit(id.value)
+            }
+            val recordId = if (edit == null || splitItems.isNotEmpty()) {
                 val newId = UUID.randomUUID().toString()
                 val completedAt = now()
                 dao.insertRecord(RecordRow(newId, draft.id, body, draft.firstContentAt ?: completedAt, completedAt,
@@ -578,6 +608,28 @@ class LocalTextStore internal constructor(
         }
         cleanReleasedMedia()
         return result
+    }
+
+    private suspend fun applySplitToSource(
+        edit: RecordEditRow, selection: List<RecordSplitItemRow>, destination: List<ContentItem>,
+    ) {
+        val source = dao.activeRecord(edit.recordId)
+        if (source == null || source.revision != edit.baseRevision) throw CopySourceChanged()
+        val filled = destination.filter { it.hasContent() }.mapTo(mutableSetOf()) { it.id.value }
+        val movedIds = selection.filter { it.draftItemId in filled }.mapTo(mutableSetOf()) { it.sourceItemId }
+        require(movedIds.isNotEmpty()) { "请保留至少一项要移出的原内容，或放弃这次拆分。" }
+
+        val original = itemDao.recordItems(source.id)
+        val remaining = original.filter { it.itemId !in movedIds }
+        if (original.size - remaining.size != movedIds.size) throw CopySourceChanged()
+        val content = remaining.map { it.asItem() }
+        require(content.any { it.hasContent() }) { "请给原记录保留至少一项实际内容。" }
+        queueRecordMedia(source.id)
+        itemDao.replaceRecordItems(source.id, remaining)
+        dao.updateRecord(source.copy(
+            body = content.filter { it.fieldName == null || it.hasContent() }.body(),
+            modifiedAt = now(), revision = source.revision + 1,
+        ))
     }
 
     override suspend fun search(keyword: String): List<RecordPreview> =

@@ -45,7 +45,10 @@ sealed interface ContentItem {
 }
 
 /** cursor 是当前文字项内的 UTF-16 偏移。其他项或空草稿使用 0。 */
-data class MixedDraft(val items: List<ContentItem>, val activeItemId: ItemId?, val cursor: Int, val title: String? = null)
+data class MixedDraft(
+    val items: List<ContentItem>, val activeItemId: ItemId?, val cursor: Int, val title: String? = null,
+    val splitSource: RecordId? = null,
+)
 
 interface MixedContentDrafts {
     suspend fun openMixedDraft(id: DraftId): MixedDraft?
