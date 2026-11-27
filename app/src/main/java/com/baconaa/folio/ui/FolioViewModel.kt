@@ -20,10 +20,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-enum class Page { Capture, Records, Search, Detail, Editor, Trash, TrashDetail, Places, Groups, GroupDetail, GroupPicker, GroupDestination, GroupGuide }
+enum class Page { Capture, Records, Search, Detail, Editor, Trash, TrashDetail, DateReview, Places, Groups, GroupDetail, GroupPicker, GroupDestination, GroupGuide, Chapters, Objects, ObjectBook, PhotoCompare }
 
 internal val Page.isGroupReadingPage get() = this == Page.GroupDetail || this == Page.GroupGuide
-internal val Page.isGroupPage get() = isGroupReadingPage || this == Page.Groups || this == Page.GroupPicker || this == Page.GroupDestination
+internal val Page.isGroupPage get() = isGroupReadingPage || this == Page.Chapters || this == Page.Groups || this == Page.GroupPicker || this == Page.GroupDestination
 
 data class GuideEditing(val layout: GuideLayout, val conflicting: GroupGuideContent? = null)
 
@@ -77,7 +77,10 @@ data class FolioState(
     val editor: RecordEditor? = null,
     val drafts: List<DraftPreview> = emptyList(),
     val draftReadRetry: DraftPreview? = null,
+    val reviewQuery: DateReviewQuery = DateReviewQuery(),
+    val reviewMatches: List<ReviewMatch> = emptyList(),
     val records: List<RecordCard> = emptyList(),
+    val groupListOrigin: Page = Page.Groups,
     val groups: List<RecordGroup> = emptyList(),
     val groupId: RecordGroupId? = null,
     val groupContent: RecordGroupContent? = null,
@@ -109,6 +112,10 @@ data class FolioState(
     val tagsLoading: Boolean = false,
     val tagsError: String? = null,
     val filterTags: Set<TagId> = emptySet(),
+    val photoComparison: PhotoComparison? = null,
+    val objectBook: RecordObject? = null,
+    val objectQuery: String = "",
+    val objectRecords: List<RecordCard> = emptyList(),
     val sharedObjects: List<RecordObject> = emptyList(),
     val objectsLoading: Boolean = false,
     val objectsError: String? = null,
@@ -162,10 +169,24 @@ class FolioViewModel(
     private val imports: MediaImports? = mixed as? MediaImports ?: published as? MediaImports,
     private val recordGroups: RecordGroups? = published as? RecordGroups ?: mixed as? RecordGroups,
     private val groupGuides: RecordGroupGuides? = published as? RecordGroupGuides ?: mixed as? RecordGroupGuides,
+    private val dateReviews: DateReviews? = browsing as? DateReviews ?: published as? DateReviews,
     private val templates: RecordTemplates? = published as? RecordTemplates ?: mixed as? RecordTemplates,
 ) : ViewModel() {
     var state by mutableStateOf(FolioState())
         private set
+    private val relations = published as? RecordRelations ?: mixed as? RecordRelations
+    suspend fun relationChoices(source: RecordId) = withContext(Dispatchers.IO) { requireNotNull(relations).relationChoices(source) }
+    suspend fun changeRelation(source: RecordId, previous: RecordId?, next: RecordId?) = withContext(Dispatchers.IO) {
+        requireNotNull(relations).changeRelation(source, previous, next)
+    }
+
+    private val chapters = published as? RecordChapters ?: mixed as? RecordChapters
+    suspend fun chapterPhotos() = withContext(Dispatchers.IO) { requireNotNull(chapters).chapterPhotos() }
+    suspend fun saveChapter(id: RecordGroupId, original: ChapterProfile?, profile: ChapterProfile) {
+        withContext(Dispatchers.IO) { requireNotNull(chapters).saveChapter(id, original, profile) }
+        openGroup(id)
+    }
+
     private val writes = Mutex()
     private var loadVersion = 0
     private var pendingInitialId: DraftId? = null
@@ -183,7 +204,10 @@ class FolioViewModel(
             linkingPlace = if (page == Page.Search) state.linkingPlace else null)
         if (page == Page.Records || page == Page.Search || page == Page.Trash || page.isGroupPage) refresh()
         if (page == Page.Search) { loadTags(); loadObjects() }
+        if (page == Page.DateReview) refresh()
         if (page == Page.Places) loadPlaces(directoryPlaceQuery)
+        if (page == Page.Objects) loadObjects()
+        if (page == Page.ObjectBook) refresh()
     }
 
     private var recordingAfter: ItemId? = null
@@ -975,8 +999,11 @@ class FolioViewModel(
         when (state.page) {
             Page.Editor -> leaveEditor()
             Page.Detail -> home(state.detailOrigin)
-            Page.Groups -> home(Page.Records)
-            Page.GroupDetail -> home(Page.Groups)
+            Page.PhotoCompare -> leavePhotoComparison()
+            Page.Objects -> home(Page.Records)
+            Page.ObjectBook -> leaveObjectBook()
+            Page.Groups, Page.Chapters -> home(Page.Records)
+            Page.GroupDetail -> home(state.groupListOrigin)
             Page.GroupGuide -> if (state.guideEdit == null) home(Page.GroupDetail) else {
                 state = state.copy(guideEdit = null, groupFeedback = null)
                 refresh()
@@ -988,12 +1015,23 @@ class FolioViewModel(
             }
             Page.GroupDestination -> home(Page.GroupPicker)
             Page.Search -> home(state.searchOrigin)
+            Page.DateReview -> home(Page.Records)
             Page.Places -> home(Page.Records)
             Page.Records -> home(Page.Capture)
             Page.Trash -> home(Page.Records)
             Page.TrashDetail -> home(Page.Trash)
             Page.Capture -> Unit
         }
+    }
+
+    fun reviewDates(query: DateReviewQuery) {
+        state = state.copy(reviewQuery = query, reviewMatches = emptyList())
+        refresh()
+    }
+
+    fun setSeasonExcluded(id: RecordId, excluded: Boolean) = runAction("回看选择保存失败，请重试。") {
+        withContext(Dispatchers.IO) { requireNotNull(dateReviews).setSeasonExcluded(id, excluded) }
+        refresh()
     }
 
     fun selectRecent(recent: Boolean) { state = state.copy(recent = recent) }
@@ -1006,6 +1044,7 @@ class FolioViewModel(
     fun refresh() {
         val version = ++loadVersion
         val page = state.page
+        val reviewQuery = state.reviewQuery
         val query = state.query
         val filterTags = state.filterTags
         val starredOnly = state.starredOnly
@@ -1019,6 +1058,19 @@ class FolioViewModel(
             try {
                 if (page.isGroupPage) {
                     readGroupPage(page, version)
+                } else if (page == Page.ObjectBook) {
+                    val book = requireNotNull(state.objectBook)
+                    val keyword = state.objectQuery
+                    val (current, records) = withContext(Dispatchers.IO) {
+                        val current = requireNotNull(objects).listObjects().first { it.id == book.id }
+                        val scoped = if (current.kind == ObjectKind.PERSON) RecordQuery(keyword, peopleIds = setOf(book.id))
+                            else RecordQuery(keyword, thingIds = setOf(book.id))
+                        current to browsing.queryRecords(scoped).certain
+                    }
+                    if (version == loadVersion) state = state.copy(objectBook = current, objectRecords = records, loading = false)
+                } else if (page == Page.DateReview) {
+                    val matches = withContext(Dispatchers.IO) { requireNotNull(dateReviews).reviewDates(reviewQuery) }
+                    if (version == loadVersion) state = state.copy(reviewMatches = matches, loading = false)
                 } else if (page == Page.Search) {
                     val (result, currentScope) = withContext(Dispatchers.IO) {
                         browsing.queryRecords(RecordQuery(query, filterTags, starredOnly, placeScope?.place?.id, people, things, mediaTypes,
@@ -1062,7 +1114,8 @@ class FolioViewModel(
             Page.GroupDetail -> {
                 val id = requireNotNull(state.groupId)
                 val content = withContext(Dispatchers.IO) { requireNotNull(recordGroups).openGroup(id) }
-                if (version == loadVersion) state = state.copy(groupContent = content, loading = false)
+                if (version == loadVersion) state = state.copy(groupContent = content, loading = false,
+                    groupListOrigin = if (content?.chapter != null) Page.Chapters else state.groupListOrigin)
             }
             Page.GroupPicker -> {
                 val records = withContext(Dispatchers.IO) { browsing.listRecentRecords() }
@@ -1072,6 +1125,10 @@ class FolioViewModel(
                 val valid = selection.members.filter { it in active }
                 state = state.copy(records = records, groupSelection = selection.copy(members = valid), loading = false,
                     groupFeedback = if (valid.size == selection.members.size) state.groupFeedback else "部分记录已失效，请确认剩余选择。")
+            }
+            Page.Chapters -> {
+                val groups = withContext(Dispatchers.IO) { requireNotNull(chapters).listChapters() }
+                if (version == loadVersion) state = state.copy(groups = groups, loading = false)
             }
             Page.Groups, Page.GroupDestination -> {
                 val groups = withContext(Dispatchers.IO) { requireNotNull(recordGroups).listGroups() }
@@ -1083,7 +1140,8 @@ class FolioViewModel(
 
     fun openGroup(id: RecordGroupId) {
         if (state.busy) return
-        state = state.copy(groupId = id, groupContent = null, groupGuide = null, guideEdit = null)
+        val origin = if (state.page == Page.GroupDetail) state.groupListOrigin else if (state.page == Page.Chapters) Page.Chapters else Page.Groups
+        state = state.copy(groupId = id, groupContent = null, groupGuide = null, guideEdit = null, groupListOrigin = origin)
         navigate(Page.GroupDetail)
     }
 
@@ -1233,7 +1291,7 @@ class FolioViewModel(
         runAction("删除记录组失败，请重试。") {
             withContext(Dispatchers.IO) { requireNotNull(recordGroups).deleteGroup(id) }
             state = state.copy(groupId = null, groupContent = null)
-            navigate(Page.Groups)
+            navigate(state.groupListOrigin)
         }
     }
 
@@ -1347,11 +1405,70 @@ class FolioViewModel(
         state = if (kind == ObjectKind.PERSON) state.copy(filterPeople = ids) else state.copy(filterThings = ids)
         refresh()
     }
+    private val previousComparisons = ArrayDeque<PhotoComparison>()
+
+    fun startPhotoComparison(photo: ContentItem.Photo? = null) {
+        if (state.busy) return
+        val detailId = state.detailId.takeIf { state.page == Page.Detail }
+        if (detailId != null && state.detailOrigin == Page.PhotoCompare) state.photoComparison?.let(previousComparisons::addLast)
+        else previousComparisons.clear()
+        val left = if (detailId != null && photo != null) PhotoReference(detailId, photo.id) else null
+        state = state.copy(photoComparison = PhotoComparison(state.page, detailId, state.detailOrigin, left))
+        navigate(Page.PhotoCompare)
+    }
+
+    fun selectComparisonPhoto(left: Boolean, ref: PhotoReference, selected: () -> Unit) =
+        runAction("选择照片失败，请重试或重新选择。") {
+            val pair = state.photoComparison ?: return@runAction
+            val source = readComparisonRecord(ref.record)
+            val photo = source?.items?.filterIsInstance<ContentItem.Photo>()?.find { it.id == ref.item }
+            if (photo == null || ref == (if (left) pair.right else pair.left)) {
+                state = state.copy(error = if (photo == null) "所选照片已不可用，请重新选择。" else "请选择另一张照片。")
+                return@runAction
+            }
+            state = state.copy(photoComparison = if (left) pair.copy(left = ref) else pair.copy(right = ref))
+            selected()
+        }
+
+    internal suspend fun readComparisonRecord(id: RecordId) = withContext(Dispatchers.IO) { published.openRecordContent(id) }
+
+    internal suspend fun comparisonSources(keyword: String, scope: RecordObject?) = withContext(Dispatchers.IO) {
+        browsing.queryRecords(RecordQuery(keyword, mediaTypes = setOf(MediaFilter.PHOTO),
+            peopleIds = setOfNotNull(scope?.takeIf { it.kind == ObjectKind.PERSON }?.id),
+            thingIds = setOfNotNull(scope?.takeIf { it.kind == ObjectKind.THING }?.id))).certain
+    }
+
+    private fun leavePhotoComparison() {
+        val pair = state.photoComparison
+        state = state.copy(photoComparison = previousComparisons.removeLastOrNull())
+        if (pair?.origin == Page.Detail && pair.detail != null) runAction("记录读取失败，请重试。") {
+            showDetail(pair.detail, pair.detailOrigin)
+        } else navigate(pair?.origin ?: Page.Records)
+    }
+
+    private data class BookOrigin(val page: Page, val detail: RecordId?, val detailOrigin: Page,
+                                  val book: RecordObject?, val query: String)
+    private val bookOrigins = ArrayDeque<BookOrigin>()
+
     fun openObject(value: RecordObject) {
-        state = state.copy(query = "", filterTags = emptySet(), starredOnly = false, placeScope = null,
-            mediaTypes = emptySet(), eventDateFilter = null, filterPeople = if (value.kind == ObjectKind.PERSON) setOf(value.id) else emptySet(),
-            filterThings = if (value.kind == ObjectKind.THING) setOf(value.id) else emptySet(), searchOrigin = cardSearchOrigin, linkingPlace = null)
-        home(Page.Search)
+        if (state.busy) return
+        if (state.page != Page.ObjectBook && !(state.page == Page.Detail && state.detailOrigin == Page.ObjectBook)) bookOrigins.clear()
+        bookOrigins.addLast(BookOrigin(state.page, state.detailId, state.detailOrigin, state.objectBook, state.objectQuery))
+        state = state.copy(objectBook = value, objectQuery = "", objectRecords = emptyList())
+        navigate(Page.ObjectBook)
+    }
+
+    fun queryObjectBook(value: String) {
+        state = state.copy(objectQuery = value)
+        refresh()
+    }
+
+    private fun leaveObjectBook() {
+        val origin = bookOrigins.removeLastOrNull()
+        state = state.copy(objectBook = origin?.book, objectQuery = origin?.query.orEmpty())
+        if (origin?.page == Page.Detail && origin.detail != null) {
+            runAction("记录读取失败，请重试。") { showDetail(origin.detail, origin.detailOrigin) }
+        } else navigate(origin?.page ?: Page.Objects)
     }
 
     private var placesVersion = 0

@@ -37,6 +37,36 @@ class TextDatabaseMigrationTest {
         context.deleteDatabase(name)
     }
 
+    @Test fun savedSeasonRangeAndNewExclusionSurviveUpgradeAndReopen() = runBlocking {
+        val day = LocalDate.of(2023, 11, 8)
+        createDatabase(27) { sql ->
+            sql.execSQL("""INSERT INTO text_records(id,sourceDraftId,body,firstRecordedAt,modifiedAt,
+                isStarred,isPinned,eventDate,eventZone) VALUES ('autumn','source','桂花',1,1,0,0,?,'Asia/Tokyo')""",
+                arrayOf(day.toEpochDay()))
+        }
+        val id = RecordId("autumn")
+        val query = DateReviewQuery(day.plusYears(1), NamedSeason.AUTUMN)
+        fun open() = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        val first = open()
+        try {
+            val store = LocalTextStore(first, context)
+            assertFalse(store.reviewDates(query).single().excluded)
+            store.setSeasonExcluded(id, true)
+        } finally { first.close() }
+        val reopened = open()
+        try {
+            val store = LocalTextStore(reopened, context)
+            assertTrue(store.reviewDates(query).single().excluded)
+            assertFalse(store.reviewDates(query.copy(season = null)).single().excluded)
+            store.moveToTrash(id)
+            assertTrue(store.reviewDates(query).isEmpty())
+            store.restoreRecord(id)
+            assertTrue(store.reviewDates(query).single().excluded)
+            store.setSeasonExcluded(id, false)
+            assertFalse(store.reviewDates(query).single().excluded)
+        } finally { reopened.close() }
+    }
+
     @Test
     fun oldDraftAndPublishedRecordSurviveUpgradeAndRemainEditable() = runBlocking {
         createDatabase(1) { sql ->
@@ -932,6 +962,19 @@ class TextDatabaseMigrationTest {
             assertEquals("溪水", store.openRecord(result))
             assertEquals(listOf(result), store.search("溪水").map { it.id })
             assertEquals(listOf(source), store.search("木桥").map { it.id })
+        } finally { db.close() }
+    }
+
+    @Test fun v25GroupsStayOrdinaryWhenChaptersBecomeAvailable() = runBlocking {
+        createDatabase(25) { it.execSQL("INSERT INTO record_groups(id,name) VALUES ('old','原有记录组')") }
+        val db = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(db, context)
+            assertEquals("原有记录组", store.listGroups().single().name)
+            assertTrue(store.listChapters().isEmpty())
+            val id = RecordGroupId("new")
+            store.saveChapter(id, null, ChapterProfile("第一次独居", "2023"))
+            assertEquals("2023", store.openGroup(id)!!.chapter?.start)
         } finally { db.close() }
     }
 

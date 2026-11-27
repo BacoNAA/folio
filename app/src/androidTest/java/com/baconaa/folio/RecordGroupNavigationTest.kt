@@ -59,6 +59,31 @@ class RecordGroupNavigationTest {
     private fun enterRecords() = compose.onNodeWithTag("nav-Records").performClick()
     private fun back() = click("返回")
 
+    @Test fun createChapterCorrectReversedDatesThenCollectARecord() {
+        val moving = record("搬家")
+        enterRecords()
+        click("生活章节")
+        click("新建章节")
+        compose.onNodeWithText("章节名称").performTextInput("第一次独居$suffix")
+        compose.onNodeWithText("起点（可选）").performTextInput("2023")
+        compose.onNodeWithText("终点（可选）").performTextInput("2022")
+        click("保存章节")
+        waitFor(hasText("结束时间不能早于开始时间。"))
+        compose.onNodeWithText("终点（可选）").performTextReplacement("2024-03")
+        click("保存章节")
+        waitFor(hasText("2023 至 2024-03"))
+        val id = runBlocking { store.listChapters().single { it.name == "第一次独居$suffix" }.id }
+        try {
+            click("收录记录")
+            pick(moving)
+            click("确认收录")
+            waitFor(hasText("搬家$suffix") and hasClickAction())
+            assertEquals(listOf(moving), order(id))
+            back()
+            waitFor(hasText("第一次独居$suffix") and hasClickAction())
+        } finally { runBlocking { store.deleteGroup(id) } }
+    }
+
     @Test fun createInSelectionOrderJoinAnotherGroupAndReadTheSameEditedRecord() {
         val buy = record("购买")
         val use = record("试用")

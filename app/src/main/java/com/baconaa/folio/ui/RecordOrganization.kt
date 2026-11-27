@@ -261,7 +261,11 @@ internal fun RecordContents(content: RecordContent, model: FolioViewModel) {
     content.title?.let { Text(it, style = MaterialTheme.typography.titleLarge) }
     Text("事件时间：${content.times.eventTime.label()}", fontSize = 12.sp)
     content.place?.let { Text("地点", fontSize = 12.sp); PlaceDescription(it) }
-    content.objects.forEach { Text(it.kind.label, fontSize = 12.sp); ObjectDescription(it) }
+    content.objects.forEach { value ->
+        Text(value.kind.label, fontSize = 12.sp)
+        ObjectDescription(value)
+        if (model.state.page == Page.Detail) TextButton(onClick = { model.openObject(value) }) { Text("查看${value.info.name}的小册") }
+    }
     ReadingBody { enlarged ->
         val bodySize = if (enlarged) 24.sp else 18.sp
         val lineHeight = if (enlarged) 40.sp else 32.sp
@@ -273,7 +277,12 @@ internal fun RecordContents(content: RecordContent, model: FolioViewModel) {
                 is ContentItem.Pdf -> PdfAttachment(item, model)
                 is ContentItem.Link -> SavedLink(item, bodySize, lineHeight)
                 is ContentItem.Video -> VideoAttachment(item, model)
-                is ContentItem.Photo -> { Photo(item.photoId, strokes = item.strokes); if (item.caption.isNotEmpty()) Text(item.caption) }
+                is ContentItem.Photo -> {
+                    Photo(item.photoId, strokes = item.strokes)
+                    if (item.caption.isNotEmpty()) Text(item.caption)
+                    if (model.state.page == Page.Detail) TextButton(onClick = { model.startPhotoComparison(item) },
+                        modifier = Modifier.testTag("compare-start-${item.id.value}")) { Text("用这张照片对照") }
+                }
                 is ContentItem.Audio -> { AudioControl(item.audioId, item.durationMillis, model); if (item.caption.isNotEmpty()) Text(item.caption) }
                 is ContentItem.Checklist -> item.entries.forEach { Text("${if (it.checked) "☑" else "☐"} ${it.text}") }
             }

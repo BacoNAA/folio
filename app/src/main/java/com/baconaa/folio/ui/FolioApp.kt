@@ -46,6 +46,9 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
     val state = model.state
     val recordsScroll = rememberLazyListState()
     val searchScroll = rememberLazyListState()
+    val objectDirectoryScroll = rememberLazyListState()
+    var objectDirectoryQuery by rememberSaveable { mutableStateOf("") }
+    val bookScroll = key(state.objectBook?.id) { rememberLazyListState() }
     val placesScroll = rememberLazyListState()
     val groupsScroll = rememberLazyListState()
     val membersScroll = key(state.groupId) { rememberLazyListState() }
@@ -100,7 +103,12 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                         Text(when (state.page) {
                             Page.Editor -> if (state.editor?.splitSource != null) "拆分草稿" else "记录这一刻"
                             Page.Search -> if (state.placeBook != null) "地点小册" else "搜索全部记录"
+                            Page.PhotoCompare -> "照片对照"
+                            Page.Objects -> "人物与物件"
+                            Page.ObjectBook -> state.objectBook?.let { "${it.kind.label}小册" } ?: "对象小册"
+                            Page.DateReview -> "日期回看"
                             Page.Places -> "按地点"
+                            Page.Chapters -> "生活章节"
                             Page.Groups -> "记录组"
                             Page.GroupDetail -> state.groupContent?.group?.name ?: "记录组"
                             Page.GroupGuide -> if (state.guideEdit != null) "编辑导览" else "专题导览"
@@ -127,8 +135,10 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                 state.error?.takeIf { state.transfer == null && state.templateLibrary == null && state.merge == null }?.let { error ->
                     val retry = when {
                         state.draftReadRetry != null -> model::retryDraftRead
+                        state.page == Page.ObjectBook -> model::refresh
                         state.page == Page.Detail -> model::retryDetail
                         state.page == Page.TrashDetail -> model::retryTrashDetail
+                        state.page == Page.DateReview -> model::refresh
                         state.page == Page.GroupGuide && state.guideEdit != null -> model::saveGuide
                         state.page == Page.Records || state.page == Page.Search || state.page == Page.Trash -> model::refresh
                         state.editor?.needsReload == true -> model::reload
@@ -162,9 +172,12 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                         Page.Records -> Column {
                             FlowRow {
                                 TextButton(onClick = model::openSearch) { Text("搜索全部记录") }
+                                TextButton(onClick = { model.home(Page.DateReview) }) { Text("日期回看") }
                                 TextButton(onClick = model::openStarred) { Text("星标") }
                                 TextButton(onClick = { model.home(Page.Trash) }) { Text("回收站") }
                                 TextButton(onClick = { model.home(Page.Groups) }) { Text("记录组") }
+                                TextButton(onClick = { model.home(Page.Chapters) }) { Text("生活章节") }
+                                TextButton(onClick = { model.home(Page.Objects) }) { Text("人物与物件") }
                             }
                             if (state.drafts.isNotEmpty()) {
                                 FilledTonalButton(onClick = {
@@ -259,12 +272,17 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     OutlinedButton(onClick = { model.startTransfer(split = false) }, enabled = !state.busy) { Text("复制为新记录") }
                                     OutlinedButton(onClick = { model.startTransfer(split = true) }, enabled = !state.busy && pending == null) { Text("拆分记录") }
+                                    state.detailId?.let { RelationButton(it, model) }
                                     OutlinedButton(onClick = { model.editTemplate(extract = true) }, enabled = !state.busy) { Text("提取为模板") }
                                 }
                             }
                         }
+                        Page.PhotoCompare -> PhotoComparisonScreen(model)
+                        Page.Objects -> ObjectDirectory(model, objectDirectoryQuery, { objectDirectoryQuery = it }, objectDirectoryScroll)
+                        Page.ObjectBook -> ObjectBookScreen(model, bookScroll)
+                        Page.DateReview -> DateReviewScreen(model)
                         Page.Places -> PlacesScreen(model, placesScroll)
-                        Page.Groups, Page.GroupDetail, Page.GroupPicker, Page.GroupDestination, Page.GroupGuide ->
+                        Page.Chapters, Page.Groups, Page.GroupDetail, Page.GroupPicker, Page.GroupDestination, Page.GroupGuide ->
                             RecordGroupScreens(model, groupsScroll, membersScroll, pickerScroll, guideScroll)
                         Page.Trash -> TrashScreen(model)
                         Page.TrashDetail -> state.trashDetail?.let { record ->

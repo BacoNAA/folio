@@ -28,7 +28,9 @@ class LocalTextStore internal constructor(
 ) : TextDrafts, PublishedTextRecords, MixedContentDrafts, MediaImports, RecordTrash, RecordTimeEditing, SeasonSettings, RecordMarking,
     RecordBrowsing by LocalRecordBrowsing(database), RecordGroups by LocalRecordGroups(database),
     RecordGroupGuides by LocalRecordGroupGuides(database), RecordTags by LocalRecordTags(database, now),
-    RecordTemplates by LocalRecordTemplates(database, now),
+    RecordRelations by LocalRecordRelations(database),
+    RecordChapters by LocalRecordChapters(database),
+    DateReviews, RecordTemplates by LocalRecordTemplates(database, now),
     RecordPlaces by LocalRecordPlaces(database, now), RecordObjects by LocalRecordObjects(database, now) {
     private val dao = database.textDao()
     private val itemDao = database.itemDao()
@@ -548,6 +550,22 @@ class LocalTextStore internal constructor(
 
     override suspend fun openDraftTimes(id: DraftId): DraftTimes? =
         dao.draft(id.value)?.let { DraftTimes(it.firstContentAt, it.eventTime?.asEventTime()) }
+
+    override suspend fun reviewDates(query: DateReviewQuery): List<ReviewMatch> = database.withTransaction {
+        val months = query.season?.let { readSeasonMonths().getValue(it) }
+        val excluded = if (months == null) emptySet() else database.seasonReviewDao().excluded().toSet()
+        listRecentRecords().mapNotNull { card ->
+            card.eventTime?.reviewReason(query, months)?.let { ReviewMatch(card, it, card.id.value in excluded) }
+        }
+    }
+
+    override suspend fun setSeasonExcluded(id: RecordId, excluded: Boolean) = database.withTransaction {
+        val reviews = database.seasonReviewDao()
+        if (excluded) {
+            checkNotNull(dao.activeRecord(id.value)) { "记录已不存在" }
+            reviews.exclude(SeasonReviewExclusion(id.value))
+        } else reviews.include(id.value)
+    }
 
     override suspend fun readSeasonMonths(): Map<NamedSeason, SeasonMonths> {
         val settings = database.seasonSettingsDao().settings().associate { it.season to it.months }

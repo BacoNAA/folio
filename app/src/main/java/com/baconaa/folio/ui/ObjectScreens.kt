@@ -32,9 +32,7 @@ internal fun ObjectPicker(model: FolioViewModel, kind: ObjectKind, editing: Bool
     var query by rememberSaveable(kind) { mutableStateOf("") }
     var formId by rememberSaveable { mutableStateOf<String?>(null) }
     val all = choices.distinctBy { it.id }.filter { it.kind == kind }
-    val filtered = all.filter { value ->
-        (listOf(value.info.name, value.info.note) + value.info.aliases).any { it.contains(query.trim(), ignoreCase = true) }
-    }
+    val filtered = all.filter { it.matchesObjectQuery(query) }
     val enabled = !state.busy && !state.objectsLoading && state.objectsError == null && state.editor?.needsReload != true
     AlertDialog(onDismissRequest = close, title = { Text(if (editing) "选择${kind.label}" else "筛选${kind.label} · 满足任一个") }, text = {
         Column {
@@ -75,7 +73,7 @@ internal fun ObjectPicker(model: FolioViewModel, kind: ObjectKind, editing: Bool
 }
 
 @Composable
-private fun ObjectInfoDialog(model: FolioViewModel, kind: ObjectKind, initial: RecordObject?, close: () -> Unit, save: (ObjectInfo) -> Unit) {
+internal fun ObjectInfoDialog(model: FolioViewModel, kind: ObjectKind, initial: RecordObject?, close: () -> Unit, save: (ObjectInfo) -> Unit) {
     var name by rememberSaveable { mutableStateOf(initial?.info?.name.orEmpty()) }
     var note by rememberSaveable { mutableStateOf(initial?.info?.note.orEmpty()) }
     var aliases by rememberSaveable { mutableStateOf(initial?.info?.aliases.orEmpty().joinToString("\n")) }

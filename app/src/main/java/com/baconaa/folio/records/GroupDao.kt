@@ -32,7 +32,7 @@ internal data class GroupMemberRow(
 
 @Dao
 internal abstract class GroupDao {
-    @Query("SELECT * FROM record_groups WHERE name IS NOT NULL ORDER BY rowid DESC")
+    @Query("SELECT * FROM record_groups WHERE name IS NOT NULL AND id NOT IN (SELECT groupId FROM life_chapters) ORDER BY rowid DESC")
     abstract suspend fun listGroups(): List<GroupRow>
 
     @Query("SELECT * FROM record_groups WHERE id = :id")

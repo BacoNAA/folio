@@ -8,7 +8,8 @@ value class RecordGroupId(val value: String) {
 }
 
 data class RecordGroup(val id: RecordGroupId, val name: String)
-data class RecordGroupContent(val group: RecordGroup, val members: List<RecordCard>)
+data class RecordGroupContent(val group: RecordGroup, val members: List<RecordCard>,
+    val chapter: ChapterProfile? = null, val cover: ChapterPhoto? = null)
 
 sealed interface GroupUpdate {
     data class Saved(val id: RecordGroupId, val order: List<RecordId>) : GroupUpdate
@@ -45,7 +46,9 @@ internal class LocalRecordGroups(private val database: FolioDatabase) : RecordGr
 
     internal suspend fun readContent(row: GroupRow): RecordGroupContent? {
         val name = row.name ?: return null
-        return RecordGroupContent(RecordGroup(RecordGroupId(row.id), name), browsing.readCards(dao.memberCards(row.id)))
+        val chapter = database.chapterDao().chapter(row.id)?.profile(name)
+        val cover = chapter?.cover?.let { database.chapterDao().photo(it.record.value, it.item.value)?.photo() }
+        return RecordGroupContent(RecordGroup(RecordGroupId(row.id), name), browsing.readCards(dao.memberCards(row.id)), chapter, cover)
     }
 
     override suspend fun createGroup(id: RecordGroupId, name: String, members: List<RecordId>): GroupUpdate =
@@ -99,6 +102,7 @@ internal class LocalRecordGroups(private val database: FolioDatabase) : RecordGr
 
     override suspend fun deleteGroup(id: RecordGroupId): Boolean = database.withTransaction {
         if (dao.retireGroup(id.value) == 0) return@withTransaction false
+        database.chapterDao().remove(id.value)
         database.guideDao().deleteGuideSections(id.value)
         dao.removeAllMembers(id.value)
         true

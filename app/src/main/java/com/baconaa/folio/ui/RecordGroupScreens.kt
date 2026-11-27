@@ -35,6 +35,7 @@ internal fun RecordGroupScreens(model: FolioViewModel, groupsScroll: LazyListSta
             return@Column
         }
         when (state.page) {
+            Page.Chapters -> ChapterList(model, groupsScroll)
             Page.Groups -> LazyColumn(state = groupsScroll, modifier = Modifier.testTag("group-list")) {
                 item { Button(onClick = model::pickGroupMembers, enabled = !state.busy) { Text("多选记录") } }
                 if (state.groups.isEmpty()) item { Text("还没有记录组。", Modifier.padding(vertical = 16.dp)) }
@@ -61,14 +62,21 @@ private fun DeletedGroup(model: FolioViewModel) {
 @Composable
 private fun GroupMembers(model: FolioViewModel, content: RecordGroupContent, scroll: LazyListState) {
     var deleteDialog by rememberSaveable(content.group.id.value) { mutableStateOf(false) }
+    var editChapter by rememberSaveable(content.group.id.value) { mutableStateOf(false) }
     val enabled = !model.state.busy
     LazyColumn(state = scroll, modifier = Modifier.fillMaxSize().testTag("group-members"),
         contentPadding = PaddingValues(vertical = 8.dp)) {
+        content.chapter?.let { chapter ->
+            item {
+                ChapterSummary(chapter, content.cover)
+                TextButton(onClick = { editChapter = true }, enabled = enabled) { Text("编辑章节") }
+            }
+        }
         item {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = model::pickGroupMembers, enabled = enabled) { Text("收录记录") }
-                TextButton(onClick = model::openGroupGuide, enabled = enabled) { Text("专题导览") }
-                TextButton(onClick = { deleteDialog = true }, enabled = enabled) { Text("删除组") }
+                if (content.chapter == null) TextButton(onClick = model::openGroupGuide, enabled = enabled) { Text("专题导览") }
+                TextButton(onClick = { deleteDialog = true }, enabled = enabled) { Text(if (content.chapter != null) "删除章节" else "删除组") }
             }
         }
         if (content.members.isEmpty()) item { Text("组内还没有记录。", Modifier.padding(vertical = 16.dp)) }
@@ -85,9 +93,10 @@ private fun GroupMembers(model: FolioViewModel, content: RecordGroupContent, scr
             }
         }
     }
+    if (editChapter) ChapterEditor(model, content.group.id, content.chapter) { editChapter = false }
     if (deleteDialog) AlertDialog(onDismissRequest = { deleteDialog = false },
         title = { Text("删除「${content.group.name}」？") }, text = { Text("组内收录和顺序将一并移除，原记录仍可查看。") },
-        confirmButton = { TextButton(onClick = { deleteDialog = false; model.deleteGroup() }) { Text("确认删除组") } },
+        confirmButton = { TextButton(onClick = { deleteDialog = false; model.deleteGroup() }) { Text(if (content.chapter != null) "确认删除章节" else "确认删除组") } },
         dismissButton = { TextButton(onClick = { deleteDialog = false }) { Text("取消") } })
 }
 
