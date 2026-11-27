@@ -1,0 +1,2147 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 29,
+    "identityHash": "55909a21404c45927ab7d296562bfe9d",
+    "entities": [
+      {
+        "tableName": "text_drafts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `body` TEXT NOT NULL, `cursor` INTEGER NOT NULL, `firstRecordedAt` INTEGER NOT NULL, `lastEditedAt` INTEGER NOT NULL, `activeItemId` TEXT, `title` TEXT, `firstContentAt` INTEGER, `eventDate` INTEGER, `eventClock` INTEGER, `eventZone` TEXT, `eventKind` TEXT, `eventEndDate` INTEGER, `eventText` TEXT, `eventSeasonYear` INTEGER, `eventStartPrecision` TEXT, `eventEndPrecision` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "body",
+            "columnName": "body",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cursor",
+            "columnName": "cursor",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "firstRecordedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastEditedAt",
+            "columnName": "lastEditedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "activeItemId",
+            "columnName": "activeItemId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "firstContentAt",
+            "columnName": "firstContentAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "eventTime.eventDate",
+            "columnName": "eventDate",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "eventTime.eventClock",
+            "columnName": "eventClock",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "eventTime.eventZone",
+            "columnName": "eventZone",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "eventTime.eventKind",
+            "columnName": "eventKind",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "eventTime.eventEndDate",
+            "columnName": "eventEndDate",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "eventTime.eventText",
+            "columnName": "eventText",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "eventTime.eventSeasonYear",
+            "columnName": "eventSeasonYear",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "eventTime.eventStartPrecision",
+            "columnName": "eventStartPrecision",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "eventTime.eventEndPrecision",
+            "columnName": "eventEndPrecision",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "text_records",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `sourceDraftId` TEXT NOT NULL, `body` TEXT NOT NULL, `firstRecordedAt` INTEGER NOT NULL, `modifiedAt` INTEGER NOT NULL, `deletedAt` INTEGER, `revision` INTEGER NOT NULL DEFAULT 1, `title` TEXT, `eventDate` INTEGER, `eventClock` INTEGER, `eventZone` TEXT, `eventKind` TEXT, `eventEndDate` INTEGER, `eventText` TEXT, `eventSeasonYear` INTEGER, `eventStartPrecision` TEXT, `eventEndPrecision` TEXT, `isStarred` INTEGER NOT NULL DEFAULT 0, `isPinned` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceDraftId",
+            "columnName": "sourceDraftId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "body",
+            "columnName": "body",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "firstRecordedAt",
+            "columnName": "firstRecordedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "modifiedAt",
+            "columnName": "modifiedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deletedAt",
+            "columnName": "deletedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "revision",
+            "columnName": "revision",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "eventTime.eventDate",
+            "columnName": "eventDate",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "eventTime.eventClock",
+            "columnName": "eventClock",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "eventTime.eventZone",
+            "columnName": "eventZone",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "eventTime.eventKind",
+            "columnName": "eventKind",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "eventTime.eventEndDate",
+            "columnName": "eventEndDate",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "eventTime.eventText",
+            "columnName": "eventText",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "eventTime.eventSeasonYear",
+            "columnName": "eventSeasonYear",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "eventTime.eventStartPrecision",
+            "columnName": "eventStartPrecision",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "eventTime.eventEndPrecision",
+            "columnName": "eventEndPrecision",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "marks.isStarred",
+            "columnName": "isStarred",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "marks.isPinned",
+            "columnName": "isPinned",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_text_records_sourceDraftId",
+            "unique": true,
+            "columnNames": [
+              "sourceDraftId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_text_records_sourceDraftId` ON `${TABLE_NAME}` (`sourceDraftId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "text_record_edits",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`draftId` TEXT NOT NULL, `recordId` TEXT NOT NULL, `baseRevision` INTEGER NOT NULL, PRIMARY KEY(`draftId`), FOREIGN KEY(`recordId`) REFERENCES `text_records`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "draftId",
+            "columnName": "draftId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recordId",
+            "columnName": "recordId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "baseRevision",
+            "columnName": "baseRevision",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "draftId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_text_record_edits_recordId",
+            "unique": false,
+            "columnNames": [
+              "recordId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_text_record_edits_recordId` ON `${TABLE_NAME}` (`recordId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "text_records",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "recordId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "record_split_items",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`draftId` TEXT NOT NULL, `sourceItemId` TEXT NOT NULL, `draftItemId` TEXT NOT NULL, PRIMARY KEY(`draftId`, `sourceItemId`), FOREIGN KEY(`draftId`) REFERENCES `text_drafts`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "draftId",
+            "columnName": "draftId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceItemId",
+            "columnName": "sourceItemId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "draftItemId",
+            "columnName": "draftItemId",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "draftId",
+            "sourceItemId"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "text_drafts",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "draftId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "draft_items",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`draftId` TEXT NOT NULL, `position` INTEGER NOT NULL, `itemId` TEXT NOT NULL, `text` TEXT, `photoId` TEXT, `caption` TEXT NOT NULL DEFAULT '', `checklistJson` TEXT, `audioId` TEXT, `audioDurationMillis` INTEGER, `pdfId` TEXT, `pdfName` TEXT, `pdfSizeBytes` INTEGER, `videoId` TEXT, `videoName` TEXT, `videoSizeBytes` INTEGER, `videoDurationMillis` INTEGER, `linkAddress` TEXT, `linkTitle` TEXT, `linkNote` TEXT, `linkScreenshotId` TEXT, `photoStrokes` BLOB, `fieldName` TEXT, `emptyFieldType` TEXT, PRIMARY KEY(`draftId`, `position`), FOREIGN KEY(`draftId`) REFERENCES `text_drafts`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "draftId",
+            "columnName": "draftId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "slot.itemId",
+            "columnName": "itemId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "slot.text",
+            "columnName": "text",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.photoId",
+            "columnName": "photoId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.caption",
+            "columnName": "caption",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "slot.checklistJson",
+            "columnName": "checklistJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.audioId",
+            "columnName": "audioId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.audioDurationMillis",
+            "columnName": "audioDurationMillis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "slot.pdfId",
+            "columnName": "pdfId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.pdfName",
+            "columnName": "pdfName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.pdfSizeBytes",
+            "columnName": "pdfSizeBytes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "slot.videoId",
+            "columnName": "videoId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.videoName",
+            "columnName": "videoName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.videoSizeBytes",
+            "columnName": "videoSizeBytes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "slot.videoDurationMillis",
+            "columnName": "videoDurationMillis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "slot.linkAddress",
+            "columnName": "linkAddress",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.linkTitle",
+            "columnName": "linkTitle",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.linkNote",
+            "columnName": "linkNote",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.linkScreenshotId",
+            "columnName": "linkScreenshotId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.photoStrokes",
+            "columnName": "photoStrokes",
+            "affinity": "BLOB"
+          },
+          {
+            "fieldPath": "slot.fieldName",
+            "columnName": "fieldName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.emptyFieldType",
+            "columnName": "emptyFieldType",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "draftId",
+            "position"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_draft_items_draftId_itemId",
+            "unique": true,
+            "columnNames": [
+              "draftId",
+              "itemId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_draft_items_draftId_itemId` ON `${TABLE_NAME}` (`draftId`, `itemId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "text_drafts",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "draftId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "record_items",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`recordId` TEXT NOT NULL, `position` INTEGER NOT NULL, `itemId` TEXT NOT NULL, `text` TEXT, `photoId` TEXT, `caption` TEXT NOT NULL DEFAULT '', `checklistJson` TEXT, `audioId` TEXT, `audioDurationMillis` INTEGER, `pdfId` TEXT, `pdfName` TEXT, `pdfSizeBytes` INTEGER, `videoId` TEXT, `videoName` TEXT, `videoSizeBytes` INTEGER, `videoDurationMillis` INTEGER, `linkAddress` TEXT, `linkTitle` TEXT, `linkNote` TEXT, `linkScreenshotId` TEXT, `photoStrokes` BLOB, `fieldName` TEXT, `emptyFieldType` TEXT, PRIMARY KEY(`recordId`, `position`), FOREIGN KEY(`recordId`) REFERENCES `text_records`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "recordId",
+            "columnName": "recordId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "slot.itemId",
+            "columnName": "itemId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "slot.text",
+            "columnName": "text",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.photoId",
+            "columnName": "photoId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.caption",
+            "columnName": "caption",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "slot.checklistJson",
+            "columnName": "checklistJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.audioId",
+            "columnName": "audioId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.audioDurationMillis",
+            "columnName": "audioDurationMillis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "slot.pdfId",
+            "columnName": "pdfId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.pdfName",
+            "columnName": "pdfName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.pdfSizeBytes",
+            "columnName": "pdfSizeBytes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "slot.videoId",
+            "columnName": "videoId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.videoName",
+            "columnName": "videoName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.videoSizeBytes",
+            "columnName": "videoSizeBytes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "slot.videoDurationMillis",
+            "columnName": "videoDurationMillis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "slot.linkAddress",
+            "columnName": "linkAddress",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.linkTitle",
+            "columnName": "linkTitle",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.linkNote",
+            "columnName": "linkNote",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.linkScreenshotId",
+            "columnName": "linkScreenshotId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.photoStrokes",
+            "columnName": "photoStrokes",
+            "affinity": "BLOB"
+          },
+          {
+            "fieldPath": "slot.fieldName",
+            "columnName": "fieldName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.emptyFieldType",
+            "columnName": "emptyFieldType",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "recordId",
+            "position"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_record_items_recordId_itemId",
+            "unique": true,
+            "columnNames": [
+              "recordId",
+              "itemId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_record_items_recordId_itemId` ON `${TABLE_NAME}` (`recordId`, `itemId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "text_records",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "recordId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "removed_draft_items",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`draftId` TEXT NOT NULL, `position` INTEGER NOT NULL, `previousItemId` TEXT, `nextItemId` TEXT, `cursor` INTEGER NOT NULL, `itemId` TEXT NOT NULL, `text` TEXT, `photoId` TEXT, `caption` TEXT NOT NULL DEFAULT '', `checklistJson` TEXT, `audioId` TEXT, `audioDurationMillis` INTEGER, `pdfId` TEXT, `pdfName` TEXT, `pdfSizeBytes` INTEGER, `videoId` TEXT, `videoName` TEXT, `videoSizeBytes` INTEGER, `videoDurationMillis` INTEGER, `linkAddress` TEXT, `linkTitle` TEXT, `linkNote` TEXT, `linkScreenshotId` TEXT, `photoStrokes` BLOB, `fieldName` TEXT, `emptyFieldType` TEXT, PRIMARY KEY(`draftId`), FOREIGN KEY(`draftId`) REFERENCES `text_drafts`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "draftId",
+            "columnName": "draftId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "previousItemId",
+            "columnName": "previousItemId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "nextItemId",
+            "columnName": "nextItemId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "cursor",
+            "columnName": "cursor",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "slot.itemId",
+            "columnName": "itemId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "slot.text",
+            "columnName": "text",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.photoId",
+            "columnName": "photoId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.caption",
+            "columnName": "caption",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "slot.checklistJson",
+            "columnName": "checklistJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.audioId",
+            "columnName": "audioId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.audioDurationMillis",
+            "columnName": "audioDurationMillis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "slot.pdfId",
+            "columnName": "pdfId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.pdfName",
+            "columnName": "pdfName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.pdfSizeBytes",
+            "columnName": "pdfSizeBytes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "slot.videoId",
+            "columnName": "videoId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.videoName",
+            "columnName": "videoName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.videoSizeBytes",
+            "columnName": "videoSizeBytes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "slot.videoDurationMillis",
+            "columnName": "videoDurationMillis",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "slot.linkAddress",
+            "columnName": "linkAddress",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.linkTitle",
+            "columnName": "linkTitle",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.linkNote",
+            "columnName": "linkNote",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.linkScreenshotId",
+            "columnName": "linkScreenshotId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.photoStrokes",
+            "columnName": "photoStrokes",
+            "affinity": "BLOB"
+          },
+          {
+            "fieldPath": "slot.fieldName",
+            "columnName": "fieldName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "slot.emptyFieldType",
+            "columnName": "emptyFieldType",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "draftId"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "text_drafts",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "draftId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "photo_cleanup_queue",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`photoId` TEXT NOT NULL, PRIMARY KEY(`photoId`))",
+        "fields": [
+          {
+            "fieldPath": "photoId",
+            "columnName": "photoId",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "photoId"
+          ]
+        }
+      },
+      {
+        "tableName": "audio_cleanup_queue",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`audioId` TEXT NOT NULL, PRIMARY KEY(`audioId`))",
+        "fields": [
+          {
+            "fieldPath": "audioId",
+            "columnName": "audioId",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "audioId"
+          ]
+        }
+      },
+      {
+        "tableName": "tags",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `ownerDraftId` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`ownerDraftId`) REFERENCES `text_drafts`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerDraftId",
+            "columnName": "ownerDraftId",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_tags_ownerDraftId",
+            "unique": false,
+            "columnNames": [
+              "ownerDraftId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_tags_ownerDraftId` ON `${TABLE_NAME}` (`ownerDraftId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "text_drafts",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "ownerDraftId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "draft_tags",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`draftId` TEXT NOT NULL, `tagId` TEXT NOT NULL, `position` INTEGER NOT NULL, PRIMARY KEY(`draftId`, `tagId`), FOREIGN KEY(`draftId`) REFERENCES `text_drafts`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`tagId`) REFERENCES `tags`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "draftId",
+            "columnName": "draftId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tagId",
+            "columnName": "tagId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "draftId",
+            "tagId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_draft_tags_tagId",
+            "unique": false,
+            "columnNames": [
+              "tagId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_draft_tags_tagId` ON `${TABLE_NAME}` (`tagId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "text_drafts",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "draftId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "tags",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "tagId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "record_tags",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`recordId` TEXT NOT NULL, `tagId` TEXT NOT NULL, `position` INTEGER NOT NULL, PRIMARY KEY(`recordId`, `tagId`), FOREIGN KEY(`recordId`) REFERENCES `text_records`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`tagId`) REFERENCES `tags`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "recordId",
+            "columnName": "recordId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tagId",
+            "columnName": "tagId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "recordId",
+            "tagId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_record_tags_tagId",
+            "unique": false,
+            "columnNames": [
+              "tagId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_record_tags_tagId` ON `${TABLE_NAME}` (`tagId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "text_records",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "recordId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "tags",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "tagId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "places",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `ownerDraftId` TEXT, `name` TEXT NOT NULL, `city` TEXT NOT NULL, `address` TEXT NOT NULL, `note` TEXT NOT NULL, `latitude` REAL, `longitude` REAL, PRIMARY KEY(`id`), FOREIGN KEY(`ownerDraftId`) REFERENCES `text_drafts`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerDraftId",
+            "columnName": "ownerDraftId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "info.name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "info.city",
+            "columnName": "city",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "info.address",
+            "columnName": "address",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "info.note",
+            "columnName": "note",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "info.coordinates.latitude",
+            "columnName": "latitude",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "info.coordinates.longitude",
+            "columnName": "longitude",
+            "affinity": "REAL"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_places_ownerDraftId",
+            "unique": false,
+            "columnNames": [
+              "ownerDraftId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_places_ownerDraftId` ON `${TABLE_NAME}` (`ownerDraftId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "text_drafts",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "ownerDraftId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "draft_places",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`draftId` TEXT NOT NULL, `placeId` TEXT NOT NULL, PRIMARY KEY(`draftId`), FOREIGN KEY(`draftId`) REFERENCES `text_drafts`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`placeId`) REFERENCES `places`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "draftId",
+            "columnName": "draftId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "placeId",
+            "columnName": "placeId",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "draftId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_draft_places_placeId",
+            "unique": false,
+            "columnNames": [
+              "placeId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_draft_places_placeId` ON `${TABLE_NAME}` (`placeId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "text_drafts",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "draftId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "places",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "placeId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "record_places",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`recordId` TEXT NOT NULL, `placeId` TEXT NOT NULL, PRIMARY KEY(`recordId`), FOREIGN KEY(`recordId`) REFERENCES `text_records`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`placeId`) REFERENCES `places`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "recordId",
+            "columnName": "recordId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "placeId",
+            "columnName": "placeId",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "recordId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_record_places_placeId",
+            "unique": false,
+            "columnNames": [
+              "placeId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_record_places_placeId` ON `${TABLE_NAME}` (`placeId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "text_records",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "recordId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "places",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "placeId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "record_objects",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `kind` TEXT NOT NULL, `name` TEXT NOT NULL, `note` TEXT NOT NULL, `ownerDraftId` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`ownerDraftId`) REFERENCES `text_drafts`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "note",
+            "columnName": "note",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerDraftId",
+            "columnName": "ownerDraftId",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_record_objects_ownerDraftId",
+            "unique": false,
+            "columnNames": [
+              "ownerDraftId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_record_objects_ownerDraftId` ON `${TABLE_NAME}` (`ownerDraftId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "text_drafts",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "ownerDraftId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "object_aliases",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`objectId` TEXT NOT NULL, `name` TEXT NOT NULL, `position` INTEGER NOT NULL, PRIMARY KEY(`objectId`, `name`), FOREIGN KEY(`objectId`) REFERENCES `record_objects`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "objectId",
+            "columnName": "objectId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "objectId",
+            "name"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "record_objects",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "objectId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "draft_objects",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`draftId` TEXT NOT NULL, `objectId` TEXT NOT NULL, `position` INTEGER NOT NULL, PRIMARY KEY(`draftId`, `objectId`), FOREIGN KEY(`draftId`) REFERENCES `text_drafts`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`objectId`) REFERENCES `record_objects`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "draftId",
+            "columnName": "draftId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "objectId",
+            "columnName": "objectId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "draftId",
+            "objectId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_draft_objects_objectId",
+            "unique": false,
+            "columnNames": [
+              "objectId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_draft_objects_objectId` ON `${TABLE_NAME}` (`objectId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "text_drafts",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "draftId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "record_objects",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "objectId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "published_objects",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`recordId` TEXT NOT NULL, `objectId` TEXT NOT NULL, `position` INTEGER NOT NULL, PRIMARY KEY(`recordId`, `objectId`), FOREIGN KEY(`recordId`) REFERENCES `text_records`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`objectId`) REFERENCES `record_objects`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "recordId",
+            "columnName": "recordId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "objectId",
+            "columnName": "objectId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "recordId",
+            "objectId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_published_objects_objectId",
+            "unique": false,
+            "columnNames": [
+              "objectId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_published_objects_objectId` ON `${TABLE_NAME}` (`objectId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "text_records",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "recordId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "record_objects",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "objectId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "season_review_exclusions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`recordId` TEXT NOT NULL, PRIMARY KEY(`recordId`), FOREIGN KEY(`recordId`) REFERENCES `text_records`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "recordId",
+            "columnName": "recordId",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "recordId"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "text_records",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "recordId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "season_settings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`season` TEXT NOT NULL, `firstMonth` INTEGER NOT NULL, `lastMonth` INTEGER NOT NULL, PRIMARY KEY(`season`))",
+        "fields": [
+          {
+            "fieldPath": "season",
+            "columnName": "season",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "months.firstMonth",
+            "columnName": "firstMonth",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "months.lastMonth",
+            "columnName": "lastMonth",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "season"
+          ]
+        }
+      },
+      {
+        "tableName": "import_cleanup_queue",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`assetId` TEXT NOT NULL, `type` TEXT NOT NULL, PRIMARY KEY(`assetId`))",
+        "fields": [
+          {
+            "fieldPath": "assetId",
+            "columnName": "assetId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "assetId"
+          ]
+        }
+      },
+      {
+        "tableName": "record_groups",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT, `guideDescription` TEXT NOT NULL DEFAULT '', PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "guideDescription",
+            "columnName": "guideDescription",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "record_group_members",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`groupId` TEXT NOT NULL, `recordId` TEXT NOT NULL, `position` INTEGER, `previousRecordId` TEXT, `nextRecordId` TEXT, PRIMARY KEY(`groupId`, `recordId`), FOREIGN KEY(`groupId`) REFERENCES `record_groups`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`recordId`) REFERENCES `text_records`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "groupId",
+            "columnName": "groupId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recordId",
+            "columnName": "recordId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "previousRecordId",
+            "columnName": "previousRecordId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "nextRecordId",
+            "columnName": "nextRecordId",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "groupId",
+            "recordId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_record_group_members_recordId",
+            "unique": false,
+            "columnNames": [
+              "recordId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_record_group_members_recordId` ON `${TABLE_NAME}` (`recordId`)"
+          },
+          {
+            "name": "index_record_group_members_groupId_position",
+            "unique": true,
+            "columnNames": [
+              "groupId",
+              "position"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_record_group_members_groupId_position` ON `${TABLE_NAME}` (`groupId`, `position`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "record_groups",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "groupId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "text_records",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "recordId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "observation_nodes",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`ownerKind` TEXT NOT NULL, `ownerId` TEXT NOT NULL, `recordId` TEXT NOT NULL, `itemId` TEXT NOT NULL, `note` TEXT NOT NULL, `addedAt` INTEGER NOT NULL, PRIMARY KEY(`ownerKind`, `ownerId`, `recordId`, `itemId`), FOREIGN KEY(`recordId`) REFERENCES `text_records`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "ownerKind",
+            "columnName": "ownerKind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerId",
+            "columnName": "ownerId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recordId",
+            "columnName": "recordId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "itemId",
+            "columnName": "itemId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "note",
+            "columnName": "note",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "addedAt",
+            "columnName": "addedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "ownerKind",
+            "ownerId",
+            "recordId",
+            "itemId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_observation_nodes_recordId",
+            "unique": false,
+            "columnNames": [
+              "recordId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_observation_nodes_recordId` ON `${TABLE_NAME}` (`recordId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "text_records",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "recordId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "record_relations",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`firstId` TEXT NOT NULL, `secondId` TEXT NOT NULL, PRIMARY KEY(`firstId`, `secondId`), FOREIGN KEY(`firstId`) REFERENCES `text_records`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`secondId`) REFERENCES `text_records`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "firstId",
+            "columnName": "firstId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "secondId",
+            "columnName": "secondId",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "firstId",
+            "secondId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_record_relations_secondId",
+            "unique": false,
+            "columnNames": [
+              "secondId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_record_relations_secondId` ON `${TABLE_NAME}` (`secondId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "text_records",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "firstId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "text_records",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "secondId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "life_chapters",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`groupId` TEXT NOT NULL, `start` TEXT NOT NULL, `end` TEXT NOT NULL, `note` TEXT NOT NULL, `coverRecord` TEXT, `coverItem` TEXT, PRIMARY KEY(`groupId`), FOREIGN KEY(`groupId`) REFERENCES `record_groups`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "groupId",
+            "columnName": "groupId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "start",
+            "columnName": "start",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "end",
+            "columnName": "end",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "note",
+            "columnName": "note",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "coverRecord",
+            "columnName": "coverRecord",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "coverItem",
+            "columnName": "coverItem",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "groupId"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "record_groups",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "groupId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "group_guide_sections",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`groupId` TEXT NOT NULL, `id` TEXT NOT NULL, `position` INTEGER NOT NULL, `title` TEXT NOT NULL, `description` TEXT NOT NULL, PRIMARY KEY(`groupId`, `id`), FOREIGN KEY(`groupId`) REFERENCES `record_groups`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "groupId",
+            "columnName": "groupId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "description",
+            "columnName": "description",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "groupId",
+            "id"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "record_groups",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "groupId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "group_guide_assignments",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`groupId` TEXT NOT NULL, `recordId` TEXT NOT NULL, `sectionId` TEXT NOT NULL, PRIMARY KEY(`groupId`, `recordId`), FOREIGN KEY(`groupId`, `recordId`) REFERENCES `record_group_members`(`groupId`, `recordId`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`groupId`, `sectionId`) REFERENCES `group_guide_sections`(`groupId`, `id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "groupId",
+            "columnName": "groupId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recordId",
+            "columnName": "recordId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sectionId",
+            "columnName": "sectionId",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "groupId",
+            "recordId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_group_guide_assignments_groupId_sectionId",
+            "unique": false,
+            "columnNames": [
+              "groupId",
+              "sectionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_group_guide_assignments_groupId_sectionId` ON `${TABLE_NAME}` (`groupId`, `sectionId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "record_group_members",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "groupId",
+              "recordId"
+            ],
+            "referencedColumns": [
+              "groupId",
+              "recordId"
+            ]
+          },
+          {
+            "table": "group_guide_sections",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "groupId",
+              "sectionId"
+            ],
+            "referencedColumns": [
+              "groupId",
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "record_templates",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `revision` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "revision",
+            "columnName": "revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "template_fields",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`templateId` TEXT NOT NULL, `position` INTEGER NOT NULL, `name` TEXT NOT NULL, `type` TEXT NOT NULL, PRIMARY KEY(`templateId`, `position`), FOREIGN KEY(`templateId`) REFERENCES `record_templates`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "templateId",
+            "columnName": "templateId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "templateId",
+            "position"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "record_templates",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "templateId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "template_tags",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`templateId` TEXT NOT NULL, `tagId` TEXT NOT NULL, PRIMARY KEY(`templateId`, `tagId`), FOREIGN KEY(`templateId`) REFERENCES `record_templates`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`tagId`) REFERENCES `tags`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "templateId",
+            "columnName": "templateId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tagId",
+            "columnName": "tagId",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "templateId",
+            "tagId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_template_tags_tagId",
+            "unique": false,
+            "columnNames": [
+              "tagId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_template_tags_tagId` ON `${TABLE_NAME}` (`tagId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "record_templates",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "templateId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "tags",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "tagId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      }
+    ],
+    "views": [
+      {
+        "viewName": "editable_text_drafts",
+        "createSql": "CREATE VIEW `${VIEW_NAME}` AS SELECT d.*, d.rowid AS insertionOrder, e.recordId FROM text_drafts d\n       LEFT JOIN text_record_edits e ON e.draftId = d.id\n       LEFT JOIN text_records r ON r.id = e.recordId\n       WHERE r.deletedAt IS NULL"
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '55909a21404c45927ab7d296562bfe9d')"
+    ]
+  }
+}

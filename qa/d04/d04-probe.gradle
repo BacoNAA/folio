@@ -1,0 +1,7 @@
+// Include this probe only when checking a release candidate on a dedicated installation.
+def sources = new File(gradle.startParameter.initScripts.find { it.name == 'd04-probe.gradle' }.parentFile, 'androidTest')
+gradle.beforeProject { project ->
+    if (project.path == ':app') project.pluginManager.withPlugin('com.android.application') {
+        project.android.sourceSets.getByName('androidTest').kotlin.srcDir(sources)
+    }
+}

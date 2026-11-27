@@ -90,7 +90,7 @@ internal class LocalRecordBrowsing(private val database: FolioDatabase) : Record
     override suspend fun listStarredRecords(): List<RecordCard> = queryRecords(starredOnly = true)
 
     override suspend fun queryRecords(query: RecordQuery): RecordSearchResult = database.withTransaction {
-        val records = dao.activeRecords(
+        val active = dao.activeRecords(
             query.keyword, query.tagIds.map { it.value }, query.tagIds.isEmpty(), query.starredOnly, query.placeId?.value,
             query.peopleIds.map { it.value }, query.peopleIds.isEmpty(), query.thingIds.map { it.value }, query.thingIds.isEmpty(),
             allMedia = query.mediaTypes.isEmpty(), photo = MediaFilter.PHOTO in query.mediaTypes,
@@ -99,6 +99,10 @@ internal class LocalRecordBrowsing(private val database: FolioDatabase) : Record
             link = MediaFilter.LINK in query.mediaTypes,
             textOnly = MediaFilter.TEXT_ONLY in query.mediaTypes,
         )
+        val records = query.feeling?.let { value ->
+            val ids = database.feelingDao().matches(value.scaleId.value, value.level, value.total, value.label).toSet()
+            active.filter { it.id in ids }
+        } ?: active
         val dates = when (val filter = query.time) {
             null -> return@withTransaction RecordSearchResult(readCards(records), emptyList(), 0)
             EventTimeFilter.Undated -> {

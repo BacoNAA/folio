@@ -30,6 +30,14 @@ internal fun PlacesScreen(model: FolioViewModel, scroll: androidx.compose.founda
     val state = model.state
     Column(Modifier.padding(horizontal = 20.dp)) {
         PlaceSearch(model)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(!state.showPlaceStars, { model.showPlaceStars(false) }, label = { Text("地点列表") })
+            FilterChip(state.showPlaceStars, { model.showPlaceStars(true) }, label = { Text("地点星图") })
+        }
+        if (state.showPlaceStars) {
+            PlaceStarChart(model)
+            return@Column
+        }
         Text("记录条数不代表到访次数；没有坐标也能查看。", fontSize = 12.sp)
         if (!state.placesLoading && state.placesError == null && state.places.isEmpty()) Text("没有匹配的地点。可在记录编辑中添加地点。")
         LazyColumn(Modifier.testTag("places-list"), state = scroll) {
@@ -126,19 +134,28 @@ internal fun SearchPlacePicker(model: FolioViewModel, close: () -> Unit) {
 internal fun PlaceBookHeader(model: FolioViewModel) {
     val state = model.state
     val place = state.placeBook ?: return
+    var impressions by rememberSaveable(place.id.value) { mutableStateOf(false) }
     var editing by rememberSaveable(place.id.value) { mutableStateOf(false) }
     var actions by remember { mutableStateOf(false) }
+    var tasks by rememberSaveable(place.id.value) { mutableStateOf(false) }
     Column {
         Row {
             Text(place.info.name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
             Box {
                 TextButton(onClick = { actions = true }, enabled = !state.busy) { Text("地点操作") }
                 DropdownMenu(actions, { actions = false }) {
+                    DropdownMenuItem(text = { Text("下次想试") }, onClick = { actions = false; tasks = true })
                     DropdownMenuItem(text = { Text("在这里记一条") }, onClick = { actions = false; model.newTextAtPlace() })
                     DropdownMenuItem(text = { Text("关联已有记录") }, onClick = { actions = false; model.chooseExistingRecord() })
+                    DropdownMenuItem(text = { Text("变化轨道") }, onClick = { actions = false; model.openTrack(TrackOwner(place), place.info.name) })
+                    DropdownMenuItem(text = { Text("地点整体印象") }, onClick = { actions = false; impressions = true })
                     DropdownMenuItem(text = { Text("编辑地点资料") }, onClick = { actions = false; editing = true })
                 }
             }
+        }
+        TargetStateButton(model, StateTarget(place))
+        state.placeScope?.impression?.takeIf { it.isNotBlank() }?.let {
+            Text("地点整体印象 · $it", maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
         val details = listOf(place.info.city, place.info.address, place.info.note).filter { it.isNotEmpty() }.joinToString(" · ")
         if (details.isNotEmpty()) Text(details, fontSize = 12.sp, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
@@ -149,6 +166,14 @@ internal fun PlaceBookHeader(model: FolioViewModel) {
             FilterChip(state.placeRecent, { model.selectPlaceRecent(true) }, label = { Text("最近记录") })
         }
     }
+    if (tasks) PlaceTaskDialog(place, { tasks = false }, { task ->
+        tasks = false
+        model.writeTaskExperience(task)
+    }, { record ->
+        tasks = false
+        model.openRecord(record)
+    })
+    if (impressions) FeelingDialog(model, FeelingTarget.Place(place.id)) { impressions = false; model.refresh() }
     if (editing) PlaceInfoDialog(model, place, shared = true, onDismiss = { editing = false }, save = model::updatePlace)
 }
 

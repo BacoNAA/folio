@@ -10,6 +10,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.baconaa.folio.records.RecordObject
+import com.baconaa.folio.records.TrackOwner
+import com.baconaa.folio.records.StateTarget
 
 internal fun RecordObject.matchesObjectQuery(query: String) =
     (listOf(info.name, info.note) + info.aliases).any { it.contains(query.trim(), ignoreCase = true) }
@@ -48,9 +50,11 @@ internal fun ObjectBookScreen(model: FolioViewModel, scroll: LazyListState) {
     LazyColumn(state = scroll, contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             ObjectDescription(book)
+            TargetStateButton(model, StateTarget(book))
             Row {
                 TextButton(onClick = { editing = true }) { Text("编辑共享资料") }
                 TextButton(onClick = { model.startPhotoComparison() }) { Text("照片对照") }
+                TextButton(onClick = { model.openTrack(TrackOwner(book), book.info.name) }) { Text("变化轨道") }
             }
             OutlinedTextField(state.objectQuery, model::queryObjectBook, singleLine = true,
                 label = { Text("在本小册中查找") }, modifier = Modifier.fillMaxWidth().testTag("book-query"))

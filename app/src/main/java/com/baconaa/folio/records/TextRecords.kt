@@ -40,6 +40,8 @@ data class RecordContent(
     val title: String? = null,
     val revision: Long = 1,
     val templateFields: List<TemplateField> = items.mapNotNull { it.templateField() },
+    val feelings: List<NamedFeeling> = emptyList(),
+    val templateScaleIds: Set<ScaleId> = emptySet(),
 ) {
     val text: String get() = items.body()
     val photos: List<PhotoId> get() = items.photos()

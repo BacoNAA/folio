@@ -14,7 +14,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.baconaa.folio.records.*
 
-data class TemplateEdit(val previous: RecordTemplate?, val name: String, val fields: List<TemplateField>, val tags: Set<TagId>)
+data class TemplateEdit(val previous: RecordTemplate?, val name: String, val fields: List<TemplateField>, val tags: Set<TagId>, val scales: Set<ScaleId> = emptySet())
 data class TemplateLibrary(val saved: List<RecordTemplate>? = null, val edit: TemplateEdit? = null, val stale: Boolean = false, val justSaved: Boolean = false)
 
 @Composable
@@ -87,6 +87,7 @@ internal fun TemplateLibraryDialog(library: TemplateLibrary, model: FolioViewMod
                             }
                         }
                     }
+                    item { FeelingEntry(model, FeelingTarget.Template, "沿用感受刻度 · ${form.scales.size}", enabled) }
                     if (state.tagsLoading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
                     if (state.tagsError != null) item { ErrorMessage(state.tagsError, model::loadTags) }
                     if (state.sharedTags.isNotEmpty()) item { Text("沿用共享标签") }

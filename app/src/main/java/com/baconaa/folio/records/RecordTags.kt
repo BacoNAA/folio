@@ -1,15 +1,18 @@
 package com.baconaa.folio.records
 
+import com.baconaa.folio.media.StampArtwork
 import androidx.room.withTransaction
 import java.util.UUID
 
 @JvmInline
 value class TagId(val value: String)
 
-data class Tag(val id: TagId, val name: String)
+data class Tag(val id: TagId, val name: String, val stampRevision: String? = null)
 
 /** 标签身份独立于名称；同名标签不会自动合并。 */
 interface RecordTags {
+    suspend fun saveStamp(draft: DraftId?, tag: TagId?, name: String, png: ByteArray): TagId
+    suspend fun readStamp(tag: Tag): ByteArray?
     /** 只列正式共享标签，包括暂时没有关联记录的标签。 */
     suspend fun listTags(keyword: String = ""): List<Tag>
     /** 创建本草稿私有标签并选中，完成后其他草稿才可复用。 */
@@ -67,6 +70,25 @@ internal class LocalRecordTags(private val database: FolioDatabase, private val 
         if (drafts.draft(id.value) == null) null else dao.draftTags(id.value).map { it.asTag() }
     }
 
+    override suspend fun readStamp(tag: Tag) = tag.stampRevision?.let { dao.stamp(tag.id.value, it) }
+
+    override suspend fun saveStamp(draft: DraftId?, tag: TagId?, name: String, png: ByteArray): TagId {
+        StampArtwork.decode(png).recycle()
+        return database.withTransaction {
+            val title = tagName(name)
+            if (draft != null) requireDraft(draft)
+            val id = tag ?: createDraftTag(requireNotNull(draft) { "请先建立草稿。" }, title)
+            if (tag != null) {
+                val row = requireNotNull(dao.tag(id.value)) { "标签已不存在。" }
+                require(row.ownerDraftId == null || row.ownerDraftId == draft?.value) { "这个标签属于另一份草稿。" }
+                if (row.name != title) dao.rename(id.value, title)
+                if (row.ownerDraftId != null) drafts.touchDraft(row.ownerDraftId, now())
+            }
+            dao.putStamp(StampRow(id.value, UUID.randomUUID().toString(), png))
+            id
+        }
+    }
+
     override suspend fun renameTag(id: TagId, name: String) = database.withTransaction {
         val tag = checkNotNull(dao.tag(id.value)) { "标签已不存在" }
         require(tag.ownerDraftId == null) { "尚未共享的标签请在所属草稿中修改" }
@@ -81,4 +103,4 @@ internal class LocalRecordTags(private val database: FolioDatabase, private val 
     private fun tagName(name: String) = name.trim().also { require(it.isNotEmpty()) { "请填写标签名称" } }
 }
 
-internal fun TagRow.asTag() = Tag(TagId(id), name)
+internal fun TagDisplayRow.asTag() = Tag(TagId(id), name, stampRevision)

@@ -29,9 +29,25 @@ class LocalTextStore internal constructor(
     RecordBrowsing by LocalRecordBrowsing(database), RecordGroups by LocalRecordGroups(database),
     RecordGroupGuides by LocalRecordGroupGuides(database), RecordTags by LocalRecordTags(database, now),
     RecordRelations by LocalRecordRelations(database),
+    RecordStates by LocalRecordStates(database),
     RecordChapters by LocalRecordChapters(database),
-    DateReviews, RecordTemplates by LocalRecordTemplates(database, now),
+    FeelingScales by LocalFeelingScales(database, now), DateReviews, RecordTemplates by LocalRecordTemplates(database, now),
+    RecordObservations by LocalObservations(database, now),
     RecordPlaces by LocalRecordPlaces(database, now), RecordObjects by LocalRecordObjects(database, now) {
+    internal val contextSets = ContextSets(database, this, this)
+    internal val placeTasks = PlaceTasks(database)
+
+    internal suspend fun newTaskDraft(taskId: String): DraftId = database.withTransaction {
+        val task = requireNotNull(database.placeTaskDao().task(taskId)) { "事项已不可用。" }
+        val draft = createDraft(null)
+        placeDao.replaceDraftPlace(draft.value, task.placeId)
+        insertText(draft, null, TextEdit("", 0))
+        database.placeTaskDao().bind(TaskDraft(draft.value, taskId))
+        draft
+    }
+
+    internal val backups = LocalBackups(database, context.applicationContext)
+    internal val reading = ReadingSettings(database, context.applicationContext)
     private val dao = database.textDao()
     private val itemDao = database.itemDao()
     private val trashDao = database.trashDao()
@@ -107,7 +123,8 @@ class LocalTextStore internal constructor(
             if (draft.title == value) return@withTransaction id
             if (value == null && draft.firstContentAt == null && draft.eventTime == null &&
                 draft.activeItemId == null && !itemActions.canUndo(id) && tagDao.draftTags(draft.id).isEmpty() &&
-                placeDao.draftPlace(draft.id) == null && objectDao.draftObjects(draft.id).isEmpty()
+                placeDao.draftPlace(draft.id) == null && objectDao.draftObjects(draft.id).isEmpty() &&
+                database.feelingDao().draftSlots(id.value).isEmpty()
             ) {
                 dao.deleteDraft(draft.id)
                 return@withTransaction null
@@ -406,6 +423,8 @@ class LocalTextStore internal constructor(
             title = record.title, firstContentAt = record.firstRecordedAt))
         dao.insertEdit(RecordEditRow(draftId.value, record.id, record.revision))
         itemDao.replaceDraftItems(draftId.value, items)
+        val feelings = database.feelingDao()
+        feelings.recordSlots(record.id).forEach { feelings.save(DraftFeelingRow(draftId.value, it)) }
         tagDao.replaceDraftTags(draftId.value, tagDao.recordTags(record.id).map { it.id })
         objectDao.replaceDraftObjects(draftId.value, objectDao.recordObjects(record.id).map { it.row.id })
         placeDao.replaceDraftPlace(draftId.value, placeDao.recordPlace(record.id)?.id)
@@ -614,6 +633,8 @@ class LocalTextStore internal constructor(
             requireReadableMedia(items)
             queueDraftMedia(id.value)
             val slots = items.map { it.asPublishedSlot() }
+            val feelings = database.feelingDao()
+            val feelingSlots = feelings.draftSlots(id.value)
             val tags = tagDao.draftTags(id.value).map { it.id }
             val objects = objectDao.draftObjects(id.value).map { it.row.id }
             val place = placeDao.draftPlace(id.value)?.id
@@ -639,7 +660,7 @@ class LocalTextStore internal constructor(
                     queueRecordMedia(record.id)
                     itemDao.replaceRecordItems(record.id, slots)
                 }
-                if (itemsChanged || draft.title != record.title || draft.eventTime != record.eventTime ||
+                if (itemsChanged || feelingSlots != feelings.recordSlots(record.id) || draft.title != record.title || draft.eventTime != record.eventTime ||
                     tags != tagDao.recordTags(record.id).map { it.id } || place != placeDao.recordPlace(record.id)?.id ||
                     objects != objectDao.recordObjects(record.id).map { it.row.id }
                 ) {
@@ -649,12 +670,17 @@ class LocalTextStore internal constructor(
                 record.id
             }
             // 先转为共享再删除草稿，未选择的私有标签随草稿级联丢弃；与正式内容同事务。
+            feelings.clearRecord(recordId)
+            feelingSlots.forEach { feelings.save(RecordFeelingRow(recordId, it)) }
             tagDao.promoteSelected(draft.id)
             tagDao.replaceRecordTags(recordId, tags)
             objectDao.promoteSelected(draft.id)
             objectDao.replaceRecordObjects(recordId, objects)
             placeDao.promoteSelected(draft.id)
             placeDao.replaceRecordPlace(recordId, place)
+            database.placeTaskDao().pending(draft.id)?.let { task ->
+                database.placeTaskDao().link(TaskExperience(task.id, recordId))
+            }
             check(dao.deleteDraft(draft.id) == 1) { "未能移除已完成的草稿" }
             RecordId(recordId)
         }
@@ -699,9 +725,13 @@ class LocalTextStore internal constructor(
 
     private suspend fun recordContent(row: RecordRow): RecordContent {
         val items = itemDao.recordItems(row.id).map { it.asItem() }
+        val feelings = database.feelingDao()
+        val slots = feelings.recordSlots(row.id)
+        val named = feelings.recordValues(row.id).map { it.asFeeling() }
         return RecordContent(items.filter { it.fieldName == null || it.hasContent() }, row.times(), row.marks,
             tagDao.recordTags(row.id).map { it.asTag() }, placeDao.recordPlace(row.id)?.asPlace(),
-            objectDao.recordObjects(row.id).map { it.asObject() }, row.title, row.revision, items.mapNotNull { it.templateField() })
+            objectDao.recordObjects(row.id).map { it.asObject() }, row.title, row.revision, items.mapNotNull { it.templateField() },
+            named, slots.map { ScaleId(it.scaleId) }.toSet())
     }
 
     override suspend fun openRecordContent(id: RecordId): RecordContent? = database.withTransaction {
