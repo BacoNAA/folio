@@ -4,6 +4,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.graphics.Bitmap
 import androidx.room.Room
+import androidx.room.withTransaction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.baconaa.folio.media.LocalAudioOriginals
@@ -35,6 +36,74 @@ class TextDatabaseMigrationTest {
     @After
     fun cleanUp() {
         context.deleteDatabase(name)
+    }
+
+    @Test fun releasedBackupRowsRestoreOverCurrentPlaceTasks() = runBlocking {
+        createDatabase(30) { sql ->
+            sql.execSQL("""INSERT INTO text_records(id,sourceDraftId,body,firstRecordedAt,modifiedAt,isStarred,isPinned)
+                VALUES ('old-record','old-draft','旧版游记',1,2,0,0)""")
+        }
+        val config = androidx.sqlite.db.SupportSQLiteOpenHelper.Configuration.builder(context).name(name)
+            .callback(object : androidx.sqlite.db.SupportSQLiteOpenHelper.Callback(30) {
+                override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) = Unit
+                override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+            }).build()
+        val bytes = java.io.ByteArrayOutputStream()
+        androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory().create(config).use { old ->
+            BackupRows(old.readableDatabase).write(java.io.DataOutputStream(bytes))
+        }
+        val db = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(db, context)
+            val draft = store.saveDraft(null, TextEdit("本机体验", 0))!!
+            val place = store.createDraftPlace(draft, PlaceInfo("本机地点"))
+            store.completeMixedDraft(draft)
+            store.placeTasks.add(place, "待试")
+            db.runInTransaction {
+                val rows = BackupRows(db.openHelper.writableDatabase)
+                rows.replace(java.io.DataInputStream(bytes.toByteArray().inputStream()))
+            }
+            assertTrue(store.placeTasks.read(place).isEmpty())
+            assertEquals("旧版游记", store.openRecord(RecordId("old-record")))
+        } finally { db.close() }
+    }
+
+    @Test fun existingRecordsGainIndependentEmptyStateOnUpgrade() = runBlocking {
+        createDatabase(30) { sql ->
+            sql.execSQL("""INSERT INTO text_records(id,sourceDraftId,body,firstRecordedAt,modifiedAt,isStarred,isPinned)
+                VALUES ('entry','source','旧读书记录',1,1,0,0)""")
+        }
+        val db = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(db, context)
+            val entry = StateTarget(RecordId("entry"))
+            assertNull(store.currentState(entry))
+            assertTrue(store.readStates(entry).history.isEmpty())
+            val reading = CustomState("reading", "在读", "▤")
+            store.defineState(reading)
+            store.setState(entry, null, reading.id, "first", null)
+            assertEquals(reading, store.currentState(entry))
+            assertEquals("旧读书记录", store.openRecord(RecordId("entry")))
+        } finally { db.close() }
+    }
+
+    @Test fun existingRecordsGainOptionalFeelingsWithoutLosingTheirIdentity() = runBlocking {
+        createDatabase(30) { sql ->
+            sql.execSQL("""INSERT INTO text_records(id,sourceDraftId,body,firstRecordedAt,modifiedAt,isStarred,isPinned)
+                VALUES ('old-meal','old-source','旧面馆',1,1,0,0)""")
+        }
+        val id = RecordId("old-meal")
+        val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(database, context)
+            assertEquals(id, store.search("旧面馆").single().id)
+            assertTrue(store.openRecordContent(id)!!.feelings.isEmpty())
+            val scale = store.saveFeelingScale(null, "辣度", listOf("微辣", "很辣"))
+            val draft = store.editRecord(id)
+            store.setDraftFeeling(draft, scale.choice(2))
+            store.completeDraft(draft, TextEdit("旧面馆", 0))
+            assertEquals(scale.choice(2), store.openRecordContent(id)!!.feelings.single().choice)
+        } finally { database.close() }
     }
 
     @Test fun savedSeasonRangeAndNewExclusionSurviveUpgradeAndReopen() = runBlocking {
@@ -995,6 +1064,31 @@ class TextDatabaseMigrationTest {
             store.saveObservation(owner, record, source.items.single().id, "第一朵")
             assertEquals("第一朵", store.readObservations(owner).single().note)
             assertEquals(source, store.openRecordContent(record))
+        } finally { db.close() }
+    }
+
+    @Test fun stampUpgradeAndPreviousBackupPreservePlainTags() = runBlocking {
+        createDatabase(30) { it.execSQL("INSERT INTO tags(id,name) VALUES('old','旧厨房')") }
+        val config = androidx.sqlite.db.SupportSQLiteOpenHelper.Configuration.builder(context).name(name)
+            .callback(object : androidx.sqlite.db.SupportSQLiteOpenHelper.Callback(30) {
+                override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) = error("样本库应已存在")
+                override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = error("应为 v30")
+            }).build()
+        val bytes = java.io.ByteArrayOutputStream()
+        androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory().create(config).use {
+            BackupRows(it.writableDatabase).write(java.io.DataOutputStream(bytes))
+        }
+        val db = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(db, context)
+            val old = Tag(TagId("old"), "旧厨房")
+            assertEquals(listOf(old), store.listTags())
+            store.saveStamp(null, old.id, "新厨房", com.baconaa.folio.media.StampArtwork.icon("♥"))
+            db.withTransaction {
+                BackupRows(db.openHelper.writableDatabase).replace(java.io.DataInputStream(bytes.toByteArray().inputStream()))
+            }
+            assertEquals(listOf(old), store.listTags())
+            assertNull(store.readStamp(store.listTags().single()))
         } finally { db.close() }
     }
 

@@ -70,7 +70,7 @@ data class RecordEditor(
 }
 
 /** 同一地点既可作为普通搜索条件，也可作为有资料和记录操作的地点小册。 */
-data class PlaceScope(val place: Place, val isBook: Boolean)
+data class PlaceScope(val place: Place, val isBook: Boolean, val impression: String = "")
 
 data class FolioState(
     val page: Page = Page.Capture,
@@ -111,6 +111,7 @@ data class FolioState(
     val sharedTags: List<Tag> = emptyList(),
     val tagsLoading: Boolean = false,
     val tagsError: String? = null,
+    val feelingFilter: NamedFeeling? = null,
     val filterTags: Set<TagId> = emptySet(),
     val track: TrackOwner? = null,
     val trackName: String = "",
@@ -156,7 +157,7 @@ data class DeletedRecord(val id: RecordId, val origin: Page, val query: String,
     val filterTags: Set<TagId>, val starredOnly: Boolean, val recent: Boolean,
     val placeScope: PlaceScope?, val searchOrigin: Page, val placeRecent: Boolean,
     val filterPeople: Set<ObjectId>, val filterThings: Set<ObjectId>, val mediaTypes: Set<MediaFilter>,
-    val eventDateFilter: EventDateFilter?, val groupId: RecordGroupId? = null)
+    val eventDateFilter: EventDateFilter?, val groupId: RecordGroupId? = null, val feeling: NamedFeeling? = null)
 
 /** UI 状态由主线程持有；草稿写入串行，完成和离开等待最后一次输入落盘。 */
 class FolioViewModel(
@@ -179,7 +180,25 @@ class FolioViewModel(
 ) : ViewModel() {
     var state by mutableStateOf(FolioState())
         private set
+    internal val feelingScales = published as? FeelingScales ?: mixed as? FeelingScales
+    fun filterFeeling(value: NamedFeeling?) { state = state.copy(feelingFilter = value); refresh() }
+
     private val relations = published as? RecordRelations ?: mixed as? RecordRelations
+    internal val customStates = published as? RecordStates ?: mixed as? RecordStates
+
+    internal suspend fun openStateMatch(match: StateMatch) {
+        when (match.kind) {
+            StateTargetKind.RECORD -> openRecord(RecordId(match.id))
+            StateTargetKind.PLACE -> openPlace(withContext(Dispatchers.IO) {
+                requireNotNull(places?.openPlace(PlaceId(match.id))) { "地点已不可用。" }
+            })
+            StateTargetKind.PERSON, StateTargetKind.THING -> openObject(withContext(Dispatchers.IO) {
+                requireNotNull(objects?.listObjects()?.find { it.id.value == match.id && it.kind.name == match.kind.name }) {
+                    "对象已不可用。"
+                }
+            })
+        }
+    }
     suspend fun relationChoices(source: RecordId) = withContext(Dispatchers.IO) { requireNotNull(relations).relationChoices(source) }
     suspend fun changeRelation(source: RecordId, previous: RecordId?, next: RecordId?) = withContext(Dispatchers.IO) {
         requireNotNull(relations).changeRelation(source, previous, next)
@@ -742,7 +761,7 @@ class FolioViewModel(
         if (state.busy) return
         val source = state.detail.takeIf { extract }
         val form = TemplateEdit(template, template?.name.orEmpty(), template?.fields ?: source?.templateFields.orEmpty(),
-            (template?.tags ?: source?.tags.orEmpty()).map { it.id }.toSet())
+            (template?.tags ?: source?.tags.orEmpty()).map { it.id }.toSet(), template?.scales ?: source?.templateScaleIds.orEmpty())
         state = state.copy(templateLibrary = (state.templateLibrary ?: TemplateLibrary()).copy(edit = form), error = null)
         loadTags()
     }
@@ -758,7 +777,7 @@ class FolioViewModel(
     fun saveTemplate() = runAction("模板保存失败，已保留当前填写，请重试。") {
         val form = state.templateLibrary?.edit ?: return@runAction
         try {
-            val saved = withContext(Dispatchers.IO) { requireNotNull(templates).saveTemplate(form.previous, form.name, form.fields, form.tags) }
+            val saved = withContext(Dispatchers.IO) { requireNotNull(templates).saveTemplate(form.previous, form.name, form.fields, form.tags, form.scales) }
             state = state.copy(templateLibrary = TemplateLibrary(listOf(saved), justSaved = true))
         } catch (changed: TemplateChanged) { templateChanged(changed) }
     }
@@ -1064,6 +1083,7 @@ class FolioViewModel(
         val page = state.page
         val reviewQuery = state.reviewQuery
         val query = state.query
+        val feelingFilter = state.feelingFilter
         val filterTags = state.filterTags
         val starredOnly = state.starredOnly
         val placeScope = state.placeScope
@@ -1092,8 +1112,12 @@ class FolioViewModel(
                 } else if (page == Page.Search) {
                     val (result, currentScope) = withContext(Dispatchers.IO) {
                         browsing.queryRecords(RecordQuery(query, filterTags, starredOnly, placeScope?.place?.id, people, things, mediaTypes,
-                            eventDateFilter.forQuery())) to
-                            placeScope?.let { scope -> scope.copy(place = requireNotNull(places?.openPlace(scope.place.id))) }
+                            eventDateFilter.forQuery(), feelingFilter?.choice)) to
+                            placeScope?.let { scope ->
+                                val place = requireNotNull(places?.openPlace(scope.place.id))
+                                val note = if (scope.isBook) feelingScales?.placeImpression(place.id).orEmpty() else ""
+                                scope.copy(place = place, impression = note)
+                            }
                     }
                     if (version == loadVersion) state = state.copy(results = result.certain, possibleResults = result.possible, undatedMatchCount = result.undatedCount,
                         placeScope = currentScope, loading = false)
@@ -1351,8 +1375,32 @@ class FolioViewModel(
         }
     }
 
+    internal suspend fun stampImage(tag: Tag) = withContext(Dispatchers.IO) {
+        requireNotNull(tags).readStamp(tag)?.let(com.baconaa.folio.media.StampArtwork::decode)
+    }
+
+    fun saveStamp(tag: TagId?, name: String, png: ByteArray, saved: () -> Unit) {
+        if (state.editor == null) {
+            runAction("图章保存失败，请重试。") {
+                withContext(Dispatchers.IO) { requireNotNull(tags).saveStamp(null, requireNotNull(tag), name, png) }
+                loadTags()
+                refresh()
+                saved()
+            }
+        } else structure("图章保存失败，请重试。") { editor ->
+            val draft = requireNotNull(editor.draftId)
+            withContext(Dispatchers.IO) { requireNotNull(tags).saveStamp(draft, tag, name, png) }
+            loadTags()
+            saved()
+        }
+    }
+
     fun createTag(name: String) = editTags("新标签保存失败，请重试。") { id ->
         requireNotNull(tags).createDraftTag(id, name)
+    }
+
+    internal fun applyContextSet(set: String) = editTags("套用失败，请检查组合条件后重试。") { id ->
+        (mixed as LocalTextStore).contextSets.apply(set, id)
     }
 
     fun selectTag(tag: Tag, selected: Boolean) = editTags("标签选择保存失败，请重试。") { id ->
@@ -1376,13 +1424,13 @@ class FolioViewModel(
     fun filterEventDate(filter: EventDateFilter?) { state = state.copy(eventDateFilter = filter); refresh() }
     fun filterMedia(types: Set<MediaFilter>) { state = state.copy(mediaTypes = types); refresh() }
     fun clearFilters() { state = state.copy(filterTags = emptySet(), starredOnly = false, placeScope = null,
-        filterPeople = emptySet(), filterThings = emptySet(), mediaTypes = emptySet(), eventDateFilter = null); refresh() }
+        filterPeople = emptySet(), filterThings = emptySet(), mediaTypes = emptySet(), feelingFilter = null, eventDateFilter = null); refresh() }
     fun openSearch() { state = state.copy(searchOrigin = Page.Records, placeScope = null, linkingPlace = null); home(Page.Search) }
     fun openStarred() { state = state.copy(filterTags = emptySet(), starredOnly = true, query = "", placeScope = null, searchOrigin = Page.Records, linkingPlace = null,
-        filterPeople = emptySet(), filterThings = emptySet(), mediaTypes = emptySet(), eventDateFilter = null); home(Page.Search) }
+        filterPeople = emptySet(), filterThings = emptySet(), mediaTypes = emptySet(), feelingFilter = null, eventDateFilter = null); home(Page.Search) }
     private val cardSearchOrigin get() = if (state.page.isGroupReadingPage) state.page else Page.Records
     fun openTag(tag: Tag) { state = state.copy(filterTags = setOf(tag.id), starredOnly = false, query = "", placeScope = null, searchOrigin = cardSearchOrigin, linkingPlace = null,
-        filterPeople = emptySet(), filterThings = emptySet(), mediaTypes = emptySet(), eventDateFilter = null); home(Page.Search) }
+        filterPeople = emptySet(), filterThings = emptySet(), mediaTypes = emptySet(), feelingFilter = null, eventDateFilter = null); home(Page.Search) }
 
     private var objectsVersion = 0
     fun loadObjects() {
@@ -1543,14 +1591,14 @@ class FolioViewModel(
     }
     fun openPlace(place: Place) {
         state = state.copy(placeScope = PlaceScope(place, isBook = true), query = "", filterTags = emptySet(), starredOnly = false, searchOrigin = Page.Places, linkingPlace = null,
-            filterPeople = emptySet(), filterThings = emptySet(), mediaTypes = emptySet(), eventDateFilter = null)
+            filterPeople = emptySet(), filterThings = emptySet(), mediaTypes = emptySet(), feelingFilter = null, eventDateFilter = null)
         home(Page.Search)
     }
     fun selectPlaceRecent(value: Boolean) { state = state.copy(placeRecent = value) }
     fun chooseExistingRecord() {
         val place = state.placeBook ?: return
         state = state.copy(linkingPlace = place, placeScope = null, query = "", filterTags = emptySet(), starredOnly = false,
-            filterPeople = emptySet(), filterThings = emptySet(), mediaTypes = emptySet(), eventDateFilter = null)
+            filterPeople = emptySet(), filterThings = emptySet(), mediaTypes = emptySet(), feelingFilter = null, eventDateFilter = null)
         refresh()
     }
     fun filterByPlace(place: Place?) { state = state.copy(placeScope = place?.let { PlaceScope(it, isBook = false) }); refresh() }
@@ -1562,6 +1610,11 @@ class FolioViewModel(
             refresh()
         }
     }
+    internal fun writeTaskExperience(task: String) = runAction("体验草稿创建失败，请重试。") {
+        val id = withContext(Dispatchers.IO) { (mixed as LocalTextStore).newTaskDraft(task) }
+        openCreatedDraft(id)
+    }
+
     fun newTextAtPlace() {
         if (state.busy || state.editor != null) return
         val place = state.placeBook ?: return
@@ -1585,7 +1638,7 @@ class FolioViewModel(
         val id = state.detailId ?: return
         val origin = state.detailOrigin
         val context = DeletedRecord(id, origin, state.query, state.filterTags, state.starredOnly, state.recent, state.placeScope, state.searchOrigin, state.placeRecent,
-            state.filterPeople, state.filterThings, state.mediaTypes, state.eventDateFilter, state.groupId)
+            state.filterPeople, state.filterThings, state.mediaTypes, state.eventDateFilter, state.groupId, state.feelingFilter)
         val hasDraft = state.drafts.any { it.recordId == id || it.splitSource == id }
         media?.stopPlayback()
         runAction("移入回收站失败，请重试。") {
@@ -1608,7 +1661,7 @@ class FolioViewModel(
                 query = deleted.query, filterTags = deleted.filterTags, starredOnly = deleted.starredOnly, recent = deleted.recent,
                 placeScope = deleted.placeScope, searchOrigin = deleted.searchOrigin, placeRecent = deleted.placeRecent,
                 filterPeople = deleted.filterPeople, filterThings = deleted.filterThings, mediaTypes = deleted.mediaTypes,
-                eventDateFilter = deleted.eventDateFilter, groupId = deleted.groupId,
+                feelingFilter = deleted.feeling, eventDateFilter = deleted.eventDateFilter, groupId = deleted.groupId,
                 groupContent = if (deleted.origin == Page.GroupDetail) null else state.groupContent,
                 scrollRestoreVersion = state.scrollRestoreVersion + 1)
             refresh()

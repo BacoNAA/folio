@@ -187,16 +187,21 @@ internal interface TextDao {
 
 @Database(
     entities = [
+        ContextSetRow::class, ContextTag::class, ContextFeeling::class,
+        StampRow::class,
+        FeelingScaleRow::class, DraftFeelingRow::class, RecordFeelingRow::class, PlaceFeelingRow::class, TemplateFeelingRow::class, PlaceImpression::class,
+        CustomState::class, TargetStateRow::class, StateChangeRow::class,
         DraftRow::class, RecordRow::class, RecordEditRow::class, RecordSplitItemRow::class,
         DraftItemRow::class, RecordItemRow::class, RemovedItem::class, PhotoCleanupEntry::class,
         AudioCleanupEntry::class, TagRow::class, DraftTagRow::class, RecordTagRow::class,
         PlaceRow::class, DraftPlaceRow::class, RecordPlaceRow::class,
         ObjectRow::class, ObjectAliasRow::class, DraftObjectRow::class, PublishedObjectRow::class,
         ReadingPreference::class, SeasonReviewExclusion::class, SeasonSettingRow::class, ImportCleanupEntry::class, GroupRow::class, GroupMemberRow::class,
+        PlaceTaskRow::class, TaskExperience::class, TaskDraft::class,
         ObservationRow::class, RelationRow::class, ChapterRow::class, GuideSectionRow::class, GuideAssignmentRow::class, TemplateRow::class, TemplateFieldRow::class, TemplateTagRow::class,
     ],
-    views = [EditableDraftRow::class],
-    version = 30,
+    views = [EditableDraftRow::class, TagDisplayRow::class],
+    version = 35,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -227,10 +232,18 @@ internal interface TextDao {
         AutoMigration(from = 27, to = 28),
         AutoMigration(from = 28, to = 29),
         AutoMigration(from = 29, to = 30),
+        AutoMigration(from = 30, to = 31),
+        AutoMigration(from = 31, to = 32),
+        AutoMigration(from = 32, to = 33),
+        AutoMigration(from = 33, to = 34),
+        AutoMigration(from = 34, to = 35),
     ],
 )
 @TypeConverters(PhotoStrokeStorage::class)
 internal abstract class FolioDatabase : RoomDatabase() {
+    abstract fun customStateDao(): CustomStateDao
+    abstract fun contextDao(): ContextDao
+    abstract fun feelingDao(): FeelingDao
     abstract fun backupValidationDao(): BackupValidationDao
     abstract fun textDao(): TextDao
     abstract fun itemDao(): ContentItemDao
@@ -240,6 +253,7 @@ internal abstract class FolioDatabase : RoomDatabase() {
     abstract fun chapterDao(): ChapterDao
     abstract fun groupDao(): GroupDao
     abstract fun guideDao(): GroupGuideDao
+    abstract fun placeTaskDao(): PlaceTaskDao
     abstract fun observationDao(): ObservationDao
     abstract fun templateDao(): TemplateDao
     abstract fun photoCleanupDao(): PhotoCleanupDao

@@ -55,10 +55,14 @@ internal class BackupRows(private val db: SupportSQLiteDatabase) {
     }
 
     fun replace(input: DataInputStream) {
-        require(input.readInt() == db.version && input.readInt() == tables.size) { "此备份的数据版本与本应用不兼容。" }
+        val version = input.readInt()
+        require(version in 30..db.version) { "此备份的数据版本与本应用不兼容。" }
+        // 每次仅新增表的迁移都可读旧包；旧版本本应具备的表仍须全部存在。
+        val expected = tables.filterKeys { (introducedIn[it] ?: 30) <= version }
+        require(input.readInt() == expected.size) { "备份数据表不完整。" }
         db.execSQL("PRAGMA defer_foreign_keys=ON")
         tables.keys.forEach { db.execSQL("DELETE FROM `$it`") }
-        tables.forEach { (name, columns) ->
+        expected.forEach { (name, columns) ->
             require(input.readUTF() == name && input.readInt() == columns.size && columns.all { input.readUTF() == it }) {
                 "备份数据结构不匹配。"
             }
@@ -109,6 +113,13 @@ internal class BackupRows(private val db: SupportSQLiteDatabase) {
     }
 
     companion object {
+        private val introducedIn = mapOf(
+            "context_sets" to 35, "context_tags" to 35, "context_feelings" to 35,
+            "tag_stamps" to 34,
+            "draft_feelings" to 33, "feeling_scales" to 33, "place_feelings" to 33, "place_impressions" to 33, "record_feelings" to 33, "template_feeling_scales" to 33,
+            "custom_states" to 32, "state_changes" to 32, "target_states" to 32,
+            "place_tasks" to 31, "task_experiences" to 31, "task_experience_drafts" to 31,
+        )
         private const val MAX_FIELD_BYTES = 16_777_216
         private val originalColumns = mapOf("photoId" to "photo", "linkScreenshotId" to "photo", "audioId" to "audio",
             "pdfId" to "pdf", "videoId" to "video")

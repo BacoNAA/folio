@@ -12,6 +12,7 @@ data class RecordQuery(
     val thingIds: Set<ObjectId> = emptySet(),
     val mediaTypes: Set<MediaFilter> = emptySet(),
     val time: EventTimeFilter? = null,
+    val feeling: FeelingChoice? = null,
 )
 
 sealed interface EventTimeFilter {

@@ -70,6 +70,8 @@ class LocalPhotoOriginals private constructor(private val context: Context) {
     }
 
     /** 在 I/O 线程读取，调用方负责关闭返回的流。 */
+    internal fun stampSource(id: PhotoId) = ImageDecoder.createSource(original(id))
+
     fun openOriginal(id: PhotoId): InputStream = original(id).inputStream()
 
     /** 从已导入的原件读取时间供用户确认。无有效拍摄时间返回 null，原件本身无法打开时抛出 I/O 错误。 */

@@ -16,14 +16,15 @@ data class TemplateField(val type: TemplateFieldType, val name: String = type.la
 }
 
 data class RecordTemplate(val id: TemplateId, val revision: Long, val name: String,
-    val fields: List<TemplateField>, val tags: List<Tag>)
+    val fields: List<TemplateField>, val tags: List<Tag>, val scales: Set<ScaleId> = emptySet())
 
 class TemplateChanged : IllegalStateException("模板已更新，请重新查看当前字段。")
 
 interface RecordTemplates {
     suspend fun listTemplates(): List<RecordTemplate>
     /** 新建传 null；修改须与预览版本一致。只接受已共享标签的身份。 */
-    suspend fun saveTemplate(previous: RecordTemplate?, name: String, fields: List<TemplateField>, tags: Set<TagId>): RecordTemplate
+    suspend fun saveTemplate(previous: RecordTemplate?, name: String, fields: List<TemplateField>, tags: Set<TagId>,
+        scales: Set<ScaleId> = previous?.scales.orEmpty()): RecordTemplate
     /** 按预览的版本起草，复制字段和标签引用；首次记录时间仍取第一次保存实际内容的时刻。 */
     suspend fun startTemplateDraft(id: TemplateId, expectedRevision: Long, eventTime: EventTime? = null): DraftId
 }
@@ -45,7 +46,7 @@ internal class LocalRecordTemplates(private val db: FolioDatabase, private val n
 
     override suspend fun listTemplates() = dao.list().map { it.asTemplate() }
 
-    override suspend fun saveTemplate(previous: RecordTemplate?, name: String, fields: List<TemplateField>, tags: Set<TagId>) =
+    override suspend fun saveTemplate(previous: RecordTemplate?, name: String, fields: List<TemplateField>, tags: Set<TagId>, scales: Set<ScaleId>) =
         db.withTransaction {
             val title = name.trim()
             require(title.isNotEmpty() && fields.isNotEmpty() && fields.none { it.name.isBlank() }) { "请填写模板名称和每个字段的名称。" }
@@ -55,6 +56,9 @@ internal class LocalRecordTemplates(private val db: FolioDatabase, private val n
             val row = TemplateRow(id, title, (previous?.revision ?: 0) + 1)
             if (previous == null) dao.insert(row)
             else if (dao.update(id, previous.revision, title) != 1) throw TemplateChanged()
+            val feelings = db.feelingDao()
+            feelings.clearTemplate(id)
+            feelings.attach(scales.map { TemplateFeelingRow(id, it.value) })
             dao.clearFields(id)
             dao.clearTags(id)
             dao.addFields(fields.mapIndexed { position, field -> TemplateFieldRow(id, position, field.name.trim(), field.type) })
@@ -71,6 +75,7 @@ internal class LocalRecordTemplates(private val db: FolioDatabase, private val n
             val items = template.fields.map { it.emptyItem() }
             db.textDao().insertDraft(DraftRow(draft.value, "", 0, timestamp, timestamp, eventTime = eventTime?.asFields()))
             db.writeMixedDraft(draft, MixedDraft(items, items.first().id, 0), timestamp)
+            template.scales.forEach { db.feelingDao().save(DraftFeelingRow(draft.value, FeelingSlot(it.value, 0, 0, "", true))) }
             db.tagDao().replaceDraftTags(draft.value, template.tags.map { it.id.value })
             draft
         }

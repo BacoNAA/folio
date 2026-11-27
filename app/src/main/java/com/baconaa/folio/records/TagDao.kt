@@ -1,5 +1,7 @@
 package com.baconaa.folio.records
 
+import androidx.room.DatabaseView
+import androidx.room.OnConflictStrategy
 import androidx.room.Dao
 import androidx.room.Embedded
 import androidx.room.Entity
@@ -37,7 +39,14 @@ internal data class DraftTagRow(val draftId: String, val tagId: String, val posi
 )
 internal data class RecordTagRow(val recordId: String, val tagId: String, val position: Int)
 
-internal data class RecordTagPreviewRow(val recordId: String, @Embedded val tag: TagRow)
+@Entity(tableName = "tag_stamps", foreignKeys = [ForeignKey(entity = TagRow::class, parentColumns = ["id"],
+    childColumns = ["tagId"], onDelete = ForeignKey.CASCADE)])
+internal data class StampRow(@PrimaryKey val tagId: String, val revision: String, val png: ByteArray)
+
+@DatabaseView(viewName = "tag_display", value = """SELECT t.id,t.name,t.ownerDraftId,s.revision AS stampRevision
+    FROM tags t LEFT JOIN tag_stamps s ON s.tagId=t.id""")
+internal data class TagDisplayRow(val id: String, val name: String, val ownerDraftId: String?, val stampRevision: String?)
+internal data class RecordTagPreviewRow(val recordId: String, @Embedded val tag: TagDisplayRow)
 
 // 两种搜索入口共用当前正式内容规则；参数使用 instr，用户输入的 %/_ 不会被当作通配符。
 internal const val RECORD_TEXT_MATCH = """(instr(lower(r.body), lower(:keyword)) > 0
@@ -57,6 +66,12 @@ internal const val RECORD_TEXT_MATCH = """(instr(lower(r.body), lower(:keyword))
 
 @Dao
 internal abstract class TagDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    abstract suspend fun putStamp(row: StampRow)
+
+    @Query("SELECT png FROM tag_stamps WHERE tagId=:id AND revision=:revision")
+    abstract suspend fun stamp(id: String, revision: String): ByteArray?
+
     @Insert
     abstract suspend fun insertTag(tag: TagRow)
 
@@ -66,19 +81,19 @@ internal abstract class TagDao {
     @Query("SELECT * FROM tags WHERE id IN (:ids)")
     abstract suspend fun tags(ids: List<String>): List<TagRow>
 
-    @Query("SELECT * FROM tags WHERE ownerDraftId IS NULL AND instr(lower(name), lower(:keyword)) > 0 ORDER BY name COLLATE NOCASE, id")
-    abstract suspend fun sharedTags(keyword: String): List<TagRow>
+    @Query("SELECT * FROM tag_display WHERE ownerDraftId IS NULL AND instr(lower(name), lower(:keyword)) > 0 ORDER BY name COLLATE NOCASE, id")
+    abstract suspend fun sharedTags(keyword: String): List<TagDisplayRow>
 
     @Query("UPDATE tags SET name = :name WHERE id = :id")
     abstract suspend fun rename(id: String, name: String)
 
-    @Query("SELECT t.* FROM draft_tags dt JOIN tags t ON t.id = dt.tagId WHERE dt.draftId = :id ORDER BY dt.position")
-    abstract suspend fun draftTags(id: String): List<TagRow>
+    @Query("SELECT t.* FROM draft_tags dt JOIN tag_display t ON t.id = dt.tagId WHERE dt.draftId = :id ORDER BY dt.position")
+    abstract suspend fun draftTags(id: String): List<TagDisplayRow>
 
-    @Query("SELECT t.* FROM record_tags rt JOIN tags t ON t.id = rt.tagId WHERE rt.recordId = :id ORDER BY rt.position")
-    abstract suspend fun recordTags(id: String): List<TagRow>
+    @Query("SELECT t.* FROM record_tags rt JOIN tag_display t ON t.id = rt.tagId WHERE rt.recordId = :id ORDER BY rt.position")
+    abstract suspend fun recordTags(id: String): List<TagDisplayRow>
 
-    @Query("""SELECT rt.recordId, t.* FROM record_tags rt JOIN tags t ON t.id = rt.tagId
+    @Query("""SELECT rt.recordId, t.* FROM record_tags rt JOIN tag_display t ON t.id = rt.tagId
               JOIN text_records r ON r.id = rt.recordId WHERE r.deletedAt IS NULL AND rt.recordId IN (:ids)
               ORDER BY rt.recordId, rt.position""")
     abstract suspend fun activeRecordTags(ids: List<String>): List<RecordTagPreviewRow>

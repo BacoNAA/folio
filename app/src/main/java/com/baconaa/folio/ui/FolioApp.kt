@@ -179,6 +179,8 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                 TextButton(onClick = { model.home(Page.Groups) }) { Text("记录组") }
                                 TextButton(onClick = { model.home(Page.Chapters) }) { Text("生活章节") }
                                 TextButton(onClick = { model.home(Page.Objects) }) { Text("人物与物件") }
+                                StateFilterButton(model)
+                                ContextSetEntry(model, editingDraft = false)
                                 BackupManager(model::afterBackupRestore)
                             }
                             if (state.drafts.isNotEmpty()) {
@@ -262,6 +264,7 @@ fun FolioApp(model: FolioViewModel, launchMedia: (String, ItemId?) -> Unit = { _
                                     TextButton(onClick = { deleteDialog = true }, enabled = !state.busy) { Text("删除") }
                                 }
                                 val pending = state.drafts.firstOrNull { it.recordId == state.detailId || it.splitSource == state.detailId }
+                                state.detailId?.let { TargetStateButton(model, StateTarget(it)) }
                                 pending?.let { draft ->
                                     if (draft.splitSource != null) Text("已有拆分草稿。完成或放弃后可再次编辑、拆分。", fontSize = 13.sp)
                                     else Text("另有未完成修改，当前显示上次完成的内容。", fontSize = 13.sp)
@@ -452,7 +455,7 @@ internal fun RecordPreview(record: RecordCard, model: FolioViewModel, actions: (
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
             RecordCardSummary(record, model)
             if (record.tags.isNotEmpty()) Row {
-                record.tags.take(2).forEach { tag -> TextButton(onClick = { model.openTag(tag) }) { Text(tag.name) } }
+                record.tags.take(2).forEach { tag -> TextButton(onClick = { model.openTag(tag) }) { TagStampIcon(tag, model); Text(tag.name) } }
                 if (record.tags.size > 2) Text("另有 ${record.tags.size - 2} 个标签", fontSize = 12.sp)
             }
             if (record.objects.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
