@@ -42,6 +42,7 @@ internal fun EditorClues(model: FolioViewModel) {
             Text(if (expanded) "收起时间、地点与线索" else "时间、地点与线索 · 选填")
         }
         if (expanded) {
+            ContextSetEntry(model, editingDraft = true, enabled = enabled && editor.hasContent)
             TextButton(onClick = { timeDialog = true }, enabled = enabled, modifier = Modifier.testTag("edit-time")) {
                 Text("事件时间：${editor.eventTime.label()}")
             }

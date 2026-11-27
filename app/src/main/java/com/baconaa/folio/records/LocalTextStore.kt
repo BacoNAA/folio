@@ -34,6 +34,7 @@ class LocalTextStore internal constructor(
     FeelingScales by LocalFeelingScales(database, now), DateReviews, RecordTemplates by LocalRecordTemplates(database, now),
     RecordObservations by LocalObservations(database, now),
     RecordPlaces by LocalRecordPlaces(database, now), RecordObjects by LocalRecordObjects(database, now) {
+    internal val contextSets = ContextSets(database, this, this)
     internal val placeTasks = PlaceTasks(database)
 
     internal suspend fun newTaskDraft(taskId: String): DraftId = database.withTransaction {

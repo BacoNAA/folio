@@ -1399,6 +1399,10 @@ class FolioViewModel(
         requireNotNull(tags).createDraftTag(id, name)
     }
 
+    internal fun applyContextSet(set: String) = editTags("套用失败，请检查组合条件后重试。") { id ->
+        (mixed as LocalTextStore).contextSets.apply(set, id)
+    }
+
     fun selectTag(tag: Tag, selected: Boolean) = editTags("标签选择保存失败，请重试。") { id ->
         val current = requireNotNull(requireNotNull(tags).openDraftTags(id)).map { it.id }
         tags.saveDraftTags(id, if (selected) (current + tag.id).distinct() else current - tag.id)

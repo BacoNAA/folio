@@ -23,6 +23,7 @@ internal interface BackupValidationDao {
 
 internal suspend fun validateBackupData(database: FolioDatabase) {
     val sql = database.openHelper.writableDatabase
+    validateContextSets(database.contextDao())
     val validation = database.backupValidationDao()
     val items = database.itemDao()
     sql.query("SELECT id FROM text_drafts").use { cursor ->

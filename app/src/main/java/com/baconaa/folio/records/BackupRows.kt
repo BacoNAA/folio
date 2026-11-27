@@ -114,6 +114,7 @@ internal class BackupRows(private val db: SupportSQLiteDatabase) {
 
     companion object {
         private val introducedIn = mapOf(
+            "context_sets" to 35, "context_tags" to 35, "context_feelings" to 35,
             "tag_stamps" to 34,
             "draft_feelings" to 33, "feeling_scales" to 33, "place_feelings" to 33, "place_impressions" to 33, "record_feelings" to 33, "template_feeling_scales" to 33,
             "custom_states" to 32, "state_changes" to 32, "target_states" to 32,
