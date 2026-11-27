@@ -33,7 +33,9 @@ class ContextSetNavigationTest {
             store.listDrafts().any { draft -> store.openDraftTags(draft.id)?.any { it.name == keyword } == true }
         } }
         runBlocking { check(store.contextSets.matches(set).size == 1) }
-        compose.onNodeWithText("完成").performClick()
+        val complete = hasText("完成") and isEnabled()
+        compose.waitUntil(15000) { compose.onAllNodes(complete).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNode(complete).performClick()
         compose.waitUntil(15000) { compose.onAllNodesWithText("已保存 · 查看").fetchSemanticsNodes().isNotEmpty() }
         runBlocking { check(store.contextSets.matches(set).size == 2) }
     }

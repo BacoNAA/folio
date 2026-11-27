@@ -118,9 +118,8 @@ class OrganizationNavigationTest {
         compose.onNodeWithTag("new-tag").performTextInput(tagName)
         compose.waitUntil(10_000) { compose.onAllNodes(hasText("新建并选中") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("新建并选中").performClick()
-        compose.waitUntil(10_000) { compose.onAllNodesWithText("改名").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("关闭标签").performClick()
-        compose.onNodeWithTag("mixed-editor").performScrollToNode(hasText("标签：$tagName"))
+        compose.onNodeWithTag("mixed-editor").performScrollToNode(hasTestTag("edit-tags"))
         waitText("标签：$tagName")
         compose.activityRule.scenario.recreate()
         compose.onNodeWithText("完成").performClick()
@@ -143,7 +142,9 @@ class OrganizationNavigationTest {
         compose.onNodeWithTag("search").performTextInput(text)
         waitText("1 条记录")
         compose.onNodeWithText("筛选标签").performClick()
-        compose.onNodeWithTag("tag-choice-${content.tags.single().id.value}").performScrollTo().performClick()
+        val tagChoice = hasTestTag("tag-choice-${content.tags.single().id.value}")
+        compose.onNodeWithTag("tag-choices").performScrollToNode(tagChoice)
+        compose.onNode(tagChoice).performClick()
         compose.onNodeWithText("关闭标签").performClick()
         waitText("1 条记录")
         compose.onNodeWithText("清除筛选").performClick()

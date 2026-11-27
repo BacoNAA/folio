@@ -72,7 +72,9 @@ class HomeNavigationTest {
         waitText("草稿已保存")
         compose.onNodeWithTag("editor").performTextReplacement("$text，完成修改")
         compose.onNodeWithText("完成").performClick()
-        waitText("$text，完成修改")
+        val editPublishedRecord = hasText("编辑") and isEnabled()
+        compose.waitUntil(15_000) { compose.onAllNodes(editPublishedRecord).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("$text，完成修改").assertExists()
         compose.onNodeWithText("返回").performClick()
         compose.onNodeWithTag("search").assertTextContains(text)
         waitText("1 条记录")
