@@ -42,7 +42,10 @@ internal suspend fun validateBackupData(database: FolioDatabase) {
         }
     }
     sql.query("SELECT id FROM places").use { c ->
-        while (c.moveToNext()) database.placeDao().place(c.getString(0))!!.asPlace()
+        while (c.moveToNext()) {
+            val id = c.getString(0)
+            database.placeDao().place(id)!!.asPlace()
+        }
     }
     sql.query("SELECT id FROM record_objects").use { c ->
         while (c.moveToNext()) database.objectDao().objectById(c.getString(0))!!.asObject()
@@ -75,9 +78,38 @@ internal suspend fun validateBackupData(database: FolioDatabase) {
             require(exists) { "观察说明缺少所属小册。" }
         }
     }
+    validateBackupFeelings(database)
     LocalRecordTemplates(database, System::currentTimeMillis).listTemplates()
     validateCustomStates(database.customStateDao())
     database.seasonSettingsDao().settings()
+}
+
+private suspend fun validateBackupFeelings(database: FolioDatabase) {
+    val sql = database.openHelper.writableDatabase
+    database.feelingDao().scales().forEach { it.asScale() }
+    for (table in listOf("draft_feelings", "record_feelings", "place_feelings")) {
+        sql.query("SELECT scaleId, level, total, label, suggested FROM $table").use { rows ->
+            while (rows.moveToNext()) {
+                currentCoroutineContext().ensureActive()
+                fun integer(index: Int): Int {
+                    require(rows.getType(index) == android.database.Cursor.FIELD_TYPE_INTEGER) { "感受程度格式无效。" }
+                    val long = rows.getLong(index)
+                    return long.toInt().also { require(it.toLong() == long) { "感受程度超出范围。" } }
+                }
+                val suggested = integer(4)
+                require(suggested == 0 || (suggested == 1 && table != "place_feelings")) { "感受项目归属无效。" }
+                FeelingSlot(rows.getString(0), integer(1), integer(2), rows.getString(3), suggested == 1).choice()
+            }
+        }
+    }
+    sql.query("""SELECT 1 FROM places p WHERE p.ownerDraftId IS NOT NULL AND (
+        EXISTS (SELECT 1 FROM place_feelings WHERE placeId=p.id) OR
+        EXISTS (SELECT 1 FROM place_impressions WHERE placeId=p.id)) LIMIT 1""").use {
+        require(!it.moveToFirst()) { "地点整体印象必须属于共享地点。" }
+    }
+    sql.query("SELECT note FROM place_impressions").use {
+        while (it.moveToNext()) require(it.getString(0).isNotBlank()) { "地点印象为空。" }
+    }
 }
 
 internal suspend fun validateOriginal(context: Context, ref: OriginalRef, file: File) {

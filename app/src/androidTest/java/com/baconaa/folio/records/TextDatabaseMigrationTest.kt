@@ -86,6 +86,25 @@ class TextDatabaseMigrationTest {
         } finally { db.close() }
     }
 
+    @Test fun existingRecordsGainOptionalFeelingsWithoutLosingTheirIdentity() = runBlocking {
+        createDatabase(30) { sql ->
+            sql.execSQL("""INSERT INTO text_records(id,sourceDraftId,body,firstRecordedAt,modifiedAt,isStarred,isPinned)
+                VALUES ('old-meal','old-source','旧面馆',1,1,0,0)""")
+        }
+        val id = RecordId("old-meal")
+        val database = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(database, context)
+            assertEquals(id, store.search("旧面馆").single().id)
+            assertTrue(store.openRecordContent(id)!!.feelings.isEmpty())
+            val scale = store.saveFeelingScale(null, "辣度", listOf("微辣", "很辣"))
+            val draft = store.editRecord(id)
+            store.setDraftFeeling(draft, scale.choice(2))
+            store.completeDraft(draft, TextEdit("旧面馆", 0))
+            assertEquals(scale.choice(2), store.openRecordContent(id)!!.feelings.single().choice)
+        } finally { database.close() }
+    }
+
     @Test fun savedSeasonRangeAndNewExclusionSurviveUpgradeAndReopen() = runBlocking {
         val day = LocalDate.of(2023, 11, 8)
         createDatabase(27) { sql ->

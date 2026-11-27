@@ -187,6 +187,7 @@ internal interface TextDao {
 
 @Database(
     entities = [
+        FeelingScaleRow::class, DraftFeelingRow::class, RecordFeelingRow::class, PlaceFeelingRow::class, TemplateFeelingRow::class, PlaceImpression::class,
         CustomState::class, TargetStateRow::class, StateChangeRow::class,
         DraftRow::class, RecordRow::class, RecordEditRow::class, RecordSplitItemRow::class,
         DraftItemRow::class, RecordItemRow::class, RemovedItem::class, PhotoCleanupEntry::class,
@@ -198,7 +199,7 @@ internal interface TextDao {
         ObservationRow::class, RelationRow::class, ChapterRow::class, GuideSectionRow::class, GuideAssignmentRow::class, TemplateRow::class, TemplateFieldRow::class, TemplateTagRow::class,
     ],
     views = [EditableDraftRow::class],
-    version = 32,
+    version = 33,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -231,11 +232,13 @@ internal interface TextDao {
         AutoMigration(from = 29, to = 30),
         AutoMigration(from = 30, to = 31),
         AutoMigration(from = 31, to = 32),
+        AutoMigration(from = 32, to = 33),
     ],
 )
 @TypeConverters(PhotoStrokeStorage::class)
 internal abstract class FolioDatabase : RoomDatabase() {
     abstract fun customStateDao(): CustomStateDao
+    abstract fun feelingDao(): FeelingDao
     abstract fun backupValidationDao(): BackupValidationDao
     abstract fun textDao(): TextDao
     abstract fun itemDao(): ContentItemDao

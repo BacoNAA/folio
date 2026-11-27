@@ -134,6 +134,7 @@ internal fun SearchPlacePicker(model: FolioViewModel, close: () -> Unit) {
 internal fun PlaceBookHeader(model: FolioViewModel) {
     val state = model.state
     val place = state.placeBook ?: return
+    var impressions by rememberSaveable(place.id.value) { mutableStateOf(false) }
     var editing by rememberSaveable(place.id.value) { mutableStateOf(false) }
     var actions by remember { mutableStateOf(false) }
     var tasks by rememberSaveable(place.id.value) { mutableStateOf(false) }
@@ -147,11 +148,15 @@ internal fun PlaceBookHeader(model: FolioViewModel) {
                     DropdownMenuItem(text = { Text("在这里记一条") }, onClick = { actions = false; model.newTextAtPlace() })
                     DropdownMenuItem(text = { Text("关联已有记录") }, onClick = { actions = false; model.chooseExistingRecord() })
                     DropdownMenuItem(text = { Text("变化轨道") }, onClick = { actions = false; model.openTrack(TrackOwner(place), place.info.name) })
+                    DropdownMenuItem(text = { Text("地点整体印象") }, onClick = { actions = false; impressions = true })
                     DropdownMenuItem(text = { Text("编辑地点资料") }, onClick = { actions = false; editing = true })
                 }
             }
         }
         TargetStateButton(model, StateTarget(place))
+        state.placeScope?.impression?.takeIf { it.isNotBlank() }?.let {
+            Text("地点整体印象 · $it", maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        }
         val details = listOf(place.info.city, place.info.address, place.info.note).filter { it.isNotEmpty() }.joinToString(" · ")
         if (details.isNotEmpty()) Text(details, fontSize = 12.sp, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         place.info.coordinates?.let { Text(it.label(), fontSize = 12.sp) }
@@ -168,6 +173,7 @@ internal fun PlaceBookHeader(model: FolioViewModel) {
         tasks = false
         model.openRecord(record)
     })
+    if (impressions) FeelingDialog(model, FeelingTarget.Place(place.id)) { impressions = false; model.refresh() }
     if (editing) PlaceInfoDialog(model, place, shared = true, onDismiss = { editing = false }, save = model::updatePlace)
 }
 

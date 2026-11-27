@@ -18,13 +18,15 @@ internal data class TemplateTagRow(val templateId: String, val tagId: String)
 
 internal data class TemplateDefinition(
     @Embedded val template: TemplateRow,
+    @Relation(parentColumn = "id", entityColumn = "templateId", entity = TemplateFeelingRow::class, projection = ["scaleId"])
+    val scales: List<String>,
     @Relation(parentColumn = "id", entityColumn = "templateId") val fields: List<TemplateFieldRow>,
     @Relation(parentColumn = "id", entityColumn = "id", associateBy = Junction(TemplateTagRow::class,
         parentColumn = "templateId", entityColumn = "tagId")) val tags: List<TagRow>,
 ) {
     fun asTemplate() = RecordTemplate(TemplateId(template.id), template.revision, template.name,
         fields.sortedBy { it.position }.map { TemplateField(it.type, it.name) },
-        tags.sortedWith(compareBy({ it.name }, { it.id })).map { it.asTag() })
+        tags.sortedWith(compareBy({ it.name }, { it.id })).map { it.asTag() }, scales.map(::ScaleId).toSet())
 }
 
 @Dao

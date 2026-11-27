@@ -49,6 +49,9 @@ internal fun EditorClues(model: FolioViewModel) {
                 modifier = Modifier.testTag("edit-tags")) {
                 Text(if (editor.tags.isEmpty()) "选择或新建文字标签" else "标签：${editor.tags.joinToString("、") { it.name }}")
             }
+            editor.draftId?.let { id ->
+                FeelingEntry(model, FeelingTarget.Draft(id), "本次感受", enabled = enabled)
+            }
             if (!editor.hasContent) Text("先留下一点内容，再添加标签。", fontSize = 12.sp)
             TextButton(onClick = { model.loadPlaces(); placeDialog = true }, enabled = enabled && editor.hasContent,
                 modifier = Modifier.testTag("edit-place")) { Text("地点：${editor.place?.info?.name ?: "暂不填写"}") }
@@ -155,23 +158,28 @@ internal fun SearchFilters(model: FolioViewModel) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
             FilterChip(state.starredOnly, { model.filterStarred(!state.starredOnly) }, label = { Text("只看星标") })
             TextButton(onClick = { showTags = true; model.loadTags() }) { Text("筛选标签${if (state.filterTags.isEmpty()) "" else " · ${state.filterTags.size}"}") }
-            if (state.starredOnly || state.filterTags.isNotEmpty() || state.filterPlace != null || state.filterPeople.isNotEmpty() || state.filterThings.isNotEmpty() || state.mediaTypes.isNotEmpty() || state.eventDateFilter != null)
+            if (state.feelingFilter != null || state.starredOnly || state.filterTags.isNotEmpty() || state.filterPlace != null || state.filterPeople.isNotEmpty() || state.filterThings.isNotEmpty() || state.mediaTypes.isNotEmpty() || state.eventDateFilter != null)
                 TextButton(onClick = model::clearFilters) { Text("清除筛选") }
             ObjectKind.entries.forEach { kind ->
                 TextButton(onClick = { model.loadObjects(); objectKind = kind }) { Text("筛选${kind.label}") }
             }
             TextButton(onClick = { showTime = true }) { Text("事件时间") }
             TextButton(onClick = { showMedia = true }) { Text("内容类型") }
+            FeelingEntry(model, FeelingTarget.Filter, "筛选感受")
             if (state.placeBook == null && state.linkingPlace == null) TextButton(onClick = {
                 model.loadPlaces()
                 showPlace = true
             }) { Text("筛选地点") }
         }
-        if (selectedPlace != null || state.filterTags.isNotEmpty() || state.filterPeople.isNotEmpty() || state.filterThings.isNotEmpty() || state.mediaTypes.isNotEmpty() || state.eventDateFilter != null) Row(
+        if (state.feelingFilter != null || selectedPlace != null || state.filterTags.isNotEmpty() || state.filterPeople.isNotEmpty() || state.filterThings.isNotEmpty() || state.mediaTypes.isNotEmpty() || state.eventDateFilter != null) Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            state.feelingFilter?.let { filter ->
+                InputChip(selected = true, onClick = { model.filterFeeling(null) },
+                    label = { Text("${filter.name} · ${filter.choice.display} ×") })
+            }
             selectedPlace?.info?.let { info ->
                 val label = listOf(info.name, info.city, info.address, info.note).filter { it.isNotBlank() }.joinToString(" · ")
                 InputChip(selected = true, onClick = { model.filterByPlace(null) }, modifier = Modifier.testTag("remove-place-filter"),
@@ -261,6 +269,7 @@ internal fun RecordContents(content: RecordContent, model: FolioViewModel) {
     content.title?.let { Text(it, style = MaterialTheme.typography.titleLarge) }
     Text("事件时间：${content.times.eventTime.label()}", fontSize = 12.sp)
     content.place?.let { Text("地点", fontSize = 12.sp); PlaceDescription(it) }
+    content.feelings.forEach { Text("${it.name} · ${it.choice.display}") }
     content.objects.forEach { value ->
         Text(value.kind.label, fontSize = 12.sp)
         ObjectDescription(value)

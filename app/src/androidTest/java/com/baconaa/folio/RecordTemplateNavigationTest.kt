@@ -83,9 +83,9 @@ internal class RecordTemplateNavigationTest : PhotoStoreFixture() {
         val failSave = AtomicBoolean(true)
         val failRead = AtomicBoolean(false)
         val templates = object : RecordTemplates by store {
-            override suspend fun saveTemplate(previous: RecordTemplate?, name: String, fields: List<TemplateField>, tags: Set<TagId>): RecordTemplate {
+            override suspend fun saveTemplate(previous: RecordTemplate?, name: String, fields: List<TemplateField>, tags: Set<TagId>, scales: Set<ScaleId>): RecordTemplate {
                 if (failSave.getAndSet(false)) throw IOException("写入失败")
-                return store.saveTemplate(previous, name, fields, tags)
+                return store.saveTemplate(previous, name, fields, tags, scales)
             }
         }
         val mixed = object : MixedContentDrafts by store {
