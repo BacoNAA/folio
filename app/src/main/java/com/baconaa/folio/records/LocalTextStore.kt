@@ -33,6 +33,17 @@ class LocalTextStore internal constructor(
     DateReviews, RecordTemplates by LocalRecordTemplates(database, now),
     RecordObservations by LocalObservations(database, now),
     RecordPlaces by LocalRecordPlaces(database, now), RecordObjects by LocalRecordObjects(database, now) {
+    internal val placeTasks = PlaceTasks(database)
+
+    internal suspend fun newTaskDraft(taskId: String): DraftId = database.withTransaction {
+        val task = requireNotNull(database.placeTaskDao().task(taskId)) { "事项已不可用。" }
+        val draft = createDraft(null)
+        placeDao.replaceDraftPlace(draft.value, task.placeId)
+        insertText(draft, null, TextEdit("", 0))
+        database.placeTaskDao().bind(TaskDraft(draft.value, taskId))
+        draft
+    }
+
     internal val backups = LocalBackups(database, context.applicationContext)
     internal val reading = ReadingSettings(database, context.applicationContext)
     private val dao = database.textDao()
@@ -658,6 +669,9 @@ class LocalTextStore internal constructor(
             objectDao.replaceRecordObjects(recordId, objects)
             placeDao.promoteSelected(draft.id)
             placeDao.replaceRecordPlace(recordId, place)
+            database.placeTaskDao().pending(draft.id)?.let { task ->
+                database.placeTaskDao().link(TaskExperience(task.id, recordId))
+            }
             check(dao.deleteDraft(draft.id) == 1) { "未能移除已完成的草稿" }
             RecordId(recordId)
         }

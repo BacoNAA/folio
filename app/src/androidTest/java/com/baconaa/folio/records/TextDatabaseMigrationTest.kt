@@ -37,6 +37,36 @@ class TextDatabaseMigrationTest {
         context.deleteDatabase(name)
     }
 
+    @Test fun releasedBackupRowsRestoreOverCurrentPlaceTasks() = runBlocking {
+        createDatabase(30) { sql ->
+            sql.execSQL("""INSERT INTO text_records(id,sourceDraftId,body,firstRecordedAt,modifiedAt,isStarred,isPinned)
+                VALUES ('old-record','old-draft','旧版游记',1,2,0,0)""")
+        }
+        val config = androidx.sqlite.db.SupportSQLiteOpenHelper.Configuration.builder(context).name(name)
+            .callback(object : androidx.sqlite.db.SupportSQLiteOpenHelper.Callback(30) {
+                override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) = Unit
+                override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+            }).build()
+        val bytes = java.io.ByteArrayOutputStream()
+        androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory().create(config).use { old ->
+            BackupRows(old.readableDatabase).write(java.io.DataOutputStream(bytes))
+        }
+        val db = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(db, context)
+            val draft = store.saveDraft(null, TextEdit("本机体验", 0))!!
+            val place = store.createDraftPlace(draft, PlaceInfo("本机地点"))
+            store.completeMixedDraft(draft)
+            store.placeTasks.add(place, "待试")
+            db.runInTransaction {
+                val rows = BackupRows(db.openHelper.writableDatabase)
+                rows.replace(java.io.DataInputStream(bytes.toByteArray().inputStream()))
+            }
+            assertTrue(store.placeTasks.read(place).isEmpty())
+            assertEquals("旧版游记", store.openRecord(RecordId("old-record")))
+        } finally { db.close() }
+    }
+
     @Test fun savedSeasonRangeAndNewExclusionSurviveUpgradeAndReopen() = runBlocking {
         val day = LocalDate.of(2023, 11, 8)
         createDatabase(27) { sql ->

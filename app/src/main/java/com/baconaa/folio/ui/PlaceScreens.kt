@@ -136,12 +136,14 @@ internal fun PlaceBookHeader(model: FolioViewModel) {
     val place = state.placeBook ?: return
     var editing by rememberSaveable(place.id.value) { mutableStateOf(false) }
     var actions by remember { mutableStateOf(false) }
+    var tasks by rememberSaveable(place.id.value) { mutableStateOf(false) }
     Column {
         Row {
             Text(place.info.name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
             Box {
                 TextButton(onClick = { actions = true }, enabled = !state.busy) { Text("地点操作") }
                 DropdownMenu(actions, { actions = false }) {
+                    DropdownMenuItem(text = { Text("下次想试") }, onClick = { actions = false; tasks = true })
                     DropdownMenuItem(text = { Text("在这里记一条") }, onClick = { actions = false; model.newTextAtPlace() })
                     DropdownMenuItem(text = { Text("关联已有记录") }, onClick = { actions = false; model.chooseExistingRecord() })
                     DropdownMenuItem(text = { Text("变化轨道") }, onClick = { actions = false; model.openTrack(TrackOwner(place), place.info.name) })
@@ -158,6 +160,13 @@ internal fun PlaceBookHeader(model: FolioViewModel) {
             FilterChip(state.placeRecent, { model.selectPlaceRecent(true) }, label = { Text("最近记录") })
         }
     }
+    if (tasks) PlaceTaskDialog(place, { tasks = false }, { task ->
+        tasks = false
+        model.writeTaskExperience(task)
+    }, { record ->
+        tasks = false
+        model.openRecord(record)
+    })
     if (editing) PlaceInfoDialog(model, place, shared = true, onDismiss = { editing = false }, save = model::updatePlace)
 }
 

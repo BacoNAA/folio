@@ -59,6 +59,10 @@ internal suspend fun validateBackupData(database: FolioDatabase) {
     sql.query("SELECT firstId,secondId FROM record_relations").use { edges ->
         while (edges.moveToNext()) require(edges.getString(0) < edges.getString(1)) { "双向记录关联无效。" }
     }
+    sql.query("""SELECT 1 FROM place_tasks t JOIN places p ON p.id=t.placeId
+        WHERE trim(t.label)='' OR t.checked NOT IN (0,1) OR p.ownerDraftId IS NOT NULL LIMIT 1""").use {
+        require(!it.moveToFirst()) { "地点事项无效。" }
+    }
     // 素材项被移出后，仍可保留观察说明；所属小册的身份必须可解析。
     sql.query("SELECT DISTINCT ownerKind,ownerId FROM observation_nodes").use { owners ->
         while (owners.moveToNext()) {

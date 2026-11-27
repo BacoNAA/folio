@@ -1562,6 +1562,11 @@ class FolioViewModel(
             refresh()
         }
     }
+    internal fun writeTaskExperience(task: String) = runAction("体验草稿创建失败，请重试。") {
+        val id = withContext(Dispatchers.IO) { (mixed as LocalTextStore).newTaskDraft(task) }
+        openCreatedDraft(id)
+    }
+
     fun newTextAtPlace() {
         if (state.busy || state.editor != null) return
         val place = state.placeBook ?: return
