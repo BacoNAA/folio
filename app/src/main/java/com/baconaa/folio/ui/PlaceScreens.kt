@@ -30,6 +30,14 @@ internal fun PlacesScreen(model: FolioViewModel, scroll: androidx.compose.founda
     val state = model.state
     Column(Modifier.padding(horizontal = 20.dp)) {
         PlaceSearch(model)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(!state.showPlaceStars, { model.showPlaceStars(false) }, label = { Text("地点列表") })
+            FilterChip(state.showPlaceStars, { model.showPlaceStars(true) }, label = { Text("地点星图") })
+        }
+        if (state.showPlaceStars) {
+            PlaceStarChart(model)
+            return@Column
+        }
         Text("记录条数不代表到访次数；没有坐标也能查看。", fontSize = 12.sp)
         if (!state.placesLoading && state.placesError == null && state.places.isEmpty()) Text("没有匹配的地点。可在记录编辑中添加地点。")
         LazyColumn(Modifier.testTag("places-list"), state = scroll) {
@@ -136,6 +144,7 @@ internal fun PlaceBookHeader(model: FolioViewModel) {
                 DropdownMenu(actions, { actions = false }) {
                     DropdownMenuItem(text = { Text("在这里记一条") }, onClick = { actions = false; model.newTextAtPlace() })
                     DropdownMenuItem(text = { Text("关联已有记录") }, onClick = { actions = false; model.chooseExistingRecord() })
+                    DropdownMenuItem(text = { Text("变化轨道") }, onClick = { actions = false; model.openTrack(TrackOwner(place), place.info.name) })
                     DropdownMenuItem(text = { Text("编辑地点资料") }, onClick = { actions = false; editing = true })
                 }
             }

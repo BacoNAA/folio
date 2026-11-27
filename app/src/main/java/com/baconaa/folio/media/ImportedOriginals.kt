@@ -101,7 +101,7 @@ internal class ImportedOriginals(private val context: Context, private val audio
         null
     }
 
-    private fun inspectPdf(file: File) {
+    internal fun inspectPdf(file: File) {
         ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
             try {
                 PdfRenderer(descriptor).use { document ->

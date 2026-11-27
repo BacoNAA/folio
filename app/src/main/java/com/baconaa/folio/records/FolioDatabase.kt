@@ -192,11 +192,11 @@ internal interface TextDao {
         AudioCleanupEntry::class, TagRow::class, DraftTagRow::class, RecordTagRow::class,
         PlaceRow::class, DraftPlaceRow::class, RecordPlaceRow::class,
         ObjectRow::class, ObjectAliasRow::class, DraftObjectRow::class, PublishedObjectRow::class,
-        SeasonReviewExclusion::class, SeasonSettingRow::class, ImportCleanupEntry::class, GroupRow::class, GroupMemberRow::class,
-        RelationRow::class, ChapterRow::class, GuideSectionRow::class, GuideAssignmentRow::class, TemplateRow::class, TemplateFieldRow::class, TemplateTagRow::class,
+        ReadingPreference::class, SeasonReviewExclusion::class, SeasonSettingRow::class, ImportCleanupEntry::class, GroupRow::class, GroupMemberRow::class,
+        ObservationRow::class, RelationRow::class, ChapterRow::class, GuideSectionRow::class, GuideAssignmentRow::class, TemplateRow::class, TemplateFieldRow::class, TemplateTagRow::class,
     ],
     views = [EditableDraftRow::class],
-    version = 28,
+    version = 30,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -225,10 +225,13 @@ internal interface TextDao {
         AutoMigration(from = 25, to = 26),
         AutoMigration(from = 26, to = 27),
         AutoMigration(from = 27, to = 28),
+        AutoMigration(from = 28, to = 29),
+        AutoMigration(from = 29, to = 30),
     ],
 )
 @TypeConverters(PhotoStrokeStorage::class)
 internal abstract class FolioDatabase : RoomDatabase() {
+    abstract fun backupValidationDao(): BackupValidationDao
     abstract fun textDao(): TextDao
     abstract fun itemDao(): ContentItemDao
     abstract fun removedItemDao(): RemovedItemDao
@@ -237,6 +240,7 @@ internal abstract class FolioDatabase : RoomDatabase() {
     abstract fun chapterDao(): ChapterDao
     abstract fun groupDao(): GroupDao
     abstract fun guideDao(): GroupGuideDao
+    abstract fun observationDao(): ObservationDao
     abstract fun templateDao(): TemplateDao
     abstract fun photoCleanupDao(): PhotoCleanupDao
     abstract fun audioCleanupDao(): AudioCleanupDao

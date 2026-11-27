@@ -978,6 +978,26 @@ class TextDatabaseMigrationTest {
         } finally { db.close() }
     }
 
+    @Test fun preTrackObjectAndItsPublishedItemCanStartAnObservationAfterUpgrade() = runBlocking {
+        createDatabase(28) { sql ->
+            sql.execSQL("INSERT INTO text_records(id,sourceDraftId,body,firstRecordedAt,modifiedAt) VALUES ('balcony','old','开花',1,2)")
+            sql.execSQL("INSERT INTO record_items(recordId,position,itemId,text) VALUES ('balcony',0,'flower','开花')")
+            sql.execSQL("INSERT INTO record_objects(id,kind,name,note) VALUES ('plant','THING','花盆','阳台')")
+            sql.execSQL("INSERT INTO published_objects(recordId,objectId,position) VALUES ('balcony','plant',0)")
+        }
+        val db = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(db, context)
+            val owner = TrackOwner(store.listObjects().single())
+            val record = RecordId("balcony")
+            val source = store.openRecordContent(record)!!
+            assertTrue(store.readObservations(owner).isEmpty())
+            store.saveObservation(owner, record, source.items.single().id, "第一朵")
+            assertEquals("第一朵", store.readObservations(owner).single().note)
+            assertEquals(source, store.openRecordContent(record))
+        } finally { db.close() }
+    }
+
     private fun createDatabase(version: Int, seed: (SQLiteDatabase) -> Unit) {
         val schemaFile = "${FolioDatabase::class.java.name}/$version.json"
         val schema = instrumentation.context.assets.open(schemaFile).bufferedReader().use {
