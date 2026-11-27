@@ -180,6 +180,21 @@ class FolioViewModel(
     var state by mutableStateOf(FolioState())
         private set
     private val relations = published as? RecordRelations ?: mixed as? RecordRelations
+    internal val customStates = published as? RecordStates ?: mixed as? RecordStates
+
+    internal suspend fun openStateMatch(match: StateMatch) {
+        when (match.kind) {
+            StateTargetKind.RECORD -> openRecord(RecordId(match.id))
+            StateTargetKind.PLACE -> openPlace(withContext(Dispatchers.IO) {
+                requireNotNull(places?.openPlace(PlaceId(match.id))) { "地点已不可用。" }
+            })
+            StateTargetKind.PERSON, StateTargetKind.THING -> openObject(withContext(Dispatchers.IO) {
+                requireNotNull(objects?.listObjects()?.find { it.id.value == match.id && it.kind.name == match.kind.name }) {
+                    "对象已不可用。"
+                }
+            })
+        }
+    }
     suspend fun relationChoices(source: RecordId) = withContext(Dispatchers.IO) { requireNotNull(relations).relationChoices(source) }
     suspend fun changeRelation(source: RecordId, previous: RecordId?, next: RecordId?) = withContext(Dispatchers.IO) {
         requireNotNull(relations).changeRelation(source, previous, next)

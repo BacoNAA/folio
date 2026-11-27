@@ -29,6 +29,7 @@ class LocalTextStore internal constructor(
     RecordBrowsing by LocalRecordBrowsing(database), RecordGroups by LocalRecordGroups(database),
     RecordGroupGuides by LocalRecordGroupGuides(database), RecordTags by LocalRecordTags(database, now),
     RecordRelations by LocalRecordRelations(database),
+    RecordStates by LocalRecordStates(database),
     RecordChapters by LocalRecordChapters(database),
     DateReviews, RecordTemplates by LocalRecordTemplates(database, now),
     RecordObservations by LocalObservations(database, now),

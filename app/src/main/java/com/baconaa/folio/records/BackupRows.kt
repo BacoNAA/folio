@@ -114,6 +114,7 @@ internal class BackupRows(private val db: SupportSQLiteDatabase) {
 
     companion object {
         private val introducedIn = mapOf(
+            "custom_states" to 32, "state_changes" to 32, "target_states" to 32,
             "place_tasks" to 31, "task_experiences" to 31, "task_experience_drafts" to 31,
         )
         private const val MAX_FIELD_BYTES = 16_777_216

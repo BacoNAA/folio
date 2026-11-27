@@ -67,6 +67,25 @@ class TextDatabaseMigrationTest {
         } finally { db.close() }
     }
 
+    @Test fun existingRecordsGainIndependentEmptyStateOnUpgrade() = runBlocking {
+        createDatabase(30) { sql ->
+            sql.execSQL("""INSERT INTO text_records(id,sourceDraftId,body,firstRecordedAt,modifiedAt,isStarred,isPinned)
+                VALUES ('entry','source','旧读书记录',1,1,0,0)""")
+        }
+        val db = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(db, context)
+            val entry = StateTarget(RecordId("entry"))
+            assertNull(store.currentState(entry))
+            assertTrue(store.readStates(entry).history.isEmpty())
+            val reading = CustomState("reading", "在读", "▤")
+            store.defineState(reading)
+            store.setState(entry, null, reading.id, "first", null)
+            assertEquals(reading, store.currentState(entry))
+            assertEquals("旧读书记录", store.openRecord(RecordId("entry")))
+        } finally { db.close() }
+    }
+
     @Test fun savedSeasonRangeAndNewExclusionSurviveUpgradeAndReopen() = runBlocking {
         val day = LocalDate.of(2023, 11, 8)
         createDatabase(27) { sql ->

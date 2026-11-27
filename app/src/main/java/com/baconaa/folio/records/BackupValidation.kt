@@ -76,6 +76,7 @@ internal suspend fun validateBackupData(database: FolioDatabase) {
         }
     }
     LocalRecordTemplates(database, System::currentTimeMillis).listTemplates()
+    validateCustomStates(database.customStateDao())
     database.seasonSettingsDao().settings()
 }
 

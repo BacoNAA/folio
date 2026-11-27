@@ -151,6 +151,7 @@ internal fun PlaceBookHeader(model: FolioViewModel) {
                 }
             }
         }
+        TargetStateButton(model, StateTarget(place))
         val details = listOf(place.info.city, place.info.address, place.info.note).filter { it.isNotEmpty() }.joinToString(" · ")
         if (details.isNotEmpty()) Text(details, fontSize = 12.sp, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         place.info.coordinates?.let { Text(it.label(), fontSize = 12.sp) }
