@@ -454,7 +454,7 @@ internal fun RecordPreview(record: RecordCard, model: FolioViewModel, actions: (
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
             RecordCardSummary(record, model)
             if (record.tags.isNotEmpty()) Row {
-                record.tags.take(2).forEach { tag -> TextButton(onClick = { model.openTag(tag) }) { Text(tag.name) } }
+                record.tags.take(2).forEach { tag -> TextButton(onClick = { model.openTag(tag) }) { TagStampIcon(tag, model); Text(tag.name) } }
                 if (record.tags.size > 2) Text("另有 ${record.tags.size - 2} 个标签", fontSize = 12.sp)
             }
             if (record.objects.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {

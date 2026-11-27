@@ -1375,6 +1375,26 @@ class FolioViewModel(
         }
     }
 
+    internal suspend fun stampImage(tag: Tag) = withContext(Dispatchers.IO) {
+        requireNotNull(tags).readStamp(tag)?.let(com.baconaa.folio.media.StampArtwork::decode)
+    }
+
+    fun saveStamp(tag: TagId?, name: String, png: ByteArray, saved: () -> Unit) {
+        if (state.editor == null) {
+            runAction("图章保存失败，请重试。") {
+                withContext(Dispatchers.IO) { requireNotNull(tags).saveStamp(null, requireNotNull(tag), name, png) }
+                loadTags()
+                refresh()
+                saved()
+            }
+        } else structure("图章保存失败，请重试。") { editor ->
+            val draft = requireNotNull(editor.draftId)
+            withContext(Dispatchers.IO) { requireNotNull(tags).saveStamp(draft, tag, name, png) }
+            loadTags()
+            saved()
+        }
+    }
+
     fun createTag(name: String) = editTags("新标签保存失败，请重试。") { id ->
         requireNotNull(tags).createDraftTag(id, name)
     }

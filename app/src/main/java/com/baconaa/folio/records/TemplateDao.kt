@@ -22,7 +22,7 @@ internal data class TemplateDefinition(
     val scales: List<String>,
     @Relation(parentColumn = "id", entityColumn = "templateId") val fields: List<TemplateFieldRow>,
     @Relation(parentColumn = "id", entityColumn = "id", associateBy = Junction(TemplateTagRow::class,
-        parentColumn = "templateId", entityColumn = "tagId")) val tags: List<TagRow>,
+        parentColumn = "templateId", entityColumn = "tagId")) val tags: List<TagDisplayRow>,
 ) {
     fun asTemplate() = RecordTemplate(TemplateId(template.id), template.revision, template.name,
         fields.sortedBy { it.position }.map { TemplateField(it.type, it.name) },

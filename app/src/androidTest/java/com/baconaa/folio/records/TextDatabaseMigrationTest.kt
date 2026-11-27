@@ -4,6 +4,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.graphics.Bitmap
 import androidx.room.Room
+import androidx.room.withTransaction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.baconaa.folio.media.LocalAudioOriginals
@@ -1063,6 +1064,31 @@ class TextDatabaseMigrationTest {
             store.saveObservation(owner, record, source.items.single().id, "第一朵")
             assertEquals("第一朵", store.readObservations(owner).single().note)
             assertEquals(source, store.openRecordContent(record))
+        } finally { db.close() }
+    }
+
+    @Test fun stampUpgradeAndPreviousBackupPreservePlainTags() = runBlocking {
+        createDatabase(30) { it.execSQL("INSERT INTO tags(id,name) VALUES('old','旧厨房')") }
+        val config = androidx.sqlite.db.SupportSQLiteOpenHelper.Configuration.builder(context).name(name)
+            .callback(object : androidx.sqlite.db.SupportSQLiteOpenHelper.Callback(30) {
+                override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) = error("样本库应已存在")
+                override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = error("应为 v30")
+            }).build()
+        val bytes = java.io.ByteArrayOutputStream()
+        androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory().create(config).use {
+            BackupRows(it.writableDatabase).write(java.io.DataOutputStream(bytes))
+        }
+        val db = Room.databaseBuilder(context, FolioDatabase::class.java, name).build()
+        try {
+            val store = LocalTextStore(db, context)
+            val old = Tag(TagId("old"), "旧厨房")
+            assertEquals(listOf(old), store.listTags())
+            store.saveStamp(null, old.id, "新厨房", com.baconaa.folio.media.StampArtwork.icon("♥"))
+            db.withTransaction {
+                BackupRows(db.openHelper.writableDatabase).replace(java.io.DataInputStream(bytes.toByteArray().inputStream()))
+            }
+            assertEquals(listOf(old), store.listTags())
+            assertNull(store.readStamp(store.listTags().single()))
         } finally { db.close() }
     }
 

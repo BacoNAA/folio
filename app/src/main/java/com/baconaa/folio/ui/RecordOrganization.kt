@@ -47,7 +47,7 @@ internal fun EditorClues(model: FolioViewModel) {
             }
             TextButton(onClick = { tagDialog = true; model.loadTags() }, enabled = enabled && editor.hasContent,
                 modifier = Modifier.testTag("edit-tags")) {
-                Text(if (editor.tags.isEmpty()) "选择或新建文字标签" else "标签：${editor.tags.joinToString("、") { it.name }}")
+                Text(if (editor.tags.isEmpty()) "选择标签或制作图章" else "标签：${editor.tags.joinToString("、") { it.name }}")
             }
             editor.draftId?.let { id ->
                 FeelingEntry(model, FeelingTarget.Draft(id), "本次感受", enabled = enabled)
@@ -78,6 +78,7 @@ internal fun TagDialog(model: FolioViewModel, editing: Boolean, close: () -> Uni
     val selected = if (editing) state.editor?.tags.orEmpty().map { it.id }.toSet() else state.filterTags
     val choices = (state.sharedTags + if (editing) state.editor?.tags.orEmpty() else emptyList()).distinctBy { it.id }
     var name by rememberSaveable { mutableStateOf("") }
+    var stampId by rememberSaveable { mutableStateOf<String?>(null) }
     var renameId by rememberSaveable { mutableStateOf<String?>(null) }
     var renamed by rememberSaveable { mutableStateOf("") }
     var renameSubmitted by rememberSaveable { mutableStateOf(false) }
@@ -93,7 +94,7 @@ internal fun TagDialog(model: FolioViewModel, editing: Boolean, close: () -> Uni
         }
     }
     val enabled = !state.busy && !state.tagsLoading && state.tagsError == null && state.editor?.needsReload != true
-    AlertDialog(onDismissRequest = close, title = { Text(if (editing) "文字标签" else "筛选标签 · 满足任一个") }, text = {
+    AlertDialog(onDismissRequest = close, title = { Text(if (editing) "标签与图章" else "筛选标签 · 满足任一个") }, text = {
         Column {
             if (state.tagsLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
             state.tagsError?.let { ErrorMessage(it, model::loadTags) }
@@ -106,22 +107,42 @@ internal fun TagDialog(model: FolioViewModel, editing: Boolean, close: () -> Uni
                             if (editing) model.selectTag(tag, checked)
                             else model.filterByTags(if (checked) selected + tag.id else selected - tag.id)
                         }, enabled = enabled, modifier = Modifier.testTag("tag-choice-${tag.id.value}"))
-                        val same = choices.filter { it.name == tag.name }
-                        Text(tag.name + if (same.size > 1) "（同名 ${same.indexOf(tag) + 1}）" else "", Modifier.weight(1f))
-                        if (editing && tag.id in selected) TextButton(onClick = { renameId = tag.id.value; renamed = tag.name; renameSubmitted = false }, enabled = enabled) { Text("改名") }
+                        Column(Modifier.weight(1f)) {
+                            val same = choices.filter { it.name == tag.name }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                TagStampIcon(tag, model)
+                                Text(tag.name + if (same.size > 1) "（同名 ${same.indexOf(tag) + 1}）" else "")
+                            }
+                            FlowRow {
+                                TextButton(onClick = { stampId = tag.id.value }, enabled = enabled,
+                                    modifier = Modifier.testTag("edit-stamp-${tag.id.value}")) {
+                                    Text(if (tag.stampRevision == null) "制章" else "换图")
+                                }
+                                if (editing && tag.id in selected) TextButton(onClick = {
+                                    renameId = tag.id.value; renamed = tag.name; renameSubmitted = false
+                                }, enabled = enabled) { Text("改名") }
+                            }
+                        }
                     }
                 }
             }
             if (editing) {
                 OutlinedTextField(name, { name = it }, label = { Text("新标签名称") }, singleLine = true,
                     modifier = Modifier.testTag("new-tag"))
-                TextButton(onClick = {
-                    previousTagCount = state.editor?.tags.orEmpty().size; pendingTagName = name.trim(); model.createTag(name)
-                }, enabled = enabled && name.isNotBlank()) { Text("新建并选中") }
+                FlowRow {
+                    TextButton(onClick = {
+                        previousTagCount = state.editor?.tags.orEmpty().size; pendingTagName = name.trim(); model.createTag(name)
+                    }, enabled = enabled && name.isNotBlank()) { Text("新建并选中") }
+                    TextButton(onClick = { stampId = "new" }, enabled = enabled) { Text("制作图章") }
+                }
                 Text("新标签随本次记录完成后供其他记录选用；同名标签不会自动合并。", fontSize = 12.sp)
             } else if (choices.isEmpty() && state.tagsError == null && !state.tagsLoading) Text("还没有已完成的标签。")
         }
     }, confirmButton = { TextButton(onClick = close) { Text("关闭标签") } })
+    stampId?.let { id ->
+        val target = choices.firstOrNull { it.id.value == id }
+        if (id == "new" || target != null) StampMaker(model, target) { stampId = null }
+    }
     val tag = choices.firstOrNull { it.id.value == renameId }
     if (tag != null) {
         val shared = state.sharedTags.any { it.id == tag.id }
@@ -297,7 +318,11 @@ internal fun RecordContents(content: RecordContent, model: FolioViewModel) {
             }
         }
     }
-    if (content.tags.isNotEmpty()) Text(content.tags.joinToString(" · ") { it.name })
+    if (content.tags.any { it.stampRevision != null }) {
+        FlowRow(verticalArrangement = Arrangement.spacedBy(4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            content.tags.forEach { tag -> Row(verticalAlignment = Alignment.CenterVertically) { TagStampIcon(tag, model); Text(tag.name) } }
+        }
+    } else if (content.tags.isNotEmpty()) Text(content.tags.joinToString(" · ") { it.name })
     HorizontalDivider()
     Text("记录于 ${formatDate(content.times.firstRecordedAt)}", fontSize = 12.sp)
     if (content.times.modifiedAt != content.times.firstRecordedAt) Text("修改于 ${formatDate(content.times.modifiedAt)}", fontSize = 12.sp)

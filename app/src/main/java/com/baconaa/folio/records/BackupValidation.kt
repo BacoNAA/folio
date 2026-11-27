@@ -1,5 +1,6 @@
 package com.baconaa.folio.records
 
+import com.baconaa.folio.media.StampArtwork
 import android.content.Context
 import androidx.room.Dao
 import androidx.room.Query
@@ -39,6 +40,13 @@ internal suspend fun validateBackupData(database: FolioDatabase) {
             val id = cursor.getString(0)
             validation.record(id).eventTime?.asEventTime()
             items.recordItems(id).forEach { it.asItem() }
+        }
+    }
+    sql.query("SELECT tagId, revision, length(png) FROM tag_stamps").use { c ->
+        while (c.moveToNext()) {
+            require(c.getLong(2) in 1..StampArtwork.MAX_BYTES.toLong()) { "备份的图章大小无效。" }
+            val png = requireNotNull(database.tagDao().stamp(c.getString(0), c.getString(1)))
+            StampArtwork.decode(png).recycle()
         }
     }
     sql.query("SELECT id FROM places").use { c ->

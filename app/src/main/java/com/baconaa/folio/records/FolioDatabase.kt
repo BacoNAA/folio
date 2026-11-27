@@ -187,6 +187,7 @@ internal interface TextDao {
 
 @Database(
     entities = [
+        StampRow::class,
         FeelingScaleRow::class, DraftFeelingRow::class, RecordFeelingRow::class, PlaceFeelingRow::class, TemplateFeelingRow::class, PlaceImpression::class,
         CustomState::class, TargetStateRow::class, StateChangeRow::class,
         DraftRow::class, RecordRow::class, RecordEditRow::class, RecordSplitItemRow::class,
@@ -198,8 +199,8 @@ internal interface TextDao {
         PlaceTaskRow::class, TaskExperience::class, TaskDraft::class,
         ObservationRow::class, RelationRow::class, ChapterRow::class, GuideSectionRow::class, GuideAssignmentRow::class, TemplateRow::class, TemplateFieldRow::class, TemplateTagRow::class,
     ],
-    views = [EditableDraftRow::class],
-    version = 33,
+    views = [EditableDraftRow::class, TagDisplayRow::class],
+    version = 34,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
@@ -233,6 +234,7 @@ internal interface TextDao {
         AutoMigration(from = 30, to = 31),
         AutoMigration(from = 31, to = 32),
         AutoMigration(from = 32, to = 33),
+        AutoMigration(from = 33, to = 34),
     ],
 )
 @TypeConverters(PhotoStrokeStorage::class)
